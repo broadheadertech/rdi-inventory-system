@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RedBox Apparel — UX Design Directions</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --brand-primary: #DC2626;
+    --brand-primary-hover: #B91C1C;
+    --brand-primary-light: #FEF2F2;
+    --brand-secondary: #1F2937;
+    --gray-50: #F9FAFB;
+    --gray-100: #F3F4F6;
+    --gray-200: #E5E7EB;
+    --gray-300: #D1D5DB;
+    --gray-500: #6B7280;
+    --gray-700: #374151;
+    --gray-800: #1F2937;
+    --gray-900: #111827;
+    --success: #16A34A;
+    --success-light: #F0FDF4;
+    --warning: #F59E0B;
+    --warning-light: #FFFBEB;
+    --danger: #EF4444;
+    --danger-light: #FEF2F2;
+    --info: #3B82F6;
+    --info-light: #EFF6FF;
+    --white: #FFFFFF;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', system-ui, sans-serif; background: var(--gray-900); color: var(--white); }
+
+  /* NAV */
+  .top-nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: var(--gray-900); border-bottom: 1px solid var(--gray-700);
+    padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+  }
+  .top-nav h1 { font-size: 18px; font-weight: 700; color: var(--brand-primary); }
+  .top-nav .tabs { display: flex; gap: 4px; margin-left: 32px; }
+  .top-nav .tab {
+    padding: 8px 16px; border-radius: 8px; cursor: pointer;
+    font-size: 13px; font-weight: 500; color: var(--gray-300);
+    border: 1px solid transparent; transition: all 0.2s;
+  }
+  .top-nav .tab:hover { color: var(--white); background: rgba(255,255,255,0.05); }
+  .top-nav .tab.active { color: var(--white); background: var(--brand-primary); border-color: var(--brand-primary); }
+
+  .content { padding-top: 64px; }
+
+  /* SECTION */
+  .section { display: none; padding: 32px; }
+  .section.active { display: block; }
+  .section-title { font-size: 28px; font-weight: 800; margin-bottom: 8px; }
+  .section-subtitle { font-size: 15px; color: var(--gray-400); margin-bottom: 32px; }
+
+  /* DIRECTION CARDS */
+  .directions-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 48px; }
+  .direction-label {
+    font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--brand-primary); margin-bottom: 8px;
+  }
+  .direction-desc { font-size: 13px; color: var(--gray-400); margin-bottom: 16px; }
+
+  /* MOCKUP FRAMES */
+  .mockup-frame {
+    background: var(--gray-800); border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--gray-700); transition: transform 0.2s;
+  }
+  .mockup-frame:hover { transform: scale(1.01); }
+  .frame-bar {
+    background: var(--gray-700); padding: 8px 12px; display: flex; align-items: center; gap: 6px;
+  }
+  .frame-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .frame-dot.r { background: #EF4444; }
+  .frame-dot.y { background: #F59E0B; }
+  .frame-dot.g { background: #22C55E; }
+  .frame-label { font-size: 11px; color: var(--gray-400); margin-left: 8px; }
+
+  /* ============================================ */
+  /* POS MOCKUPS */
+  /* ============================================ */
+
+  /* POS Direction A: Clean Split */
+  .pos-a { display: flex; height: 520px; background: var(--white); }
+  .pos-a .cart-panel { flex: 1; padding: 20px; border-right: 2px solid var(--gray-200); display: flex; flex-direction: column; }
+  .pos-a .action-panel { width: 340px; padding: 20px; display: flex; flex-direction: column; background: var(--gray-50); }
+  .pos-a .pos-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .pos-a .pos-header h2 { font-size: 22px; font-weight: 700; color: var(--gray-900); }
+  .pos-a .status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success); display: inline-block; }
+  .pos-a .cart-items { flex: 1; overflow: auto; }
+  .pos-a .cart-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 0; border-bottom: 1px solid var(--gray-100);
+  }
+  .pos-a .cart-item .item-name { font-size: 16px; font-weight: 500; color: var(--gray-900); }
+  .pos-a .cart-item .item-variant { font-size: 13px; color: var(--gray-500); }
+  .pos-a .cart-item .item-price { font-size: 16px; font-weight: 600; color: var(--gray-900); }
+  .pos-a .cart-item .item-qty {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 14px; color: var(--gray-700);
+  }
+  .pos-a .cart-total {
+    border-top: 2px solid var(--gray-900); padding-top: 16px; margin-top: 16px;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .pos-a .cart-total .label { font-size: 18px; font-weight: 600; color: var(--gray-700); }
+  .pos-a .cart-total .amount { font-size: 36px; font-weight: 700; color: var(--gray-900); }
+
+  .pos-a .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; flex: 1; }
+  .pos-a .product-tile {
+    background: var(--white); border: 1px solid var(--gray-200); border-radius: 8px;
+    padding: 12px; text-align: center; cursor: pointer; transition: all 0.15s;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .pos-a .product-tile:hover { border-color: var(--brand-primary); background: var(--brand-primary-light); }
+  .pos-a .product-tile .tile-brand { font-size: 10px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; }
+  .pos-a .product-tile .tile-name { font-size: 13px; font-weight: 500; color: var(--gray-900); margin: 4px 0; }
+  .pos-a .product-tile .tile-price { font-size: 13px; font-weight: 600; color: var(--brand-primary); }
+
+  .pos-a .pay-buttons { display: flex; flex-direction: column; gap: 8px; }
+  .pos-a .pay-btn {
+    padding: 16px; border-radius: 12px; border: none; cursor: pointer;
+    font-size: 16px; font-weight: 600; font-family: inherit; transition: all 0.15s;
+  }
+  .pos-a .pay-btn.primary { background: var(--brand-primary); color: var(--white); }
+  .pos-a .pay-btn.primary:hover { background: var(--brand-primary-hover); }
+  .pos-a .pay-btn.secondary { background: var(--white); color: var(--gray-700); border: 1px solid var(--gray-200); }
+  .pos-a .pay-btn.secondary:hover { background: var(--gray-100); }
+
+  .pos-a .discount-toggle {
+    display: flex; align-items: center; gap: 10px; padding: 12px;
+    background: var(--white); border-radius: 8px; margin-bottom: 12px;
+    border: 1px solid var(--gray-200);
+  }
+  .pos-a .discount-toggle .toggle-label { font-size: 14px; color: var(--gray-700); flex: 1; }
+  .toggle-switch {
+    width: 44px; height: 24px; border-radius: 12px; background: var(--gray-300);
+    position: relative; cursor: pointer; transition: background 0.2s;
+  }
+  .toggle-switch.on { background: var(--success); }
+  .toggle-switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%; background: white;
+    transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+  .toggle-switch.on::after { transform: translateX(20px); }
+
+  /* POS Direction B: Dark Mode Industrial */
+  .pos-b { display: flex; height: 520px; background: var(--gray-900); color: var(--white); }
+  .pos-b .cart-panel { flex: 1; padding: 20px; border-right: 1px solid var(--gray-700); display: flex; flex-direction: column; }
+  .pos-b .action-panel { width: 340px; padding: 20px; display: flex; flex-direction: column; background: #0F172A; }
+  .pos-b .pos-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+  .pos-b .pos-header h2 { font-size: 22px; font-weight: 700; color: var(--white); }
+  .pos-b .cart-items { flex: 1; overflow: auto; }
+  .pos-b .cart-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 14px 0; border-bottom: 1px solid var(--gray-700);
+  }
+  .pos-b .cart-item .item-name { font-size: 16px; font-weight: 500; color: var(--white); }
+  .pos-b .cart-item .item-variant { font-size: 13px; color: var(--gray-400); }
+  .pos-b .cart-item .item-price { font-size: 16px; font-weight: 600; color: var(--white); }
+  .pos-b .cart-total {
+    border-top: 2px solid var(--brand-primary); padding-top: 16px; margin-top: 16px;
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .pos-b .cart-total .label { font-size: 18px; font-weight: 600; color: var(--gray-400); }
+  .pos-b .cart-total .amount { font-size: 36px; font-weight: 700; color: var(--brand-primary); }
+
+  .pos-b .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 16px; flex: 1; }
+  .pos-b .product-tile {
+    background: var(--gray-800); border: 1px solid var(--gray-700); border-radius: 8px;
+    padding: 12px; text-align: center; cursor: pointer; transition: all 0.15s;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  .pos-b .product-tile:hover { border-color: var(--brand-primary); background: rgba(220,38,38,0.1); }
+  .pos-b .product-tile .tile-brand { font-size: 10px; font-weight: 600; color: var(--gray-400); text-transform: uppercase; }
+  .pos-b .product-tile .tile-name { font-size: 13px; font-weight: 500; color: var(--white); margin: 4px 0; }
+  .pos-b .product-tile .tile-price { font-size: 13px; font-weight: 600; color: var(--brand-primary); }
+
+  .pos-b .pay-buttons { display: flex; flex-direction: column; gap: 8px; }
+  .pos-b .pay-btn {
+    padding: 16px; border-radius: 12px; border: none; cursor: pointer;
+    font-size: 16px; font-weight: 600; font-family: inherit; transition: all 0.15s;
+  }
+  .pos-b .pay-btn.primary { background: var(--brand-primary); color: var(--white); }
+  .pos-b .pay-btn.primary:hover { background: var(--brand-primary-hover); }
+  .pos-b .pay-btn.secondary { background: var(--gray-800); color: var(--gray-300); border: 1px solid var(--gray-700); }
+
+  .pos-b .discount-toggle {
+    display: flex; align-items: center; gap: 10px; padding: 12px;
+    background: var(--gray-800); border-radius: 8px; margin-bottom: 12px;
+    border: 1px solid var(--gray-700);
+  }
+  .pos-b .discount-toggle .toggle-label { font-size: 14px; color: var(--gray-300); flex: 1; }
+
+  /* ============================================ */
+  /* CUSTOMER MOBILE MOCKUPS */
+  /* ============================================ */
+  .phone-frame {
+    width: 375px; margin: 0 auto; background: var(--white);
+    border-radius: 40px; overflow: hidden; box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+    border: 8px solid var(--gray-800);
+  }
+  .phone-notch {
+    background: var(--gray-900); height: 32px; margin: 0 80px;
+    border-radius: 0 0 16px 16px; position: relative;
+  }
+  .phone-content { height: 700px; overflow: auto; }
+
+  /* Customer Direction A: Brand-Forward */
+  .cust-a .cust-header {
+    background: var(--brand-primary); padding: 16px 20px; color: var(--white);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .cust-a .cust-header .logo { font-size: 20px; font-weight: 800; }
+  .cust-a .cust-header .icons { display: flex; gap: 16px; font-size: 18px; }
+  .cust-a .hero-banner {
+    background: linear-gradient(135deg, var(--gray-900), var(--gray-700));
+    padding: 32px 20px; color: var(--white);
+  }
+  .cust-a .hero-banner h1 { font-size: 28px; font-weight: 800; line-height: 1.1; margin-bottom: 8px; }
+  .cust-a .hero-banner p { font-size: 14px; color: var(--gray-300); }
+  .cust-a .brand-scroll {
+    display: flex; gap: 12px; padding: 16px 20px; overflow-x: auto;
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .cust-a .brand-pill {
+    padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: 600;
+    white-space: nowrap; background: var(--gray-100); color: var(--gray-700); cursor: pointer;
+  }
+  .cust-a .brand-pill.active { background: var(--brand-primary); color: var(--white); }
+  .cust-a .product-grid-mobile { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px 20px; }
+  .cust-a .product-card {
+    background: var(--white); border-radius: 12px; overflow: hidden;
+    border: 1px solid var(--gray-200); cursor: pointer; transition: all 0.15s;
+  }
+  .cust-a .product-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+  .cust-a .product-img {
+    height: 180px; background: var(--gray-100); display: flex;
+    align-items: center; justify-content: center; font-size: 40px; color: var(--gray-300);
+    position: relative;
+  }
+  .cust-a .stock-badge {
+    position: absolute; top: 8px; right: 8px; font-size: 10px; font-weight: 600;
+    padding: 3px 8px; border-radius: 10px;
+  }
+  .cust-a .stock-badge.in-stock { background: var(--success-light); color: var(--success); }
+  .cust-a .stock-badge.low { background: var(--warning-light); color: var(--warning); }
+  .cust-a .product-info { padding: 10px; }
+  .cust-a .product-brand { font-size: 10px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; }
+  .cust-a .product-name { font-size: 14px; font-weight: 500; color: var(--gray-900); margin: 2px 0; }
+  .cust-a .product-price { font-size: 16px; font-weight: 700; color: var(--gray-900); }
+  .cust-a .color-dots { display: flex; gap: 4px; margin-top: 6px; }
+  .cust-a .color-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--gray-200); }
+
+  /* Customer Direction B: Minimal Editorial */
+  .cust-b .cust-header {
+    background: var(--white); padding: 16px 20px; color: var(--gray-900);
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .cust-b .cust-header .logo { font-size: 20px; font-weight: 800; color: var(--brand-primary); }
+  .cust-b .search-bar {
+    margin: 16px 20px; padding: 12px 16px; background: var(--gray-100);
+    border-radius: 12px; font-size: 14px; color: var(--gray-500);
+  }
+  .cust-b .featured {
+    padding: 0 20px 16px;
+  }
+  .cust-b .featured-img {
+    height: 240px; background: linear-gradient(135deg, #1F2937, #374151);
+    border-radius: 16px; display: flex; align-items: flex-end; padding: 20px;
+    color: var(--white); position: relative;
+  }
+  .cust-b .featured-img h2 { font-size: 24px; font-weight: 800; }
+  .cust-b .featured-img .reserve-btn {
+    position: absolute; top: 16px; right: 16px;
+    background: var(--brand-primary); color: var(--white);
+    padding: 8px 16px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  }
+  .cust-b .section-label {
+    padding: 16px 20px 8px; font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-500);
+  }
+  .cust-b .product-list { padding: 0 20px; }
+  .cust-b .product-row {
+    display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--gray-100);
+    cursor: pointer; align-items: center;
+  }
+  .cust-b .product-thumb {
+    width: 72px; height: 72px; background: var(--gray-100); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; font-size: 24px; color: var(--gray-300);
+    flex-shrink: 0;
+  }
+  .cust-b .product-details { flex: 1; }
+  .cust-b .product-brand { font-size: 10px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; }
+  .cust-b .product-name { font-size: 14px; font-weight: 500; color: var(--gray-900); margin: 2px 0; }
+  .cust-b .product-price { font-size: 15px; font-weight: 700; color: var(--gray-900); }
+  .cust-b .branch-avail { font-size: 11px; color: var(--success); font-weight: 500; }
+
+  /* ============================================ */
+  /* HQ DASHBOARD MOCKUPS */
+  /* ============================================ */
+
+  .dash-frame { background: var(--gray-50); height: 520px; overflow: auto; }
+
+  /* Dashboard Direction A: Card-Based */
+  .dash-a .dash-topbar {
+    background: var(--white); padding: 12px 24px; display: flex;
+    justify-content: space-between; align-items: center;
+    border-bottom: 1px solid var(--gray-200);
+  }
+  .dash-a .dash-logo { font-size: 16px; font-weight: 800; color: var(--brand-primary); }
+  .dash-a .dash-user { font-size: 13px; color: var(--gray-500); }
+  .dash-a .dash-greeting { padding: 24px; }
+  .dash-a .dash-greeting h1 { font-size: 24px; font-weight: 700; color: var(--gray-900); }
+  .dash-a .dash-greeting p { font-size: 14px; color: var(--gray-500); margin-top: 4px; }
+  .dash-a .metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 0 24px 16px; }
+  .dash-a .metric-card {
+    background: var(--white); padding: 16px; border-radius: 12px;
+    border: 1px solid var(--gray-200);
+  }
+  .dash-a .metric-label { font-size: 12px; color: var(--gray-500); font-weight: 500; }
+  .dash-a .metric-value { font-size: 28px; font-weight: 700; color: var(--gray-900); margin: 4px 0; }
+  .dash-a .metric-change { font-size: 12px; font-weight: 500; }
+  .dash-a .metric-change.up { color: var(--success); }
+  .dash-a .metric-change.down { color: var(--danger); }
+  .dash-a .attention-section { padding: 0 24px 16px; }
+  .dash-a .attention-title { font-size: 16px; font-weight: 600; color: var(--gray-900); margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .dash-a .attention-badge { background: var(--warning-light); color: var(--warning); font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; }
+  .dash-a .attention-list { display: flex; flex-direction: column; gap: 8px; }
+  .dash-a .attention-item {
+    background: var(--white); padding: 12px 16px; border-radius: 8px;
+    border: 1px solid var(--gray-200); display: flex; justify-content: space-between;
+    align-items: center; cursor: pointer; transition: all 0.15s;
+  }
+  .dash-a .attention-item:hover { border-color: var(--brand-primary); }
+  .dash-a .attention-item .att-text { font-size: 13px; color: var(--gray-700); }
+  .dash-a .attention-item .att-branch { font-size: 12px; color: var(--gray-500); }
+  .dash-a .att-status {
+    font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 12px;
+  }
+  .dash-a .att-status.urgent { background: var(--danger-light); color: var(--danger); }
+  .dash-a .att-status.warning { background: var(--warning-light); color: var(--warning); }
+  .dash-a .att-status.info { background: var(--info-light); color: var(--info); }
+
+  .dash-a .branch-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 0 24px 24px; }
+  .dash-a .branch-card {
+    background: var(--white); padding: 16px; border-radius: 12px;
+    border: 1px solid var(--gray-200); cursor: pointer; transition: all 0.15s;
+  }
+  .dash-a .branch-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .dash-a .branch-name { font-size: 14px; font-weight: 600; color: var(--gray-900); }
+  .dash-a .branch-score { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; float: right; }
+  .dash-a .branch-score.good { background: var(--success-light); color: var(--success); }
+  .dash-a .branch-score.ok { background: var(--warning-light); color: var(--warning); }
+  .dash-a .branch-stats { display: flex; gap: 12px; margin-top: 10px; }
+  .dash-a .branch-stat { font-size: 12px; color: var(--gray-500); }
+  .dash-a .branch-stat strong { color: var(--gray-700); }
+
+  /* Dashboard Direction B: Dense Data */
+  .dash-b .dash-sidebar {
+    width: 200px; background: var(--gray-900); padding: 16px; float: left; height: 520px;
+  }
+  .dash-b .dash-sidebar .logo { font-size: 16px; font-weight: 800; color: var(--brand-primary); margin-bottom: 24px; }
+  .dash-b .nav-item {
+    padding: 8px 12px; border-radius: 6px; font-size: 13px; color: var(--gray-400);
+    cursor: pointer; margin-bottom: 2px; transition: all 0.15s;
+  }
+  .dash-b .nav-item:hover { color: var(--white); background: rgba(255,255,255,0.05); }
+  .dash-b .nav-item.active { color: var(--white); background: var(--brand-primary); }
+  .dash-b .dash-main { margin-left: 200px; padding: 20px; height: 520px; overflow: auto; }
+  .dash-b .dash-main .page-title { font-size: 20px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; }
+  .dash-b .dash-main .page-date { font-size: 12px; color: var(--gray-500); margin-bottom: 16px; }
+  .dash-b .data-table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+    background: var(--white); border-radius: 8px; overflow: hidden;
+    border: 1px solid var(--gray-200);
+  }
+  .dash-b .data-table th {
+    background: var(--gray-50); padding: 8px 12px; text-align: left;
+    font-weight: 600; color: var(--gray-700); border-bottom: 1px solid var(--gray-200);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  .dash-b .data-table td { padding: 10px 12px; border-bottom: 1px solid var(--gray-100); color: var(--gray-700); }
+  .dash-b .data-table tr:hover td { background: var(--gray-50); }
+  .dash-b .mini-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+  .dash-b .mini-metric {
+    background: var(--white); padding: 12px; border-radius: 8px;
+    border: 1px solid var(--gray-200);
+  }
+  .dash-b .mini-metric .mm-label { font-size: 11px; color: var(--gray-500); }
+  .dash-b .mini-metric .mm-value { font-size: 22px; font-weight: 700; color: var(--gray-900); }
+  .dash-b .tabs-bar { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 2px solid var(--gray-200); }
+  .dash-b .tab-item {
+    padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--gray-500);
+    cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px;
+  }
+  .dash-b .tab-item.active { color: var(--brand-primary); border-bottom-color: var(--brand-primary); }
+
+  .pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; display: inline-block; }
+  .pill.green { background: var(--success-light); color: var(--success); }
+  .pill.amber { background: var(--warning-light); color: var(--warning); }
+  .pill.red { background: var(--danger-light); color: var(--danger); }
+  .pill.blue { background: var(--info-light); color: var(--info); }
+
+  /* ============================================ */
+  /* PRODUCT DETAIL MOCKUP */
+  /* ============================================ */
+  .product-detail { background: var(--white); }
+  .pd-back { padding: 12px 20px; font-size: 14px; color: var(--gray-500); cursor: pointer; }
+  .pd-image {
+    height: 340px; background: linear-gradient(135deg, var(--gray-100), var(--gray-200));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 60px; color: var(--gray-300); position: relative;
+  }
+  .pd-dots { position: absolute; bottom: 12px; display: flex; gap: 6px; }
+  .pd-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray-300); }
+  .pd-dot.active { background: var(--gray-900); }
+  .pd-info { padding: 20px; }
+  .pd-brand { font-size: 12px; font-weight: 600; color: var(--gray-500); text-transform: uppercase; letter-spacing: 0.05em; }
+  .pd-name { font-size: 22px; font-weight: 700; color: var(--gray-900); margin: 4px 0; }
+  .pd-price { font-size: 24px; font-weight: 700; color: var(--gray-900); margin-bottom: 16px; }
+  .pd-section-label { font-size: 12px; font-weight: 600; color: var(--gray-500); margin-bottom: 8px; text-transform: uppercase; }
+  .pd-colors { display: flex; gap: 8px; margin-bottom: 16px; }
+  .pd-color-swatch {
+    width: 32px; height: 32px; border-radius: 50%; border: 3px solid transparent;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .pd-color-swatch.selected { border-color: var(--gray-900); }
+  .pd-sizes { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+  .pd-size {
+    width: 44px; height: 44px; border-radius: 8px; display: flex;
+    align-items: center; justify-content: center; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s; border: 1px solid var(--gray-200);
+    color: var(--gray-900);
+  }
+  .pd-size.selected { background: var(--gray-900); color: var(--white); border-color: var(--gray-900); }
+  .pd-size.unavailable { color: var(--gray-300); background: var(--gray-50); cursor: not-allowed; text-decoration: line-through; }
+  .pd-branch-stock { margin-bottom: 16px; }
+  .pd-branch-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--gray-100);
+  }
+  .pd-branch-name { font-size: 14px; color: var(--gray-700); }
+  .pd-branch-dist { font-size: 12px; color: var(--gray-500); }
+  .pd-branch-qty { font-size: 14px; font-weight: 600; }
+  .pd-branch-qty.has { color: var(--success); }
+  .pd-branch-qty.none { color: var(--gray-300); }
+  .pd-reserve-btn {
+    width: 100%; padding: 16px; border-radius: 12px; border: none;
+    background: var(--brand-primary); color: var(--white);
+    font-size: 16px; font-weight: 700; font-family: inherit;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .pd-reserve-btn:hover { background: var(--brand-primary-hover); }
+
+  /* COMPARISON */
+  .comparison-note {
+    background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3);
+    border-radius: 12px; padding: 16px 20px; margin: 24px 0;
+    font-size: 14px; color: var(--info); line-height: 1.6;
+  }
+  .comparison-note strong { display: block; margin-bottom: 4px; }
+
+  .full-width { grid-column: 1 / -1; }
+
+  @media (max-width: 900px) {
+    .directions-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="top-nav">
+  <h1>RedBox UX Directions</h1>
+  <div class="tabs">
+    <div class="tab active" onclick="showSection('pos')">POS Terminal</div>
+    <div class="tab" onclick="showSection('customer')">Customer Mobile</div>
+    <div class="tab" onclick="showSection('dashboard')">HQ Dashboard</div>
+    <div class="tab" onclick="showSection('detail')">Product Detail</div>
+  </div>
+</div>
+
+<div class="content">
+
+  <!-- ========== POS SECTION ========== -->
+  <div class="section active" id="sec-pos">
+    <div class="section-title">POS Terminal Directions</div>
+    <div class="section-subtitle">The heartbeat — Ate Karen's transaction screen. Optimized for speed, touch, and accuracy.</div>
+
+    <div class="directions-grid">
+      <!-- POS Direction A -->
+      <div>
+        <div class="direction-label">Direction A: Clean & Bright</div>
+        <div class="direction-desc">White background, maximum contrast, calm professional feel. Reduces eye strain on long shifts.</div>
+        <div class="mockup-frame">
+          <div class="frame-bar">
+            <div class="frame-dot r"></div><div class="frame-dot y"></div><div class="frame-dot g"></div>
+            <span class="frame-label">POS — Landscape Tablet (10")</span>
+          </div>
+          <div class="pos-a">
+            <div class="cart-panel">
+              <div class="pos-header">
+                <h2>Current Sale</h2>
+                <span><span class="status-dot"></span> Online</span>
+              </div>
+              <div class="cart-items">
+                <div class="cart-item">
+                  <div><div class="item-name">Nike Windbreaker</div><div class="item-variant">Black / Medium</div></div>
+                  <div><div class="item-price">₱2,490</div><div class="item-qty">× 1</div></div>
+                </div>
+                <div class="cart-item">
+                  <div><div class="item-name">Adidas Training Tee</div><div class="item-variant">White / Large</div></div>
+                  <div><div class="item-price">₱1,290</div><div class="item-qty">× 2</div></div>
+                </div>
+                <div class="cart-item">
+                  <div><div class="item-name">Puma Running Shorts</div><div class="item-variant">Navy / Small</div></div>
+                  <div><div class="item-price">₱990</div><div class="item-qty">× 1</div></div>
+                </div>
+              </div>
+              <div class="cart-total">
+                <span class="label">Total (3 items)</span>
+                <span class="amount">₱6,060</span>
+              </div>
+            </div>
+            <div class="action-panel">
+              <div class="discount-toggle">
+                <span class="toggle-label">Senior/PWD Discount</span>
+                <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+              </div>
+              <div class="product-grid">
+                <div class="product-tile"><div class="tile-brand">Nike</div><div class="tile-name">Windbreaker</div><div class="tile-price">₱2,490</div></div>
+                <div class="product-tile"><div class="tile-brand">Adidas</div><div class="tile-name">Training Tee</div><div class="tile-price">₱1,290</div></div>
+                <div class="product-tile"><div class="tile-brand">Puma</div><div class="tile-name">Run Shorts</div><div class="tile-price">₱990</div></div>
+                <div class="product-tile"><div class="tile-brand">Nike</div><div class="tile-name">Dri-FIT Polo</div><div class="tile-price">₱1,890</div></div>
+                <div class="product-tile"><div class="tile-brand">Adidas</div><div class="tile-name">Track Pants</div><div class="tile-price">₱2,190</div></div>
+                <div class="product-tile"><div class="tile-brand">UA</div><div class="tile-name">Gym Tank</div><div class="tile-price">₱1,490</div></div>
+              </div>
+              <div class="pay-buttons">
+                <button class="pay-btn primary">💵 Cash — ₱6,060</button>
+                <button class="pay-btn secondary">💳 GCash / Maya</button>
+                <button class="pay-btn secondary">🏷️ Check Other Branches</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- POS Direction B -->
+      <div>
+        <div class="direction-label">Direction B: Dark Industrial</div>
+        <div class="direction-desc">Dark theme reduces glare in bright stores. Red accents pop against dark backgrounds. Industrial, focused feel.</div>
+        <div class="mockup-frame">
+          <div class="frame-bar">
+            <div class="frame-dot r"></div><div class="frame-dot y"></div><div class="frame-dot g"></div>
+            <span class="frame-label">POS — Landscape Tablet (10")</span>
+          </div>
+          <div class="pos-b">
+            <div class="cart-panel">
+              <div class="pos-header">
+                <h2>Current Sale</h2>
+                <span style="color:var(--success);font-size:13px">● Online</span>
+              </div>
+              <div class="cart-items">
+                <div class="cart-item">
+                  <div><div class="item-name">Nike Windbreaker</div><div class="item-variant">Black / Medium</div></div>
+                  <div><div class="item-price">₱2,490</div></div>
+                </div>
+                <div class="cart-item">
+                  <div><div class="item-name">Adidas Training Tee</div><div class="item-variant">White / Large × 2</div></div>
+                  <div><div class="item-price">₱2,580</div></div>
+                </div>
+                <div class="cart-item">
+                  <div><div class="item-name">Puma Running Shorts</div><div class="item-variant">Navy / Small</div></div>
+                  <div><div class="item-price">₱990</div></div>
+                </div>
+              </div>
+              <div class="cart-total">
+                <span class="label">TOTAL</span>
+                <span class="amount">₱6,060</span>
+              </div>
+            </div>
+            <div class="action-panel">
+              <div class="discount-toggle">
+                <span class="toggle-label">Senior/PWD</span>
+                <div class="toggle-switch" onclick="this.classList.toggle('on')"></div>
+              </div>
+              <div class="product-grid">
+                <div class="product-tile"><div class="tile-brand">Nike</div><div class="tile-name">Windbreaker</div><div class="tile-price">₱2,490</div></div>
+                <div class="product-tile"><div class="tile-brand">Adidas</div><div class="tile-name">Training Tee</div><div class="tile-price">₱1,290</div></div>
+                <div class="product-tile"><div class="tile-brand">Puma</div><div class="tile-name">Run Shorts</div><div class="tile-price">₱990</div></div>
+                <div class="product-tile"><div class="tile-brand">Nike</div><div class="tile-name">Dri-FIT Polo</div><div class="tile-price">₱1,890</div></div>
+                <div class="product-tile"><div class="tile-brand">Adidas</div><div class="tile-name">Track Pants</div><div class="tile-price">₱2,190</div></div>
+                <div class="product-tile"><div class="tile-brand">UA</div><div class="tile-name">Gym Tank</div><div class="tile-price">₱1,490</div></div>
+              </div>
+              <div class="pay-buttons">
+                <button class="pay-btn primary">💵 CASH — ₱6,060</button>
+                <button class="pay-btn secondary">💳 GCash / Maya</button>
+                <button class="pay-btn secondary">🏷️ Check Branches</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="comparison-note">
+      <strong>Key Differences:</strong>
+      Direction A (Clean & Bright): Better for long shifts, less eye strain, professional feel, works with any brand color.<br>
+      Direction B (Dark Industrial): Reduces store glare on tablets, red accents are more dramatic, more "tech" feel, but may be harder to read in bright sunlight.
+    </div>
+  </div>
+
+  <!-- ========== CUSTOMER SECTION ========== -->
+  <div class="section" id="sec-customer">
+    <div class="section-title">Customer Mobile Directions</div>
+    <div class="section-subtitle">Jessa's browsing experience — brand-first product discovery with real-time stock.</div>
+
+    <div class="directions-grid">
+      <!-- Customer Direction A -->
+      <div>
+        <div class="direction-label">Direction A: Brand-Forward Grid</div>
+        <div class="direction-desc">Bold brand header, hero banner, 2-column product grid with stock badges. Nike/Zalora inspired.</div>
+        <div class="mockup-frame">
+          <div class="frame-bar">
+            <div class="frame-dot r"></div><div class="frame-dot y"></div><div class="frame-dot g"></div>
+            <span class="frame-label">Customer — iPhone 14 Pro (390px)</span>
+          </div>
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone-content cust-a">
+              <div class="cust-header">
+                <div class="logo">REDBOX</div>
+                <div class="icons">🔍 🛒</div>
+              </div>
+              <div class="hero-banner">
+                <h1>New Arrivals<br>This Week</h1>
+                <p>Nike • Adidas • Puma • Under Armour</p>
+              </div>
+              <div class="brand-scroll">
+                <div class="brand-pill active">All</div>
+                <div class="brand-pill">Nike</div>
+                <div class="brand-pill">Adidas</div>
+                <div class="brand-pill">Puma</div>
+                <div class="brand-pill">UA</div>
+              </div>
+              <div class="product-grid-mobile">
+                <div class="product-card">
+                  <div class="product-img">👕<div class="stock-badge in-stock">In Stock</div></div>
+                  <div class="product-info">
+                    <div class="product-brand">Nike</div>
+                    <div class="product-name">Windbreaker Jacket</div>
+                    <div class="product-price">₱2,490</div>
+                    <div class="color-dots">
+                      <div class="color-dot" style="background:#111"></div>
+                      <div class="color-dot" style="background:#1E3A5F"></div>
+                      <div class="color-dot" style="background:#8B0000"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="product-card">
+                  <div class="product-img">👕<div class="stock-badge low">Low Stock</div></div>
+                  <div class="product-info">
+                    <div class="product-brand">Adidas</div>
+                    <div class="product-name">Training Tee</div>
+                    <div class="product-price">₱1,290</div>
+                    <div class="color-dots">
+                      <div class="color-dot" style="background:#FFF;border:1px solid #ddd"></div>
+                      <div class="color-dot" style="background:#111"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="product-card">
+                  <div class="product-img">🩳</div>
+                  <div class="product-info">
+                    <div class="product-brand">Puma</div>
+                    <div class="product-name">Running Shorts</div>
+                    <div class="product-price">₱990</div>
+                    <div class="color-dots">
+                      <div class="color-dot" style="background:#1E3A5F"></div>
+                      <div class="color-dot" style="background:#111"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="product-card">
+                  <div class="product-img">👔</div>
+                  <div class="product-info">
+                    <div class="product-brand">Nike</div>
+                    <div class="product-name">Dri-FIT Polo</div>
+                    <div class="product-price">₱1,890</div>
+                    <div class="color-dots">
+                      <div class="color-dot" style="background:#FFF;border:1px solid #ddd"></div>
+                      <div class="color-dot" style="background:#1E3A5F"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Customer Direction B -->
+      <div>
+        <div class="direction-label">Direction B: Minimal Editorial</div>
+        <div class="direction-desc">Clean white header, search-first, featured product hero, list-style browsing. ZARA/Uniqlo inspired.</div>
+        <div class="mockup-frame">
+          <div class="frame-bar">
+            <div class="frame-dot r"></div><div class="frame-dot y"></div><div class="frame-dot g"></div>
+            <span class="frame-label">Customer — iPhone 14 Pro (390px)</span>
+          </div>
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone-content cust-b">
+              <div class="cust-header">
+                <div class="logo">REDBOX</div>
+                <div style="display:flex;gap:16px;font-size:18px;color:var(--gray-500)">🔍 👤</div>
+              </div>
+              <div class="search-bar">🔍 Search brands, products...</div>
+              <div class="featured">
+                <div class="featured-img">
+                  <div><h2>Nike<br>Windbreaker</h2></div>
+                  <div class="reserve-btn">Reserve Now</div>
+                </div>
+              </div>
+              <div class="section-label">Trending Now</div>
+              <div class="product-list">
+                <div class="product-row">
+                  <div class="product-thumb">👕</div>
+                  <div class="product-details">
+                    <div class="product-brand">Adidas</div>
+                    <div class="product-name">Training Tee</div>
+                    <div class="product-price">₱1,290</div>
+                    <div class="branch-avail">✓ Available at 3 branches</div>
+                  </div>
+                </div>
+                <div class="product-row">
+                  <div class="product-thumb">🩳</div>
+                  <div class="product-details">
+                    <div class="product-brand">Puma</div>
+                    <div class="product-name">Running Shorts</div>
+                    <div class="product-price">₱990</div>
+                    <div class="branch-avail">✓ Available at 5 branches</div>
+                  </div>
+                </div>
+                <div class="product-row">
+                  <div class="product-thumb">👔</div>
+                  <div class="product-details">
+                    <div class="product-brand">Nike</div>
+                    <div class="product-name">Dri-FIT Polo</div>
+                    <div class="product-price">₱1,890</div>
+                    <div class="branch-avail" style="color:var(--warning)">⚠ Low stock — 2 branches only</div>
+                  </div>
+                </div>
+                <div class="product-row">
+                  <div class="product-thumb">🧥</div>
+                  <div class="product-details">
+                    <div class="product-brand">Under Armour</div>
+                    <div class="product-name">Fleece Hoodie</div>
+                    <div class="product-price">₱3,290</div>
+                    <div class="branch-avail">✓ Available at 4 branches</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="comparison-note">
+      <strong>Key Differences:</strong>
+      Direction A (Brand-Forward Grid): 2-column grid better for visual browsing; color swatches visible on cards; stock badges prominent. More "shopping app" feel.<br>
+      Direction B (Minimal Editorial): Featured hero product creates editorial feel; list view shows more info per item including branch availability count; search-first approach. More "premium catalog" feel.
+    </div>
+  </div>
+
+  <!-- ========== DASHBOARD SECTION ========== -->
+  <div class="section" id="sec-dashboard">
+    <div class="section-title">HQ Dashboard Directions</div>
+    <div class="section-subtitle">Ate Lisa's command center — all branches at a glance with actionable alerts.</div>
+
+    <div class="directions-grid">
+      <!-- Dashboard Direction A -->
+      <div>
+        <div class="direction-label">Direction A: Card-Based Overview</div>
+        <div class="direction-desc">Top-bar navigation, metric cards, action items, branch overview cards. Clean and scannable.</div>
+        <div class="mockup-frame">
+          <div class="frame-bar">
+            <div class="frame-dot r"></div><div class="frame-dot y"></div><div class="frame-dot g"></div>
+            <span class="frame-label">HQ Dashboard — Desktop (1440px)</span>
+          </div>
+          <div class="dash-frame dash-a">
+            <div class="dash-topbar">
+              <div class="dash-logo">REDBOX HQ</div>
+              <div class="dash-user">Ate Lisa · HQ Staff · Feb 26, 2026</div>
+            </div>
+            <div class="dash-greeting">
+              <h1>Good morning, Lisa 👋</h1>
+              <p>3 items need your attention today</p>
+            </div>
+            <div class="metrics-row">
+              <div class="metric-card">
+                <div class="metric-label">Today's Sales (All)</div>
+                <div class="metric-value">₱127K</div>
+                <div class="metric-change up">↑ 12% vs yesterday</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Active Branches</div>
+                <div class="metric-value">5/5</div>
+                <div class="metric-change up">All online</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Low Stock Items</div>
+                <div class="metric-value">23</div>
+                <div class="metric-change down">↑ 8 since yesterday</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-label">Pending Transfers</div>
+                <div class="metric-value">7</div>
+                <div class="metric-change">3 in transit</div>
+              </div>
+            </div>
+            <div class="attention-section">
+              <div class="attention-title">Needs Attention <span class="attention-badge">3</span></div>
+              <div class="attention-list">
+                <div class="attention-item">
+                  <div><div class="att-text">Nike Windbreaker Medium — critically low across all branches</div><div class="att-branch">Affects: SM North, Glorietta, Megamall</div></div>
+                  <span class="att-status urgent">Critical</span>
+                </div>
+                <div class="attention-item">
+                  <div><div class="att-text">Transfer #TR-0234 delayed — driver hasn't confirmed pickup</div><div class="att-branch">SM North → Glorietta</div></div>
+                  <span class="att-status warning">Delayed</span>
+                </div>
+                <div class="attention-item">
+                  <div><div class="att-text">Demand log: 12 requests for Adidas Ultraboost (not stocked)</div><div class="att-branch">Logged across 3 branches this week</div></div>
+                  <span class="att-status info">Insight</span>
+                </div>
+              </div>
+            </div>
+            <div style="padding:0 24px 8px;font-size:16px;font-weight:600;color:var(--gray-900)">Branch Overview</div>
+            <div class="branch-grid">
+              <div class="branch-card">
+                <div class="branch-name">SM North Edsa <span class="branch-score good">92</span></div>
+                <div class="branch-stats">
+                  <div class="branch-stat"><strong>₱34K</strong> today</div>
+                  <div class="branch-stat"><strong>67</strong> txns</div>
+                  <div class="branch-stat"><strong>2</strong> low stock</div>
+                </div>
+              </div>
+              <div class="branch-card">
+                <div class="branch-name">Glorietta <span class="branch-score good">88</span></div>
+                <div class="branch-stats">
+                  <div class="branch-stat"><strong>₱28K</strong> today</div>
+                  <div class="branch-stat"><strong>52</strong> txns</div>
+                  <div class="branch-stat"><strong>5</strong> low stock</div>
+                </div>
+              </div>
+              <div class="branch-card">
+                <div class="branch-name">Megamall <span class="branch-score ok">74</span></div>
+                <div class="branch-stats">
+                  <div class="branch-stat"><strong>₱21K</strong> today</div>
+                  <div class="branch-stat"><strong>38</strong> txns</div>
+                  <div class="branch-stat"><strong>9</strong> low stock</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dashboard Direction B -->
+      <div>
+        <div class="direction-label">Direction B: Dense Data Sidebar</div>
+        <div class="direction-desc">Sidebar navigation, tabbed content, data tables. Maximum info density for power users.</div>
+        <div class="mockup-frame">
+          <div class="frame-bar">
+            <div class="frame-dot r"></div><div class="frame-dot y"></div><div class="frame-dot g"></div>
+            <span class="frame-label">HQ Dashboard — Desktop (1440px)</span>
+          </div>
+          <div class="dash-frame dash-b" style="overflow:hidden">
+            <div class="dash-sidebar">
+              <div class="logo">RB</div>
+              <div class="nav-item active">📊 Overview</div>
+              <div class="nav-item">📦 Inventory</div>
+              <div class="nav-item">🏪 Branches</div>
+              <div class="nav-item">🔄 Transfers</div>
+              <div class="nav-item">💰 Sales</div>
+              <div class="nav-item">📝 Demand Log</div>
+              <div class="nav-item">🤖 AI Insights</div>
+              <div class="nav-item" style="margin-top:auto">⚙️ Settings</div>
+            </div>
+            <div class="dash-main">
+              <div class="page-title">All Branches Overview</div>
+              <div class="page-date">Wednesday, February 26, 2026 · Updated 3s ago</div>
+              <div class="mini-metrics">
+                <div class="mini-metric"><div class="mm-label">Total Sales</div><div class="mm-value">₱127K</div></div>
+                <div class="mini-metric"><div class="mm-label">Transactions</div><div class="mm-value">287</div></div>
+                <div class="mini-metric"><div class="mm-label">Low Stock</div><div class="mm-value" style="color:var(--warning)">23</div></div>
+                <div class="mini-metric"><div class="mm-label">Transfers</div><div class="mm-value">7</div></div>
+              </div>
+              <div class="tabs-bar">
+                <div class="tab-item active">Branches</div>
+                <div class="tab-item">Alerts</div>
+                <div class="tab-item">Transfers</div>
+                <div class="tab-item">Demand</div>
+              </div>
+              <table class="data-table">
+                <thead>
+                  <tr><th>Branch</th><th>Score</th><th>Sales Today</th><th>Transactions</th><th>Low Stock</th><th>Status</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td><strong>SM North Edsa</strong></td><td><span class="pill green">92</span></td><td>₱34,200</td><td>67</td><td>2</td><td><span class="pill green">Healthy</span></td></tr>
+                  <tr><td><strong>Glorietta</strong></td><td><span class="pill green">88</span></td><td>₱28,100</td><td>52</td><td>5</td><td><span class="pill green">Healthy</span></td></tr>
+                  <tr><td><strong>Megamall</strong></td><td><span class="pill amber">74</span></td><td>₱21,400</td><td>38</td><td>9</td><td><span class="pill amber">Attention</span></td></tr>
+                  <tr><td><strong>Trinoma</strong></td><td><span class="pill green">85</span></td><td>₱25,600</td><td>45</td><td>4</td><td><span class="pill green">Healthy</span></td></tr>
+                  <tr><td><strong>Robinsons Ermita</strong></td><td><span class="pill green">81</span></td><td>₱18,200</td><td>35</td><td>3</td><td><span class="pill green">Healthy</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="comparison-note">
+      <strong>Key Differences:</strong>
+      Direction A (Card-Based): Personalized greeting, action-first layout, branch cards with at-a-glance health. Better for morning check-in ritual. More approachable.<br>
+      Direction B (Dense Data): Sidebar navigation, tabbed content, data tables. More info visible at once. Better for power users who need to drill into data quickly. More traditional dashboard feel.
+    </div>
+  </div>
+
+  <!-- ========== PRODUCT DETAIL SECTION ========== -->
+  <div class="section" id="sec-detail">
+    <div class="section-title">Product Detail + Reserve Flow</div>
+    <div class="section-subtitle">The differentiator — Jessa checks branch stock and reserves for pickup in 3 taps.</div>
+
+    <div class="directions-grid">
+      <div class="full-width" style="max-width:420px;margin:0 auto">
+        <div class="direction-label">Product Detail with Branch Stock + Reserve</div>
+        <div class="direction-desc">Nike-inspired product display with RedBox's unique branch-level stock visibility and one-tap reserve.</div>
+        <div class="mockup-frame">
+          <div class="frame-bar">
+            <div class="frame-dot r"></div><div class="frame-dot y"></div><div class="frame-dot g"></div>
+            <span class="frame-label">Customer — iPhone 14 Pro (390px)</span>
+          </div>
+          <div class="phone-frame">
+            <div class="phone-notch"></div>
+            <div class="phone-content product-detail">
+              <div class="pd-back">← Back</div>
+              <div class="pd-image">
+                👕
+                <div class="pd-dots">
+                  <div class="pd-dot active"></div>
+                  <div class="pd-dot"></div>
+                  <div class="pd-dot"></div>
+                  <div class="pd-dot"></div>
+                </div>
+              </div>
+              <div class="pd-info">
+                <div class="pd-brand">Nike</div>
+                <div class="pd-name">Windbreaker Jacket</div>
+                <div class="pd-price">₱2,490</div>
+
+                <div class="pd-section-label">Color</div>
+                <div class="pd-colors">
+                  <div class="pd-color-swatch selected" style="background:#111"></div>
+                  <div class="pd-color-swatch" style="background:#1E3A5F"></div>
+                  <div class="pd-color-swatch" style="background:#8B0000"></div>
+                  <div class="pd-color-swatch" style="background:#2F4F2F"></div>
+                </div>
+
+                <div class="pd-section-label">Size</div>
+                <div class="pd-sizes">
+                  <div class="pd-size">XS</div>
+                  <div class="pd-size">S</div>
+                  <div class="pd-size selected">M</div>
+                  <div class="pd-size">L</div>
+                  <div class="pd-size">XL</div>
+                  <div class="pd-size unavailable">XXL</div>
+                </div>
+
+                <div class="pd-section-label">Available at Branches</div>
+                <div class="pd-branch-stock">
+                  <div class="pd-branch-row">
+                    <div><div class="pd-branch-name">SM North Edsa</div><div class="pd-branch-dist">2.3 km away</div></div>
+                    <div class="pd-branch-qty has">3 left</div>
+                  </div>
+                  <div class="pd-branch-row">
+                    <div><div class="pd-branch-name">Trinoma</div><div class="pd-branch-dist">3.1 km away</div></div>
+                    <div class="pd-branch-qty has">5 left</div>
+                  </div>
+                  <div class="pd-branch-row">
+                    <div><div class="pd-branch-name">Glorietta</div><div class="pd-branch-dist">8.7 km away</div></div>
+                    <div class="pd-branch-qty has">1 left</div>
+                  </div>
+                  <div class="pd-branch-row">
+                    <div><div class="pd-branch-name">Megamall</div><div class="pd-branch-dist">5.4 km away</div></div>
+                    <div class="pd-branch-qty none">Out of stock</div>
+                  </div>
+                </div>
+
+                <button class="pd-reserve-btn">Reserve at SM North Edsa →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="comparison-note">
+      <strong>Key UX Elements:</strong>
+      Visual color swatches (not dropdowns) · Tappable size grid with clear available/unavailable states · Branch stock with distance sorting · "Reserve at [Branch]" CTA that updates based on nearest branch with stock · Bottom-sheet reservation form (name + phone only) on tap.
+    </div>
+  </div>
+
+</div>
+
+<script>
+function showSection(name) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('sec-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+</script>
+
+</body>
+</html>

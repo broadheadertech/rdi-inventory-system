@@ -1,0 +1,121 @@
+# generated: 2026-03-02
+# project: redbox-apparel
+# tracking_system: file-system
+# story_location: _bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - SM typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+
+generated: 2026-03-02
+project: redbox-apparel
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+
+development_status:
+  # Epic 1: Project Foundation & Authentication (6 stories)
+  epic-1: done
+  1-1-project-initialization-and-core-schema: done
+  1-2-authentication-and-user-management: done
+  1-3-branch-management: done
+  1-4-branch-scoped-data-isolation-and-role-based-access: done
+  1-5-route-group-structure-and-interface-layouts: done
+  1-6-audit-trail-foundation: done
+  epic-1-retrospective: optional
+
+  # Epic 2: Product Catalog & Brand Management (4 stories)
+  epic-2: done
+  2-1-brand-and-category-management: done
+  2-2-style-and-variant-management: done
+  2-3-product-image-management: done
+  2-4-bulk-product-import: done
+  epic-2-retrospective: optional
+
+  # Epic 3: Point of Sale — Online Transactions (6 stories)
+  epic-3: done
+  3-1-pos-layout-and-product-search: done
+  3-2-barcode-scanning-and-cart-management: done
+  3-3-vat-calculation-and-senior-pwd-discount: done
+  3-4-payment-processing-and-transaction-completion: done
+  3-5-bir-compliant-receipt-generation: done
+  3-6-end-of-day-cash-reconciliation: done
+  epic-3-retrospective: optional
+
+  # Epic 4: POS Offline Mode & Resilience (2 stories)
+  epic-4: done
+  4-1-service-worker-and-offline-detection: done
+  4-2-offline-transaction-queue-and-encryption: done
+  epic-4-retrospective: optional
+
+  # Epic 5: Inventory Management & Stock Visibility (3 stories)
+  epic-5: done
+  5-1-real-time-branch-stock-view: done
+  5-2-cross-branch-stock-lookup: done
+  5-3-low-stock-alerts-and-threshold-configuration: done
+  epic-5-retrospective: optional
+
+  # Epic 6: Stock Transfers & Warehouse Operations (3 stories)
+  epic-6: done
+  6-1-transfer-request-and-approval: done
+  6-2-warehouse-packing-with-barcode-scanning: done
+  6-3-transfer-tracking-and-delivery-confirmation: done
+  epic-6-retrospective: optional
+
+  # Epic 7: Dashboards, Reporting & Demand Intelligence (5 stories)
+  epic-7: done
+  7-1-hq-morning-command-center: done
+  7-2-branch-dashboard: done
+  7-3-sales-reporting-and-bir-vat-summary: done
+  7-4-demand-logging-at-pos: done
+  7-5-demand-intelligence-dashboard: done
+  epic-7-retrospective: optional
+
+  # Epic 8: Customer Website & Reserve-for-Pickup (5 stories)
+  epic-8: done
+  8-1-product-browsing-and-brand-navigation: done
+  8-2-real-time-branch-stock-and-product-detail: done
+  8-3-branch-finder: done
+  8-4-reserve-for-pickup-flow: done
+  8-5-reservation-management-and-expiry: done
+  epic-8-retrospective: optional
+
+  # Epic 9: Logistics, AI Intelligence & Supplier Ecosystem (5 stories)
+  epic-9: done
+  9-1-driver-delivery-management: done
+  9-2-delivery-assignment-and-tracking: done
+  9-3-ai-restock-suggestions: done
+  9-4-branch-performance-scoring: done
+  9-5-supplier-demand-visibility-and-stock-proposals: done
+  epic-9-retrospective: optional
+
+  # Epic 10: Website Brand Identity & Modern UX Enhancement (from brainstorming session 2026-03-02)
+  epic-10: in-progress
+  10-1-website-brand-identity-and-reverse-commerce-ux: done
+  10-2-location-aware-hero-and-live-ticker: backlog
+  10-3-living-lookbook-and-content-management: backlog
+  epic-10-retrospective: optional

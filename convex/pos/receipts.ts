@@ -1,0 +1,106 @@
+import { v, ConvexError } from "convex/values";
+import { query } from "../_generated/server";
+import { withBranchScope } from "../_helpers/withBranchScope";
+import { POS_ROLES } from "../_helpers/permissions";
+
+// ─── Get Receipt Data ───────────────────────────────────────────────────────
+
+export const getReceiptData = query({
+  args: {
+    transactionId: v.id("transactions"),
+  },
+  handler: async (ctx, args) => {
+    // 1. Auth gate — same pattern as convex/pos/transactions.ts
+    const scope = await withBranchScope(ctx);
+    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    // 2. Load transaction record
+    const transaction = await ctx.db.get(args.transactionId);
+    if (!transaction) {
+      throw new ConvexError({
+        code: "NOT_FOUND",
+        message: "Transaction not found",
+      });
+    }
+
+    // 3. Branch isolation — verify transaction belongs to user's branch
+    if (!scope.canAccessAllBranches && transaction.branchId !== scope.branchId) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    // 4. Load transaction items with variant/style enrichment
+    const transactionItems = await ctx.db
+      .query("transactionItems")
+      .withIndex("by_transaction", (q) =>
+        q.eq("transactionId", args.transactionId)
+      )
+      .collect();
+
+    const enrichedItems = await Promise.all(
+      transactionItems.map(async (item) => {
+        const variant = await ctx.db.get(item.variantId);
+        const style = variant ? await ctx.db.get(variant.styleId) : null;
+
+        return {
+          styleName: style?.name ?? "Unknown Product",
+          sku: variant?.sku ?? "",
+          size: variant?.size ?? "",
+          color: variant?.color ?? "",
+          quantity: item.quantity,
+          unitPriceCentavos: item.unitPriceCentavos,
+          lineTotalCentavos: item.lineTotalCentavos,
+        };
+      })
+    );
+
+    // 5. Load branch info
+    const branch = await ctx.db.get(transaction.branchId);
+
+    // 6. Load business settings (graceful defaults if not set)
+    const businessNameSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q) => q.eq("key", "businessName"))
+      .unique();
+    const tinSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q) => q.eq("key", "tin"))
+      .unique();
+    const businessAddressSetting = await ctx.db
+      .query("settings")
+      .withIndex("by_key", (q) => q.eq("key", "businessAddress"))
+      .unique();
+
+    // 7. Load cashier name
+    const cashier = await ctx.db.get(transaction.cashierId);
+
+    // 8. Return structured receipt data
+    return {
+      transaction: {
+        receiptNumber: transaction.receiptNumber,
+        createdAt: transaction.createdAt,
+        subtotalCentavos: transaction.subtotalCentavos,
+        vatAmountCentavos: transaction.vatAmountCentavos,
+        discountAmountCentavos: transaction.discountAmountCentavos,
+        totalCentavos: transaction.totalCentavos,
+        paymentMethod: transaction.paymentMethod,
+        discountType: transaction.discountType ?? "none",
+        amountTenderedCentavos: transaction.amountTenderedCentavos,
+        changeCentavos: transaction.changeCentavos,
+      },
+      items: enrichedItems,
+      branch: {
+        name: branch?.name ?? "",
+        address: branch?.address ?? "",
+      },
+      business: {
+        name: businessNameSetting?.value ?? "RedBox Apparel",
+        tin: tinSetting?.value ?? "",
+      },
+      businessAddress:
+        businessAddressSetting?.value ?? branch?.address ?? "",
+      cashierName: cashier?.name ?? "Unknown",
+    };
+  },
+});

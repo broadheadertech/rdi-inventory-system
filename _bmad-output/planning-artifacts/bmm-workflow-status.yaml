@@ -1,0 +1,115 @@
+# Workflow Status - redbox-apparel
+# This tracks progress through BMM methodology Analysis, Planning, and Solutioning phases.
+# Implementation phase is tracked separately in sprint-status.yaml
+
+# STATUS DEFINITIONS:
+# ==================
+# Initial Status (before completion):
+#   - required: Must be completed to progress
+#   - optional: Can be completed but not required
+#   - recommended: Strongly suggested but not required
+#   - conditional: Required only if certain conditions met (e.g., if_has_ui)
+#
+# Completion Status:
+#   - {file-path}: File created/found (e.g., "docs/product-brief.md")
+#   - skipped: Optional/conditional workflow that was skipped
+
+generated: "2026-02-25"
+project: "redbox-apparel"
+project_type: "Universal Inventory Management System (IMS) + POS + Logistics with AI Intelligence Layer + Front-facing Product Showcase Website - unified commerce platform for Philippine businesses"
+selected_track: "method"
+field_type: "greenfield"
+workflow_path: "method-greenfield"
+
+notes:
+  - "Project includes a public-facing front website for showcasing products"
+  - "Tech stack: Next.js 15, Convex, Clerk, PayMongo, Claude AI, shadcn/ui, Recharts"
+  - "Philippine market: VAT 12%, Senior/PWD discounts, BIR-style receipts"
+
+workflow_status:
+  # ===== PHASE 1: Analysis (Optional - all selected by user) =====
+  - phase: 1
+    name: "Analysis"
+    workflows:
+      - id: "brainstorm-project"
+        name: "Brainstorm"
+        status: "_bmad-output/analysis/brainstorming-session-2026-02-25.md"
+        agent: "analyst"
+        command: "/bmad:core:workflows:brainstorming"
+
+      - id: "research"
+        name: "Research"
+        status: "optional"
+        agent: "analyst"
+        command: "/bmad:bmm:workflows:research"
+
+      - id: "product-brief"
+        name: "Product Brief"
+        status: "_bmad-output/planning-artifacts/product-brief-redbox-apparel-2026-02-25.md"
+        agent: "analyst"
+        command: "/bmad:bmm:workflows:create-product-brief"
+
+  # ===== PHASE 2: Planning =====
+  - phase: 2
+    name: "Planning"
+    workflows:
+      - id: "prd"
+        name: "Product Requirements Document"
+        status: "_bmad-output/planning-artifacts/prd.md"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:prd"
+        completed: "2026-02-26"
+
+      - id: "create-ux-design"
+        name: "UX Design"
+        status: "_bmad-output/planning-artifacts/ux-design-specification.md"
+        agent: "ux-designer"
+        command: "/bmad:bmm:workflows:create-ux-design"
+        completed: "2026-02-26"
+        note: "Has UI - dashboard, POS terminal, front website, driver mobile view"
+
+  # ===== PHASE 3: Solutioning =====
+  - phase: 3
+    name: "Solutioning"
+    workflows:
+      - id: "create-architecture"
+        name: "Architecture"
+        status: "_bmad-output/planning-artifacts/architecture.md"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:create-architecture"
+        completed: "2026-02-26"
+
+      - id: "create-epics-and-stories"
+        name: "Epics & Stories"
+        status: "_bmad-output/planning-artifacts/epics.md"
+        agent: "pm"
+        command: "/bmad:bmm:workflows:create-epics-and-stories"
+        completed: "2026-02-26"
+
+      - id: "test-design"
+        name: "Test Design"
+        status: "_bmad-output/test-design-system.md"
+        agent: "tea"
+        command: "/bmad:bmm:workflows:testarch-test-design"
+        completed: "2026-02-26"
+        note: "System-level mode (Phase 3) - testability review with PASS gate recommendation"
+
+      - id: "implementation-readiness"
+        name: "Implementation Readiness Gate"
+        status: "_bmad-output/planning-artifacts/implementation-readiness-report-2026-02-26.md"
+        agent: "architect"
+        command: "/bmad:bmm:workflows:check-implementation-readiness"
+        completed: "2026-02-26"
+        note: "CONDITIONAL PASS - 11 critical issues require remediation before Sprint 1"
+
+  # ===== PHASE 4: Implementation =====
+  - phase: 4
+    name: "Implementation"
+    workflows:
+      - id: "sprint-planning"
+        name: "Sprint Planning"
+        status: "_bmad-output/implementation-artifacts/sprint-status.yaml"
+        agent: "sm"
+        command: "/bmad:bmm:workflows:sprint-planning"
+        completed: "2026-03-02"
+        note: "All 9 epics, 39 stories tracked. All marked done from prior implementation."
