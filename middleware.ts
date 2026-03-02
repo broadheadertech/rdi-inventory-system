@@ -53,9 +53,10 @@ function decodeClerkSession(token: string): ClerkJwtPayload | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
-    // Base64url → Base64 → JSON
-    const base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-    return JSON.parse(atob(base64)) as ClerkJwtPayload;
+    // Base64url → Base64 with proper padding, then decode
+    const raw = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = raw.padEnd(raw.length + ((4 - (raw.length % 4)) % 4), "=");
+    return JSON.parse(atob(padded)) as ClerkJwtPayload;
   } catch {
     return null;
   }
@@ -67,45 +68,61 @@ function decodeClerkSession(token: string): ClerkJwtPayload | null {
 // Security model:
 //   - Middleware: lightweight routing/redirect only (no crypto verification).
 //   - Convex backend: full JWT verification via requireRole() / withBranchScope().
-//   - Clerk's clerkMiddleware is intentionally avoided: @clerk/shared v3.x has
-//     no edge-light exports for #crypto / #safe-node-apis, causing Vercel Edge
-//     bundler failures.
+//   - @clerk/shared v3.x has no edge-light exports for #crypto / #safe-node-apis,
+//     so clerkMiddleware is intentionally avoided here.
 // ---------------------------------------------------------------------------
 
 export default function middleware(req: NextRequest) {
-  const pathname = req.nextUrl.pathname;
+  try {
+    const pathname = req.nextUrl.pathname;
 
-  // Public paths — no auth required
-  if (isPublicPath(pathname)) return;
-
-  // Read Clerk session JWT from cookie
-  const sessionToken = req.cookies.get("__session")?.value;
-  if (!sessionToken) {
-    const signInUrl = new URL("/sign-in", req.url);
-    signInUrl.searchParams.set("redirect_url", pathname);
-    return NextResponse.redirect(signInUrl);
-  }
-
-  const payload = decodeClerkSession(sessionToken);
-
-  // Malformed or expired token → force re-login
-  if (!payload || (payload.exp !== undefined && payload.exp < Date.now() / 1000)) {
-    const signInUrl = new URL("/sign-in", req.url);
-    signInUrl.searchParams.set("redirect_url", pathname);
-    return NextResponse.redirect(signInUrl);
-  }
-
-  const role = payload.metadata?.role;
-
-  // Role-based route access check
-  for (const [prefix, allowedRoles] of Object.entries(ROLE_ROUTE_ACCESS)) {
-    if (pathname === prefix || pathname.startsWith(prefix + "/")) {
-      if (!role || !allowedRoles.includes(role)) {
-        const defaultRoute = role ? (ROLE_DEFAULT_ROUTES[role] ?? "/") : "/";
-        return NextResponse.redirect(new URL(defaultRoute, req.url));
-      }
-      break;
+    // Public paths — no auth required
+    if (isPublicPath(pathname)) {
+      return NextResponse.next();
     }
+
+    // Read Clerk session JWT from cookie
+    const sessionToken = req.cookies.get("__session")?.value;
+    if (!sessionToken) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/sign-in";
+      url.searchParams.set("redirect_url", pathname);
+      return NextResponse.redirect(url);
+    }
+
+    const payload = decodeClerkSession(sessionToken);
+
+    // Malformed or expired token → force re-login
+    if (
+      !payload ||
+      (payload.exp !== undefined && payload.exp < Date.now() / 1000)
+    ) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/sign-in";
+      url.searchParams.set("redirect_url", pathname);
+      return NextResponse.redirect(url);
+    }
+
+    const role = payload.metadata?.role;
+
+    // Role-based route access check
+    for (const [prefix, allowedRoles] of Object.entries(ROLE_ROUTE_ACCESS)) {
+      if (pathname === prefix || pathname.startsWith(prefix + "/")) {
+        if (!role || !allowedRoles.includes(role)) {
+          const defaultRoute = role ? (ROLE_DEFAULT_ROUTES[role] ?? "/") : "/";
+          const url = req.nextUrl.clone();
+          url.pathname = defaultRoute;
+          url.search = "";
+          return NextResponse.redirect(url);
+        }
+        break;
+      }
+    }
+
+    return NextResponse.next();
+  } catch {
+    // Never block a request due to a middleware error
+    return NextResponse.next();
   }
 }
 
