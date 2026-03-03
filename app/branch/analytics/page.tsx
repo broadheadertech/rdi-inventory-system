@@ -113,6 +113,44 @@ const PAYMENT_LABELS: Record<string, string> = {
   maya: "Maya",
 };
 
+// ─── Date Preset helpers ──────────────────────────────────────────────────────
+
+type DatePreset = "today" | "weekly" | "monthly" | "yearly";
+
+const DATE_PRESETS: { value: DatePreset; label: string }[] = [
+  { value: "today", label: "Today" },
+  { value: "weekly", label: "Weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "yearly", label: "Yearly" },
+];
+
+function getPresetMs(preset: DatePreset): { startMs: number; endMs: number; label: string } {
+  const PHT = 8 * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  const nowPht = nowMs + PHT;
+  const todayMidnightPht = nowPht - (nowPht % (24 * 60 * 60 * 1000));
+  const todayStartMs = todayMidnightPht - PHT;
+
+  if (preset === "today") {
+    return { startMs: todayStartMs, endMs: nowMs, label: "Today" };
+  }
+  if (preset === "weekly") {
+    // Monday of this week
+    const dayOfWeek = new Date(nowPht).getUTCDay();
+    const daysSinceMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    return { startMs: todayStartMs - daysSinceMon * 24 * 60 * 60 * 1000, endMs: nowMs, label: "This Week" };
+  }
+  if (preset === "monthly") {
+    const d = new Date(nowPht);
+    const monthStartPht = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+    return { startMs: monthStartPht - PHT, endMs: nowMs, label: "This Month" };
+  }
+  // yearly
+  const d = new Date(nowPht);
+  const yearStartPht = Date.UTC(d.getUTCFullYear(), 0, 1);
+  return { startMs: yearStartPht - PHT, endMs: nowMs, label: "This Year" };
+}
+
 // ─── Tab Types ────────────────────────────────────────────────────────────────
 
 type AnalyticsTab = "descriptive" | "diagnostic" | "predictive";
@@ -129,17 +167,20 @@ const ANALYTICS_TABS: { value: AnalyticsTab; label: string; description: string 
 
 export default function BranchAnalyticsPage() {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>("descriptive");
+  const [datePreset, setDatePreset] = useState<DatePreset>("weekly");
+
+  const { startMs, endMs, label: periodLabel } = getPresetMs(datePreset);
 
   const branchContext = useQuery(api.dashboards.branchDashboard.getBranchContext);
 
   // Descriptive
   const weeklySales = useQuery(
     api.dashboards.branchAnalytics.getWeeklySalesSummary,
-    activeTab === "descriptive" ? {} : "skip"
+    activeTab === "descriptive" ? { startMs, endMs } : "skip"
   );
   const topProducts = useQuery(
     api.dashboards.branchAnalytics.getTopSellingProducts,
-    activeTab === "descriptive" ? {} : "skip"
+    activeTab === "descriptive" ? { startMs, endMs } : "skip"
   );
   const inventoryHealth = useQuery(
     api.dashboards.branchAnalytics.getInventoryHealth,
@@ -147,17 +188,17 @@ export default function BranchAnalyticsPage() {
   );
   const paymentBreakdown = useQuery(
     api.dashboards.branchAnalytics.getPaymentMethodBreakdown,
-    activeTab === "descriptive" ? {} : "skip"
+    activeTab === "descriptive" ? { startMs, endMs } : "skip"
   );
 
   // Diagnostic
   const velocity = useQuery(
     api.dashboards.branchAnalytics.getProductVelocity,
-    activeTab === "diagnostic" ? {} : "skip"
+    activeTab === "diagnostic" ? { startMs, endMs } : "skip"
   );
   const demandGap = useQuery(
     api.dashboards.branchAnalytics.getDemandGapAnalysis,
-    activeTab === "diagnostic" ? {} : "skip"
+    activeTab === "diagnostic" ? { startMs, endMs } : "skip"
   );
   const transferEff = useQuery(
     api.dashboards.branchAnalytics.getTransferEfficiency,
@@ -175,7 +216,7 @@ export default function BranchAnalyticsPage() {
   );
   const demandForecast = useQuery(
     api.dashboards.branchAnalytics.getDemandForecast,
-    activeTab === "predictive" ? {} : "skip"
+    activeTab === "predictive" ? { startMs, endMs } : "skip"
   );
 
   const todayLabel = new Date().toLocaleDateString("en-PH", {
@@ -214,11 +255,31 @@ export default function BranchAnalyticsPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          {isWarehouse ? "Warehouse" : "Branch"} Analytics
-        </h1>
-        <p className="mt-1 text-sm text-muted-foreground">{todayLabel}</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {isWarehouse ? "Warehouse" : "Branch"} Analytics
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">{todayLabel}</p>
+        </div>
+
+        {/* Date preset pills */}
+        <div className="flex gap-1.5 flex-wrap">
+          {DATE_PRESETS.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => setDatePreset(p.value)}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                datePreset === p.value
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-muted bg-background text-muted-foreground hover:border-primary/50 hover:text-foreground"
+              )}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* ═══ Top-level Analytics Tabs ═══════════════════════════════════════ */}
@@ -264,14 +325,14 @@ export default function BranchAnalyticsPage() {
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
-                title={isWarehouse ? "Transfer Revenue (7d)" : "Revenue (7d)"}
+                title={isWarehouse ? `Transfer Revenue (${periodLabel})` : `Revenue (${periodLabel})`}
                 value={formatCentavos(weeklySales.thisWeek.revenueCentavos)}
                 trendCurrent={weeklySales.thisWeek.revenueCentavos}
                 trendPrevious={weeklySales.lastWeek.revenueCentavos}
                 higherIsBetter
               />
               <MetricCard
-                title={isWarehouse ? "Invoices (7d)" : "Transactions (7d)"}
+                title={isWarehouse ? `Invoices (${periodLabel})` : `Transactions (${periodLabel})`}
                 value={String(weeklySales.thisWeek.transactionCount)}
                 trendCurrent={weeklySales.thisWeek.transactionCount}
                 trendPrevious={weeklySales.lastWeek.transactionCount}
@@ -279,7 +340,7 @@ export default function BranchAnalyticsPage() {
               />
               {!isWarehouse && (
                 <MetricCard
-                  title="Items Sold (7d)"
+                  title={`Items Sold (${periodLabel})`}
                   value={String(weeklySales.thisWeek.itemsSold)}
                   trendCurrent={weeklySales.thisWeek.itemsSold}
                   trendPrevious={weeklySales.lastWeek.itemsSold}
@@ -300,7 +361,7 @@ export default function BranchAnalyticsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Top Selling Products */}
             <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Top Selling Products (7d)</h3>
+              <h3 className="text-sm font-semibold">Top Selling Products ({periodLabel})</h3>
               {topProducts === undefined ? (
                 <Skeleton className="h-48" />
               ) : !topProducts || topProducts.length === 0 ? (
@@ -370,7 +431,7 @@ export default function BranchAnalyticsPage() {
               {/* Payment Methods (retail only) */}
               {!isWarehouse && (
                 <div className="space-y-3">
-                  <h3 className="text-sm font-semibold">Payment Methods (7d)</h3>
+                  <h3 className="text-sm font-semibold">Payment Methods ({periodLabel})</h3>
                   {paymentBreakdown === undefined ? (
                     <Skeleton className="h-32" />
                   ) : !paymentBreakdown ? (

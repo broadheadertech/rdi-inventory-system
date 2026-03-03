@@ -1,4 +1,5 @@
 import { query } from "../_generated/server";
+import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
 
@@ -12,58 +13,72 @@ function getPHTDayStartMs(): number {
   return todayPhtStartMs - PHT_OFFSET_MS;
 }
 
+// Resolve period from optional args — defaults to last 7 days
+function resolvePeriod(args: { startMs?: number; endMs?: number }): {
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  durationDays: number;
+} {
+  const nowMs = Date.now();
+  const endMs = args.endMs ?? nowMs;
+  const startMs = args.startMs ?? getPHTDayStartMs() - 7 * DAY_MS;
+  const durationMs = Math.max(endMs - startMs, 1);
+  return { startMs, endMs, durationMs, durationDays: Math.max(1, durationMs / DAY_MS) };
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // DESCRIPTIVE ANALYSIS — What is happening
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // ─── getWeeklySalesSummary ────────────────────────────────────────────────────
-// 7-day sales with week-over-week comparison.
+// Sales for the selected period with equivalent prior-period comparison.
 
 export const getWeeklySalesSummary = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) return null;
 
-    const todayStart = getPHTDayStartMs();
-    const thisWeekStart = todayStart - 7 * DAY_MS;
-    const lastWeekStart = todayStart - 14 * DAY_MS;
+    const { startMs, endMs, durationMs } = resolvePeriod(args);
+    const prevStartMs = startMs - durationMs;
+    const prevEndMs = startMs;
 
     // Detect warehouse
     const branch = await ctx.db.get(branchId);
     const isWarehouse = branch?.type === "warehouse";
 
     if (isWarehouse) {
-      // Warehouse: revenue from internal invoices
-      const recentInvoices = await ctx.db
+      const allInvoices = await ctx.db
         .query("internalInvoices")
-        .withIndex("by_createdAt", (q) => q.gte("createdAt", lastWeekStart))
+        .withIndex("by_createdAt", (q) => q.gte("createdAt", prevStartMs))
         .collect();
 
-      const myInvoices = recentInvoices.filter(
+      const myInvoices = allInvoices.filter(
         (inv) => (inv.fromBranchId as string) === (branchId as string)
       );
-      const thisWeekInv = myInvoices.filter((inv) => inv.createdAt >= thisWeekStart);
-      const lastWeekInv = myInvoices.filter(
-        (inv) => inv.createdAt >= lastWeekStart && inv.createdAt < thisWeekStart
-      );
+      const curInv = myInvoices.filter((i) => i.createdAt >= startMs && i.createdAt <= endMs);
+      const prevInv = myInvoices.filter((i) => i.createdAt >= prevStartMs && i.createdAt < prevEndMs);
 
       return {
         thisWeek: {
-          revenueCentavos: thisWeekInv.reduce((s, i) => s + i.totalCentavos, 0),
-          transactionCount: thisWeekInv.length,
+          revenueCentavos: curInv.reduce((s, i) => s + i.totalCentavos, 0),
+          transactionCount: curInv.length,
           itemsSold: 0,
-          avgTxnValueCentavos: thisWeekInv.length > 0
-            ? Math.round(thisWeekInv.reduce((s, i) => s + i.totalCentavos, 0) / thisWeekInv.length)
+          avgTxnValueCentavos: curInv.length > 0
+            ? Math.round(curInv.reduce((s, i) => s + i.totalCentavos, 0) / curInv.length)
             : 0,
         },
         lastWeek: {
-          revenueCentavos: lastWeekInv.reduce((s, i) => s + i.totalCentavos, 0),
-          transactionCount: lastWeekInv.length,
+          revenueCentavos: prevInv.reduce((s, i) => s + i.totalCentavos, 0),
+          transactionCount: prevInv.length,
           itemsSold: 0,
-          avgTxnValueCentavos: lastWeekInv.length > 0
-            ? Math.round(lastWeekInv.reduce((s, i) => s + i.totalCentavos, 0) / lastWeekInv.length)
+          avgTxnValueCentavos: prevInv.length > 0
+            ? Math.round(prevInv.reduce((s, i) => s + i.totalCentavos, 0) / prevInv.length)
             : 0,
         },
         isWarehouse: true,
@@ -74,16 +89,13 @@ export const getWeeklySalesSummary = query({
     const recentTxns = await ctx.db
       .query("transactions")
       .withIndex("by_branch_date", (q) =>
-        q.eq("branchId", branchId).gte("createdAt", lastWeekStart)
+        q.eq("branchId", branchId).gte("createdAt", prevStartMs)
       )
       .collect();
 
-    const thisWeekTxns = recentTxns.filter((t) => t.createdAt >= thisWeekStart);
-    const lastWeekTxns = recentTxns.filter(
-      (t) => t.createdAt >= lastWeekStart && t.createdAt < thisWeekStart
-    );
+    const curTxns = recentTxns.filter((t) => t.createdAt >= startMs && t.createdAt <= endMs);
+    const prevTxns = recentTxns.filter((t) => t.createdAt >= prevStartMs && t.createdAt < prevEndMs);
 
-    // Items sold via transactionItems join
     async function countItems(txns: typeof recentTxns): Promise<number> {
       const arrays = await Promise.all(
         txns.map((txn) =>
@@ -96,26 +108,26 @@ export const getWeeklySalesSummary = query({
       return arrays.flat().reduce((s, item) => s + item.quantity, 0);
     }
 
-    const [thisWeekItems, lastWeekItems] = await Promise.all([
-      countItems(thisWeekTxns),
-      countItems(lastWeekTxns),
+    const [curItems, prevItems] = await Promise.all([
+      countItems(curTxns),
+      countItems(prevTxns),
     ]);
 
-    const thisWeekRev = thisWeekTxns.reduce((s, t) => s + t.totalCentavos, 0);
-    const lastWeekRev = lastWeekTxns.reduce((s, t) => s + t.totalCentavos, 0);
+    const curRev = curTxns.reduce((s, t) => s + t.totalCentavos, 0);
+    const prevRev = prevTxns.reduce((s, t) => s + t.totalCentavos, 0);
 
     return {
       thisWeek: {
-        revenueCentavos: thisWeekRev,
-        transactionCount: thisWeekTxns.length,
-        itemsSold: thisWeekItems,
-        avgTxnValueCentavos: thisWeekTxns.length > 0 ? Math.round(thisWeekRev / thisWeekTxns.length) : 0,
+        revenueCentavos: curRev,
+        transactionCount: curTxns.length,
+        itemsSold: curItems,
+        avgTxnValueCentavos: curTxns.length > 0 ? Math.round(curRev / curTxns.length) : 0,
       },
       lastWeek: {
-        revenueCentavos: lastWeekRev,
-        transactionCount: lastWeekTxns.length,
-        itemsSold: lastWeekItems,
-        avgTxnValueCentavos: lastWeekTxns.length > 0 ? Math.round(lastWeekRev / lastWeekTxns.length) : 0,
+        revenueCentavos: prevRev,
+        transactionCount: prevTxns.length,
+        itemsSold: prevItems,
+        avgTxnValueCentavos: prevTxns.length > 0 ? Math.round(prevRev / prevTxns.length) : 0,
       },
       isWarehouse: false,
     };
@@ -123,26 +135,28 @@ export const getWeeklySalesSummary = query({
 });
 
 // ─── getTopSellingProducts ────────────────────────────────────────────────────
-// Top 5 products this week by revenue.
+// Top 5 products in the selected period by revenue.
 
 export const getTopSellingProducts = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) return null;
 
-    const todayStart = getPHTDayStartMs();
-    const weekStart = todayStart - 7 * DAY_MS;
+    const { startMs, endMs } = resolvePeriod(args);
 
     const txns = await ctx.db
       .query("transactions")
       .withIndex("by_branch_date", (q) =>
-        q.eq("branchId", branchId).gte("createdAt", weekStart)
+        q.eq("branchId", branchId).gte("createdAt", startMs)
       )
+      .filter((q) => q.lte(q.field("createdAt"), endMs))
       .collect();
 
-    // Aggregate items by variant
     const variantAgg = new Map<string, { qty: number; revenue: number }>();
     for (const txn of txns) {
       const items = await ctx.db
@@ -158,12 +172,10 @@ export const getTopSellingProducts = query({
       }
     }
 
-    // Sort by revenue, take top 5
     const sorted = Array.from(variantAgg.entries())
       .sort((a, b) => b[1].revenue - a[1].revenue)
       .slice(0, 5);
 
-    // Enrich with variant/style info
     const variantCache = new Map<string, { sku: string; styleName: string; size: string; color: string }>();
 
     return Promise.all(
@@ -227,23 +239,26 @@ export const getInventoryHealth = query({
 });
 
 // ─── getPaymentMethodBreakdown ────────────────────────────────────────────────
-// Cash vs GCash vs Maya distribution over 7 days.
+// Cash vs GCash vs Maya distribution over the selected period.
 
 export const getPaymentMethodBreakdown = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) return null;
 
-    const todayStart = getPHTDayStartMs();
-    const weekStart = todayStart - 7 * DAY_MS;
+    const { startMs, endMs } = resolvePeriod(args);
 
     const txns = await ctx.db
       .query("transactions")
       .withIndex("by_branch_date", (q) =>
-        q.eq("branchId", branchId).gte("createdAt", weekStart)
+        q.eq("branchId", branchId).gte("createdAt", startMs)
       )
+      .filter((q) => q.lte(q.field("createdAt"), endMs))
       .collect();
 
     const methods: Record<string, { count: number; revenueCentavos: number }> = {
@@ -279,21 +294,23 @@ export const getPaymentMethodBreakdown = query({
 // Fast movers (top 5) and slow movers (bottom 5) by daily velocity.
 
 export const getProductVelocity = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) return null;
 
-    const todayStart = getPHTDayStartMs();
-    const weekStart = todayStart - 7 * DAY_MS;
+    const { startMs, endMs, durationDays } = resolvePeriod(args);
 
-    // Sales velocity from transactions
     const txns = await ctx.db
       .query("transactions")
       .withIndex("by_branch_date", (q) =>
-        q.eq("branchId", branchId).gte("createdAt", weekStart)
+        q.eq("branchId", branchId).gte("createdAt", startMs)
       )
+      .filter((q) => q.lte(q.field("createdAt"), endMs))
       .collect();
 
     const variantSales = new Map<string, number>();
@@ -308,7 +325,6 @@ export const getProductVelocity = query({
       }
     }
 
-    // Get inventory for current stock levels
     const inventory = await ctx.db
       .query("inventory")
       .withIndex("by_branch", (q) => q.eq("branchId", branchId))
@@ -319,8 +335,10 @@ export const getProductVelocity = query({
       inventoryMap.set(inv.variantId as string, inv.quantity);
     }
 
-    // Build velocity entries (only items that have either sales or stock)
-    const allVariantIds = new Set([...variantSales.keys(), ...inventory.filter((i) => i.quantity > 0).map((i) => i.variantId as string)]);
+    const allVariantIds = new Set([
+      ...variantSales.keys(),
+      ...inventory.filter((i) => i.quantity > 0).map((i) => i.variantId as string),
+    ]);
 
     const entries: { variantId: string; totalSold: number; avgDaily: number; currentStock: number }[] = [];
     for (const vid of allVariantIds) {
@@ -328,20 +346,17 @@ export const getProductVelocity = query({
       entries.push({
         variantId: vid,
         totalSold,
-        avgDaily: Math.round((totalSold / 7) * 10) / 10,
+        avgDaily: Math.round((totalSold / durationDays) * 10) / 10,
         currentStock: inventoryMap.get(vid) ?? 0,
       });
     }
 
-    // Fast movers: highest avgDaily
     const fastMovers = [...entries].sort((a, b) => b.avgDaily - a.avgDaily).slice(0, 5);
-    // Slow movers: items with stock > 0 but lowest sales
     const slowMovers = entries
       .filter((e) => e.currentStock > 0)
       .sort((a, b) => a.avgDaily - b.avgDaily)
       .slice(0, 5);
 
-    // Enrich with variant info
     const variantCache = new Map<string, { sku: string; styleName: string; size: string; color: string }>();
     async function enrich(items: typeof fastMovers) {
       return Promise.all(
@@ -374,24 +389,24 @@ export const getProductVelocity = query({
 // Items customers ask for vs what's actually in stock.
 
 export const getDemandGapAnalysis = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) return null;
 
-    const todayStart = getPHTDayStartMs();
-    const weekStart = todayStart - 7 * DAY_MS;
+    const { startMs, endMs } = resolvePeriod(args);
 
-    // Fetch demand logs for this branch in the last 7 days
     const demandLogs = await ctx.db
       .query("demandLogs")
       .withIndex("by_branch", (q) => q.eq("branchId", branchId))
       .collect();
 
-    const recentLogs = demandLogs.filter((d) => d.createdAt >= weekStart);
+    const recentLogs = demandLogs.filter((d) => d.createdAt >= startMs && d.createdAt <= endMs);
 
-    // Aggregate by brand + design + size
     const demandAgg = new Map<string, { brand: string; design: string; size: string; count: number }>();
     for (const log of recentLogs) {
       const key = `${log.brand}|${log.design ?? ""}|${log.size ?? ""}`;
@@ -408,13 +423,11 @@ export const getDemandGapAnalysis = query({
       }
     }
 
-    // Get all inventory for this branch to check stock
     const inventory = await ctx.db
       .query("inventory")
       .withIndex("by_branch", (q) => q.eq("branchId", branchId))
       .collect();
 
-    // Build variant→brand lookup for matching
     const variantBrands = new Map<string, { brand: string; styleName: string; size: string; quantity: number }>();
     for (const inv of inventory) {
       const variant = await ctx.db.get(inv.variantId);
@@ -433,12 +446,10 @@ export const getDemandGapAnalysis = query({
       });
     }
 
-    // Match demand with stock
     const gaps = Array.from(demandAgg.values())
       .sort((a, b) => b.count - a.count)
       .slice(0, 10)
       .map((demand) => {
-        // Find matching inventory items by brand name
         const matchingStock = Array.from(variantBrands.values()).filter(
           (v) =>
             v.brand.toLowerCase() === demand.brand.toLowerCase() &&
@@ -460,7 +471,7 @@ export const getDemandGapAnalysis = query({
 });
 
 // ─── getTransferEfficiency ────────────────────────────────────────────────────
-// Average fulfillment time for incoming transfers.
+// Average fulfillment time for incoming transfers (fixed 30-day window).
 
 export const getTransferEfficiency = query({
   args: {},
@@ -472,7 +483,6 @@ export const getTransferEfficiency = query({
     const branch = await ctx.db.get(branchId);
     const isWarehouse = branch?.type === "warehouse";
 
-    // Warehouse: outgoing transfers; Retail: incoming transfers
     const transfers = isWarehouse
       ? await ctx.db
           .query("transfers")
@@ -487,7 +497,6 @@ export const getTransferEfficiency = query({
 
     const thirtyDaysAgo = Date.now() - 30 * DAY_MS;
 
-    // Delivered in last 30 days
     const delivered = transfers.filter(
       (t) => t.status === "delivered" && t.deliveredAt && t.deliveredAt >= thirtyDaysAgo
     );
@@ -502,7 +511,6 @@ export const getTransferEfficiency = query({
         ? Math.round((fulfillmentHours.reduce((s, h) => s + h, 0) / fulfillmentHours.length) * 10) / 10
         : 0;
 
-    // Pending counts
     const pending = transfers.filter(
       (t) => t.status !== "delivered" && t.status !== "rejected" && t.status !== "cancelled"
     );
@@ -582,9 +590,8 @@ export const getProjectedWeeklyRevenue = query({
     if (!branchId) return null;
 
     const todayStart = getPHTDayStartMs();
-    // PHT Monday boundary: find the Monday of this week
     const nowPht = Date.now() + PHT_OFFSET_MS;
-    const dayOfWeek = new Date(nowPht).getUTCDay(); // 0=Sun, 1=Mon...
+    const dayOfWeek = new Date(nowPht).getUTCDay();
     const daysSinceMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
     const mondayStart = todayStart - daysSinceMonday * DAY_MS;
     const lastMondayStart = mondayStart - 7 * DAY_MS;
@@ -619,7 +626,6 @@ export const getProjectedWeeklyRevenue = query({
       };
     }
 
-    // Retail
     const txns = await ctx.db
       .query("transactions")
       .withIndex("by_branch_date", (q) =>
@@ -650,23 +656,24 @@ export const getProjectedWeeklyRevenue = query({
 // Trending items from demand logs that may need stocking.
 
 export const getDemandForecast = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    startMs: v.optional(v.number()),
+    endMs: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) return null;
 
-    const todayStart = getPHTDayStartMs();
-    const weekStart = todayStart - 7 * DAY_MS;
+    const { startMs, endMs } = resolvePeriod(args);
 
     const demandLogs = await ctx.db
       .query("demandLogs")
       .withIndex("by_branch", (q) => q.eq("branchId", branchId))
       .collect();
 
-    const recentLogs = demandLogs.filter((d) => d.createdAt >= weekStart);
+    const recentLogs = demandLogs.filter((d) => d.createdAt >= startMs && d.createdAt <= endMs);
 
-    // Aggregate by brand + design
     const agg = new Map<string, { brand: string; design: string; count: number }>();
     for (const log of recentLogs) {
       const key = `${log.brand}|${log.design ?? ""}`;
@@ -678,13 +685,11 @@ export const getDemandForecast = query({
       }
     }
 
-    // Check inventory for each demanded brand
     const inventory = await ctx.db
       .query("inventory")
       .withIndex("by_branch", (q) => q.eq("branchId", branchId))
       .collect();
 
-    // Build brand→stock lookup
     const brandStock = new Map<string, number>();
     for (const inv of inventory) {
       const variant = await ctx.db.get(inv.variantId);
