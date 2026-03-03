@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { cn } from "@/lib/utils";
@@ -169,7 +169,7 @@ export default function BranchAnalyticsPage() {
   const [activeTab, setActiveTab] = useState<AnalyticsTab>("descriptive");
   const [datePreset, setDatePreset] = useState<DatePreset>("weekly");
 
-  const { startMs, endMs, label: periodLabel } = getPresetMs(datePreset);
+  const { startMs, endMs, label: periodLabel } = useMemo(() => getPresetMs(datePreset), [datePreset]);
 
   const branchContext = useQuery(api.dashboards.branchDashboard.getBranchContext);
 
