@@ -114,6 +114,7 @@ export default function VariantsPage() {
   const [createForm, setCreateForm] = useState({
     sku: "",
     barcode: "",
+    sizeGroup: "",
     size: "",
     color: "",
     gender: "" as string,
@@ -126,6 +127,7 @@ export default function VariantsPage() {
   const [editingVariant, setEditingVariant] = useState<Variant | null>(null);
   const [editForm, setEditForm] = useState({
     barcode: "",
+    sizeGroup: "",
     size: "",
     color: "",
     gender: "" as string,
@@ -139,6 +141,7 @@ export default function VariantsPage() {
     const matchesSearch =
       searchQuery === "" ||
       variant.sku.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (variant.sizeGroup && variant.sizeGroup.toLowerCase().includes(searchQuery.toLowerCase())) ||
       variant.size.toLowerCase().includes(searchQuery.toLowerCase()) ||
       variant.color.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (variant.barcode && variant.barcode.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -155,6 +158,7 @@ export default function VariantsPage() {
     setCreateForm({
       sku: "",
       barcode: "",
+      sizeGroup: "",
       size: "",
       color: "",
       gender: "",
@@ -203,6 +207,7 @@ export default function VariantsPage() {
         ...(createForm.barcode.trim()
           ? { barcode: createForm.barcode.trim() }
           : {}),
+        ...(createForm.sizeGroup ? { sizeGroup: createForm.sizeGroup } : {}),
         size: createForm.size.trim(),
         color: createForm.color.trim(),
         ...(createForm.gender && createForm.gender !== "none"
@@ -233,6 +238,7 @@ export default function VariantsPage() {
     setEditingVariant(variant);
     setEditForm({
       barcode: variant.barcode ?? "",
+      sizeGroup: variant.sizeGroup ?? "",
       size: variant.size,
       color: variant.color,
       gender: variant.gender ?? "",
@@ -277,6 +283,7 @@ export default function VariantsPage() {
       await updateVariant({
         variantId: editingVariant._id,
         barcode: editForm.barcode.trim(),
+        sizeGroup: editForm.sizeGroup || undefined,
         size: editForm.size.trim(),
         color: editForm.color.trim(),
         ...(editForm.gender && editForm.gender !== "none"
@@ -544,7 +551,9 @@ export default function VariantsPage() {
                   <TableCell className="text-muted-foreground">
                     {variant.barcode || "—"}
                   </TableCell>
-                  <TableCell>{variant.size}</TableCell>
+                  <TableCell>
+                    {variant.sizeGroup ? `${variant.sizeGroup} ${variant.size}` : variant.size}
+                  </TableCell>
                   <TableCell>
                     <span className="flex items-center gap-1.5">
                       {(() => {
@@ -681,34 +690,34 @@ export default function VariantsPage() {
                 }
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               <div className="space-y-2">
-                <Label>
-                  Size <span className="text-destructive">*</span>
-                </Label>
+                <Label>Size Group</Label>
                 <Select
-                  value={createForm.size || "__none"}
-                  onValueChange={(val) => updateCreateField("size", val === "__none" ? "" : val)}
+                  value={createForm.sizeGroup || "__none"}
+                  onValueChange={(val) => updateCreateField("sizeGroup", val === "__none" ? "" : val)}
                 >
-                  <SelectTrigger className={createErrors.size ? "border-destructive" : ""}>
-                    <SelectValue placeholder="Select size" />
+                  <SelectTrigger>
+                    <SelectValue placeholder="Group" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none" disabled>Select size</SelectItem>
+                    <SelectItem value="__none">None</SelectItem>
                     {activeSizes?.map((s) => (
-                      <SelectItem key={s._id} value={s.name}>
-                        <span className="flex items-center gap-2">
-                          {s.name}
-                          {s.sizeType && (
-                            <span className="text-xs text-muted-foreground">
-                              ({s.sizeType === "shoe_eu" ? "EU" : s.sizeType === "shoe_us" ? "US" : s.sizeType === "apparel" ? "Apparel" : "Numeric"})
-                            </span>
-                          )}
-                        </span>
-                      </SelectItem>
+                      <SelectItem key={s._id} value={s.name}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>
+                  Size Value <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  placeholder={createForm.sizeGroup ? `e.g. ${createForm.sizeGroup === "EU" ? "40" : createForm.sizeGroup === "US" ? "8" : "M"}` : "e.g. 42, M, XL"}
+                  value={createForm.size}
+                  onChange={(e) => updateCreateField("size", e.target.value)}
+                  className={createErrors.size ? "border-destructive" : ""}
+                />
                 {createErrors.size && (
                   <p className="text-sm text-destructive">
                     {createErrors.size}
@@ -847,34 +856,34 @@ export default function VariantsPage() {
                 }
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               <div className="space-y-2">
-                <Label>
-                  Size <span className="text-destructive">*</span>
-                </Label>
+                <Label>Size Group</Label>
                 <Select
-                  value={editForm.size || "__none"}
-                  onValueChange={(val) => updateEditField("size", val === "__none" ? "" : val)}
+                  value={editForm.sizeGroup || "__none"}
+                  onValueChange={(val) => updateEditField("sizeGroup", val === "__none" ? "" : val)}
                 >
-                  <SelectTrigger className={editErrors.size ? "border-destructive" : ""}>
-                    <SelectValue placeholder="Select size" />
+                  <SelectTrigger>
+                    <SelectValue placeholder="Group" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none" disabled>Select size</SelectItem>
+                    <SelectItem value="__none">None</SelectItem>
                     {activeSizes?.map((s) => (
-                      <SelectItem key={s._id} value={s.name}>
-                        <span className="flex items-center gap-2">
-                          {s.name}
-                          {s.sizeType && (
-                            <span className="text-xs text-muted-foreground">
-                              ({s.sizeType === "shoe_eu" ? "EU" : s.sizeType === "shoe_us" ? "US" : s.sizeType === "apparel" ? "Apparel" : "Numeric"})
-                            </span>
-                          )}
-                        </span>
-                      </SelectItem>
+                      <SelectItem key={s._id} value={s.name}>{s.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>
+                  Size Value <span className="text-destructive">*</span>
+                </Label>
+                <Input
+                  placeholder={editForm.sizeGroup ? `e.g. ${editForm.sizeGroup === "EU" ? "40" : editForm.sizeGroup === "US" ? "8" : "M"}` : "e.g. 42, M, XL"}
+                  value={editForm.size}
+                  onChange={(e) => updateEditField("size", e.target.value)}
+                  className={editErrors.size ? "border-destructive" : ""}
+                />
                 {editErrors.size && (
                   <p className="text-sm text-destructive">
                     {editErrors.size}

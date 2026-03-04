@@ -87,7 +87,7 @@ export const getVariantHierarchy = query({
     }
 
     const branchId = scope.branchId;
-    const result: Record<string, { brandId: string; categoryId: string; styleId: string; gender: string; color: string; size: string; agingTier: "green" | "yellow" | "red" }> = {};
+    const result: Record<string, { brandId: string; categoryId: string; styleId: string; gender: string; color: string; sizeGroup: string; size: string; agingTier: "green" | "yellow" | "red" }> = {};
 
     // Cache to avoid repeated lookups
     const categoryBrandCache = new Map<string, string>();
@@ -133,6 +133,7 @@ export const getVariantHierarchy = query({
         styleId: String(variant.styleId),
         gender: variant.gender ?? "",
         color: variant.color,
+        sizeGroup: variant.sizeGroup ?? "",
         size: variant.size,
         agingTier,
       };

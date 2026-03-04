@@ -44,6 +44,7 @@ export const createVariant = mutation({
     styleId: v.id("styles"),
     sku: v.string(),
     barcode: v.optional(v.string()),
+    sizeGroup: v.optional(v.string()),
     size: v.string(),
     color: v.string(),
     gender: v.optional(
@@ -126,6 +127,7 @@ export const createVariant = mutation({
       styleId: args.styleId,
       sku: args.sku,
       barcode: args.barcode,
+      sizeGroup: args.sizeGroup,
       size: args.size,
       color: args.color,
       gender: args.gender,
@@ -160,6 +162,7 @@ export const updateVariant = mutation({
   args: {
     variantId: v.id("variants"),
     barcode: v.optional(v.string()),
+    sizeGroup: v.optional(v.string()),
     size: v.optional(v.string()),
     color: v.optional(v.string()),
     gender: v.optional(
@@ -233,6 +236,12 @@ export const updateVariant = mutation({
         after.barcode = newBarcode;
         patch.barcode = newBarcode;
       }
+    }
+
+    if (args.sizeGroup !== undefined && args.sizeGroup !== existing.sizeGroup) {
+      before.sizeGroup = existing.sizeGroup;
+      after.sizeGroup = args.sizeGroup;
+      patch.sizeGroup = args.sizeGroup;
     }
 
     if (args.size !== undefined && args.size !== existing.size) {

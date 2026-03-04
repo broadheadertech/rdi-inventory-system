@@ -3,6 +3,10 @@ import { action, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SEED DATA
+// ═══════════════════════════════════════════════════════════════════════════════
+
 // ─── Branch Seed Data ────────────────────────────────────────────────────────
 
 const SEED_BRANCHES = [
@@ -56,36 +60,123 @@ const SEED_BRANCHES = [
   },
 ];
 
+// ─── Colors Seed Data ────────────────────────────────────────────────────────
+
+const SEED_COLORS: Array<{ name: string; hexCode: string }> = [
+  { name: "Black", hexCode: "#000000" },
+  { name: "White", hexCode: "#FFFFFF" },
+  { name: "Navy", hexCode: "#1B2A4A" },
+  { name: "Red", hexCode: "#DC2626" },
+  { name: "Olive", hexCode: "#4B5320" },
+  { name: "Charcoal", hexCode: "#36454F" },
+  { name: "Gray", hexCode: "#808080" },
+  { name: "Light Gray", hexCode: "#D1D5DB" },
+  { name: "Burgundy", hexCode: "#800020" },
+  { name: "Forest Green", hexCode: "#228B22" },
+  { name: "Royal Blue", hexCode: "#4169E1" },
+  { name: "Sky Blue", hexCode: "#87CEEB" },
+  { name: "Cream", hexCode: "#FFFDD0" },
+  { name: "Tan", hexCode: "#D2B48C" },
+  { name: "Sand", hexCode: "#C2B280" },
+  { name: "Coral", hexCode: "#FF6F61" },
+  { name: "Pink", hexCode: "#FFC0CB" },
+  { name: "Yellow", hexCode: "#FBBF24" },
+  { name: "Teal", hexCode: "#008080" },
+  { name: "Maroon", hexCode: "#800000" },
+  { name: "Brown", hexCode: "#8B4513" },
+  { name: "Khaki", hexCode: "#C3B091" },
+];
+
+// ─── Size Groups Seed Data ───────────────────────────────────────────────────
+
+const SEED_SIZE_GROUPS: Array<{ name: string; sortOrder: number }> = [
+  { name: "Apparel", sortOrder: 10 },
+  { name: "EU", sortOrder: 20 },
+  { name: "US", sortOrder: 30 },
+  { name: "Numeric", sortOrder: 40 },
+  { name: "One Size", sortOrder: 50 },
+];
+
 // ─── Catalog Seed Data ───────────────────────────────────────────────────────
 
-const CATALOG = [
+type StyleDef = {
+  name: string;
+  price: number;
+  cost: number;
+  desc: string;
+  gender?: "mens" | "womens" | "unisex" | "kids";
+};
+
+type CategoryDef = {
+  name: string;
+  styles: StyleDef[];
+};
+
+type BrandDef = {
+  brand: string;
+  categories: CategoryDef[];
+};
+
+const CATALOG: BrandDef[] = [
   {
     brand: "URBAN CORE",
     categories: [
+      // ── Headwear ──
+      {
+        name: "Caps",
+        styles: [
+          { name: "Metro Snapback", price: 59900, cost: 29900, desc: "Flat brim snapback with embroidered logo" },
+          { name: "Washed Dad Cap", price: 49900, cost: 24900, desc: "Unstructured washed cotton dad cap" },
+          { name: "Trucker Mesh Cap", price: 54900, cost: 27400, desc: "Foam front mesh back trucker cap" },
+        ],
+      },
+      {
+        name: "Beanies",
+        styles: [
+          { name: "Ribbed Cuff Beanie", price: 39900, cost: 19900, desc: "Classic ribbed knit cuff beanie" },
+          { name: "Slouch Beanie", price: 44900, cost: 22400, desc: "Oversized slouchy beanie" },
+        ],
+      },
+      // ── Tops ──
       {
         name: "T-Shirts",
         styles: [
-          { name: "Metro Basic Tee", price: 49900, desc: "Essential cotton crew neck tee" },
-          { name: "Graffiti Tag Tee", price: 59900, desc: "Oversized tee with graffiti print" },
-          { name: "Concrete Jungle Tee", price: 54900, desc: "Urban landscape graphic tee" },
-          { name: "Midnight Drift Tee", price: 64900, desc: "Reflective logo night tee" },
+          { name: "Metro Basic Tee", price: 49900, cost: 24900, desc: "Essential cotton crew neck tee" },
+          { name: "Graffiti Tag Tee", price: 59900, cost: 29900, desc: "Oversized tee with graffiti print" },
+          { name: "Concrete Jungle Tee", price: 54900, cost: 27400, desc: "Urban landscape graphic tee" },
+          { name: "Midnight Drift Tee", price: 64900, cost: 32400, desc: "Reflective logo night tee" },
         ],
       },
       {
         name: "Hoodies",
         styles: [
-          { name: "Skyline Pullover", price: 149900, desc: "Heavyweight French terry hoodie" },
-          { name: "Blackout Zip-Up", price: 169900, desc: "Full-zip hoodie with hidden pockets" },
-          { name: "Foggy Morning Hoodie", price: 159900, desc: "Acid-wash oversized hoodie" },
+          { name: "Skyline Pullover", price: 149900, cost: 74900, desc: "Heavyweight French terry hoodie" },
+          { name: "Blackout Zip-Up", price: 169900, cost: 84900, desc: "Full-zip hoodie with hidden pockets" },
+          { name: "Foggy Morning Hoodie", price: 159900, cost: 79900, desc: "Acid-wash oversized hoodie" },
         ],
       },
       {
+        name: "Long Sleeves",
+        styles: [
+          { name: "Layer Up Longsleeve", price: 69900, cost: 34900, desc: "Relaxed fit cotton long sleeve" },
+          { name: "Thermal Henley", price: 79900, cost: 39900, desc: "Waffle-knit thermal henley" },
+        ],
+      },
+      // ── Bottoms ──
+      {
         name: "Joggers",
         styles: [
-          { name: "Pavement Runner", price: 119900, desc: "Slim-fit tech joggers" },
-          { name: "Night Shift Jogger", price: 129900, desc: "Reflective stripe joggers" },
-          { name: "Cargo District Jogger", price: 139900, desc: "Multi-pocket cargo joggers" },
-          { name: "Chill Mode Sweatpant", price: 109900, desc: "Relaxed fit French terry jogger" },
+          { name: "Pavement Runner", price: 119900, cost: 59900, desc: "Slim-fit tech joggers" },
+          { name: "Night Shift Jogger", price: 129900, cost: 64900, desc: "Reflective stripe joggers" },
+          { name: "Cargo District Jogger", price: 139900, cost: 69900, desc: "Multi-pocket cargo joggers" },
+          { name: "Chill Mode Sweatpant", price: 109900, cost: 54900, desc: "Relaxed fit French terry jogger" },
+        ],
+      },
+      {
+        name: "Shorts",
+        styles: [
+          { name: "City Runner Short", price: 79900, cost: 39900, desc: "Lightweight running shorts" },
+          { name: "Urban Cargo Short", price: 89900, cost: 44900, desc: "Relaxed cargo shorts" },
         ],
       },
     ],
@@ -93,30 +184,74 @@ const CATALOG = [
   {
     brand: "STREET PULSE",
     categories: [
+      // ── Headwear ──
       {
-        name: "Caps",
+        name: "Bucket Hats",
         styles: [
-          { name: "Classic Snapback", price: 59900, desc: "Flat brim snapback with embroidered logo" },
-          { name: "Dad Cap Washed", price: 49900, desc: "Unstructured washed cotton dad cap" },
-          { name: "Trucker Mesh Cap", price: 54900, desc: "Foam front mesh back trucker" },
-          { name: "5-Panel Camp Cap", price: 64900, desc: "Nylon 5-panel camp cap" },
+          { name: "Reversible Bucket", price: 54900, cost: 27400, desc: "Two-tone reversible bucket hat" },
+          { name: "Washed Canvas Bucket", price: 49900, cost: 24900, desc: "Garment-dyed canvas bucket hat" },
         ],
       },
       {
-        name: "Shorts",
+        name: "Visors",
         styles: [
-          { name: "Boulevard Board Short", price: 89900, desc: "Quick-dry mesh-lined shorts" },
-          { name: "Alley Sweat Short", price: 79900, desc: "French terry cutoff shorts" },
-          { name: "Ripstop Cargo Short", price: 99900, desc: "Military-inspired cargo shorts" },
-          { name: "Court Side Short", price: 84900, desc: "Basketball-inspired mesh shorts" },
+          { name: "Sport Visor", price: 39900, cost: 19900, desc: "Adjustable sport visor" },
+          { name: "Mesh Back Visor", price: 34900, cost: 17400, desc: "Breathable mesh visor" },
         ],
       },
+      // ── Tops ──
       {
         name: "Tank Tops",
         styles: [
-          { name: "Raw Edge Tank", price: 44900, desc: "Cut-off raw edge tank" },
-          { name: "Stringer Vest", price: 39900, desc: "Deep-cut stringer tank" },
-          { name: "Box Logo Tank", price: 49900, desc: "Relaxed fit box logo tank top" },
+          { name: "Raw Edge Tank", price: 44900, cost: 22400, desc: "Cut-off raw edge tank" },
+          { name: "Stringer Vest", price: 39900, cost: 19900, desc: "Deep-cut stringer tank" },
+          { name: "Box Logo Tank", price: 49900, cost: 24900, desc: "Relaxed fit box logo tank top" },
+        ],
+      },
+      {
+        name: "Sweaters",
+        styles: [
+          { name: "Cable Knit Crew", price: 139900, cost: 69900, desc: "Classic cable knit crew neck" },
+          { name: "Oversized Sweatshirt", price: 119900, cost: 59900, desc: "Drop-shoulder oversized sweatshirt" },
+        ],
+      },
+      // ── Bottoms ──
+      {
+        name: "Chinos",
+        styles: [
+          { name: "Slim Stretch Chino", price: 119900, cost: 59900, desc: "Slim fit stretch cotton chinos" },
+          { name: "Relaxed Chino", price: 109900, cost: 54900, desc: "Relaxed straight leg chinos" },
+        ],
+      },
+      {
+        name: "Jeans",
+        styles: [
+          { name: "Selvedge Slim", price: 179900, cost: 89900, desc: "Japanese selvedge slim fit denim" },
+          { name: "Relaxed Wash Jean", price: 149900, cost: 74900, desc: "Relaxed fit washed denim" },
+          { name: "Skinny Black Jean", price: 139900, cost: 69900, desc: "Skinny fit black stretch denim" },
+        ],
+      },
+      {
+        name: "Cargo Pants",
+        styles: [
+          { name: "Tactical Cargo", price: 149900, cost: 74900, desc: "Multi-pocket tactical cargo pants" },
+          { name: "Ripstop Cargo Pant", price: 139900, cost: 69900, desc: "Lightweight ripstop cargo pants" },
+        ],
+      },
+      // ── Footwear ──
+      {
+        name: "Sneakers",
+        styles: [
+          { name: "Street Classic Low", price: 249900, cost: 124900, desc: "Low-top canvas street sneaker" },
+          { name: "High Voltage High-Top", price: 299900, cost: 149900, desc: "Leather high-top sneaker" },
+          { name: "Runner V2", price: 279900, cost: 139900, desc: "Lightweight mesh running shoe" },
+        ],
+      },
+      {
+        name: "Slides",
+        styles: [
+          { name: "Comfort Slide", price: 69900, cost: 34900, desc: "Molded footbed slide sandal" },
+          { name: "Logo Pool Slide", price: 59900, cost: 29900, desc: "Embossed logo pool slide" },
         ],
       },
     ],
@@ -124,49 +259,209 @@ const CATALOG = [
   {
     brand: "PRIME THREADS",
     categories: [
+      // ── Tops ──
       {
         name: "Polo Shirts",
         styles: [
-          { name: "Executive Piqué Polo", price: 129900, desc: "Premium piqué cotton polo" },
-          { name: "Tech Stretch Polo", price: 149900, desc: "4-way stretch performance polo" },
-          { name: "Mandarin Collar Polo", price: 139900, desc: "Modern mandarin collar polo" },
-          { name: "Knit Resort Polo", price: 159900, desc: "Open-knit textured polo" },
-        ],
-      },
-      {
-        name: "Jackets",
-        styles: [
-          { name: "Metro Bomber", price: 249900, desc: "Satin bomber with ribbed cuffs" },
-          { name: "Coach Windbreaker", price: 199900, desc: "Snap-front coach jacket" },
-          { name: "Denim Trucker Jacket", price: 229900, desc: "Classic trucker silhouette" },
-          { name: "Tech Shell Jacket", price: 219900, desc: "Water-resistant tech shell" },
+          { name: "Executive Pique Polo", price: 129900, cost: 64900, desc: "Premium pique cotton polo" },
+          { name: "Tech Stretch Polo", price: 149900, cost: 74900, desc: "4-way stretch performance polo" },
+          { name: "Mandarin Collar Polo", price: 139900, cost: 69900, desc: "Modern mandarin collar polo" },
+          { name: "Knit Resort Polo", price: 159900, cost: 79900, desc: "Open-knit textured polo" },
         ],
       },
       {
         name: "Dress Shirts",
         styles: [
-          { name: "Barong Modern Slim", price: 179900, desc: "Contemporary slim-fit barong tagalog" },
-          { name: "Oxford Button-Down", price: 159900, desc: "Classic oxford cloth shirt" },
-          { name: "Linen Blend Shirt", price: 169900, desc: "Breathable linen-cotton blend" },
-          { name: "Stretch Poplin Shirt", price: 149900, desc: "Easy-care stretch poplin" },
+          { name: "Barong Modern Slim", price: 179900, cost: 89900, desc: "Contemporary slim-fit barong tagalog" },
+          { name: "Oxford Button-Down", price: 159900, cost: 79900, desc: "Classic oxford cloth shirt" },
+          { name: "Linen Blend Shirt", price: 169900, cost: 84900, desc: "Breathable linen-cotton blend" },
+          { name: "Stretch Poplin Shirt", price: 149900, cost: 74900, desc: "Easy-care stretch poplin" },
+        ],
+      },
+      {
+        name: "Jackets",
+        styles: [
+          { name: "Metro Bomber", price: 249900, cost: 124900, desc: "Satin bomber with ribbed cuffs" },
+          { name: "Coach Windbreaker", price: 199900, cost: 99900, desc: "Snap-front coach jacket" },
+          { name: "Denim Trucker Jacket", price: 229900, cost: 114900, desc: "Classic trucker silhouette" },
+          { name: "Tech Shell Jacket", price: 219900, cost: 109900, desc: "Water-resistant tech shell" },
+        ],
+      },
+      // ── Bottoms ──
+      {
+        name: "Chinos",
+        styles: [
+          { name: "Tailored Chino", price: 139900, cost: 69900, desc: "Tailored fit premium chinos" },
+          { name: "Pleated Wide Chino", price: 149900, cost: 74900, desc: "Pleated wide-leg chinos" },
+        ],
+      },
+      // ── Footwear ──
+      {
+        name: "Boots",
+        styles: [
+          { name: "Chelsea Boot", price: 349900, cost: 174900, desc: "Suede Chelsea boot with elastic gore" },
+          { name: "Desert Boot", price: 299900, cost: 149900, desc: "Classic crepe-sole desert boot" },
+        ],
+      },
+      // ── Accessories ──
+      {
+        name: "Bags",
+        styles: [
+          { name: "Leather Messenger", price: 299900, cost: 149900, desc: "Full-grain leather messenger bag" },
+          { name: "Canvas Tote", price: 119900, cost: 59900, desc: "Heavy-duty canvas tote bag" },
+          { name: "Nylon Backpack", price: 179900, cost: 89900, desc: "Water-resistant nylon backpack" },
+        ],
+      },
+      {
+        name: "Belts",
+        styles: [
+          { name: "Classic Leather Belt", price: 89900, cost: 44900, desc: "Full-grain leather dress belt" },
+          { name: "Reversible Belt", price: 99900, cost: 49900, desc: "Black/brown reversible belt" },
+        ],
+      },
+      {
+        name: "Wallets",
+        styles: [
+          { name: "Bifold Wallet", price: 79900, cost: 39900, desc: "Slim leather bifold wallet" },
+          { name: "Card Holder", price: 49900, cost: 24900, desc: "Minimalist card holder" },
+        ],
+      },
+    ],
+  },
+  {
+    brand: "IRONSIDE",
+    categories: [
+      // ── Tops ──
+      {
+        name: "T-Shirts",
+        styles: [
+          { name: "Heavy Duty Tee", price: 54900, cost: 27400, desc: "220gsm heavyweight cotton tee" },
+          { name: "Washed Vintage Tee", price: 64900, cost: 32400, desc: "Garment-dyed vintage wash tee" },
+          { name: "Graphic Logo Tee", price: 59900, cost: 29900, desc: "Bold front graphic logo tee" },
+        ],
+      },
+      {
+        name: "Hoodies",
+        styles: [
+          { name: "Workwear Hoodie", price: 169900, cost: 84900, desc: "Reinforced heavyweight hoodie" },
+          { name: "Quarter-Zip Pullover", price: 159900, cost: 79900, desc: "Quarter-zip fleece pullover" },
+        ],
+      },
+      {
+        name: "Long Sleeves",
+        styles: [
+          { name: "Flannel Shirt", price: 119900, cost: 59900, desc: "Brushed cotton flannel shirt" },
+          { name: "Heavyweight Henley", price: 89900, cost: 44900, desc: "Thick ribbed henley long sleeve" },
+        ],
+      },
+      // ── Bottoms ──
+      {
+        name: "Jeans",
+        styles: [
+          { name: "Straight Fit Work Jean", price: 159900, cost: 79900, desc: "Durable straight fit work denim" },
+          { name: "Loose Carpenter Jean", price: 169900, cost: 84900, desc: "Carpenter loop loose fit jean" },
+        ],
+      },
+      {
+        name: "Cargo Pants",
+        styles: [
+          { name: "Heavy Canvas Cargo", price: 159900, cost: 79900, desc: "12oz canvas cargo work pants" },
+          { name: "Stretch Work Pant", price: 139900, cost: 69900, desc: "Stretch canvas utility pants" },
+        ],
+      },
+      {
+        name: "Shorts",
+        styles: [
+          { name: "Utility Short", price: 89900, cost: 44900, desc: "Reinforced utility work shorts" },
+          { name: "Board Short", price: 79900, cost: 39900, desc: "Quick-dry board shorts" },
+        ],
+      },
+      // ── Footwear ──
+      {
+        name: "Boots",
+        styles: [
+          { name: "Work Boot", price: 399900, cost: 199900, desc: "Steel-toe leather work boot" },
+          { name: "Hiking Boot", price: 349900, cost: 174900, desc: "Waterproof hiking boot" },
+        ],
+      },
+      // ── Underwear ──
+      {
+        name: "Boxers",
+        styles: [
+          { name: "Cotton Boxer Brief", price: 34900, cost: 17400, desc: "Stretch cotton boxer brief" },
+          { name: "Performance Boxer", price: 44900, cost: 22400, desc: "Moisture-wicking sport boxer" },
+        ],
+      },
+      {
+        name: "Undershirts",
+        styles: [
+          { name: "Crew Undershirt", price: 29900, cost: 14900, desc: "Cotton crew neck undershirt" },
+          { name: "V-Neck Undershirt", price: 29900, cost: 14900, desc: "Cotton v-neck undershirt" },
+        ],
+      },
+      {
+        name: "Socks",
+        styles: [
+          { name: "Crew Athletic Sock", price: 19900, cost: 9900, desc: "Cushioned crew athletic socks" },
+          { name: "No-Show Liner", price: 14900, cost: 7400, desc: "Invisible no-show liner socks" },
+          { name: "Work Boot Sock", price: 24900, cost: 12400, desc: "Reinforced heel/toe boot socks" },
+        ],
+      },
+      // ── Accessories ──
+      {
+        name: "Sunglasses",
+        styles: [
+          { name: "Classic Wayfarer", price: 99900, cost: 49900, desc: "UV400 polarized wayfarer" },
+          { name: "Aviator Shade", price: 109900, cost: 54900, desc: "Metal frame aviator sunglasses" },
         ],
       },
     ],
   },
 ];
 
-// ─── Variant Matrices ────────────────────────────────────────────────────────
+// ─── Variant Matrices per Category ──────────────────────────────────────────
 
-const VARIANT_MATRICES: Record<string, { colors: string[]; sizes: string[] }> = {
-  "T-Shirts":     { colors: ["Black", "White", "Navy", "Red", "Olive"], sizes: ["S", "M", "L", "XL", "XXL"] },
-  "Hoodies":      { colors: ["Black", "Navy", "Olive"],                 sizes: ["S", "M", "L", "XL", "XXL"] },
-  "Joggers":      { colors: ["Black", "Navy", "Olive", "White"],        sizes: ["S", "M", "L", "XL"] },
-  "Caps":         { colors: ["Black", "White", "Navy", "Red"],          sizes: ["One Size"] },
-  "Shorts":       { colors: ["Black", "Navy", "Olive", "White"],        sizes: ["S", "M", "L", "XL"] },
-  "Tank Tops":    { colors: ["Black", "White", "Red"],                  sizes: ["S", "M", "L", "XL"] },
-  "Polo Shirts":  { colors: ["Black", "White", "Navy"],                 sizes: ["S", "M", "L", "XL", "XXL"] },
-  "Jackets":      { colors: ["Black", "Navy", "Olive"],                 sizes: ["S", "M", "L", "XL"] },
-  "Dress Shirts": { colors: ["White", "Navy", "Black"],                 sizes: ["S", "M", "L", "XL"] },
+type MatrixDef = {
+  colors: string[];
+  sizes: string[];
+  sizeGroup: string;
+  gender?: "mens" | "womens" | "unisex" | "kids";
+};
+
+const VARIANT_MATRICES: Record<string, MatrixDef> = {
+  // Headwear
+  "Caps":          { colors: ["Black", "White", "Navy", "Red", "Olive"], sizes: ["One Size"], sizeGroup: "One Size" },
+  "Beanies":       { colors: ["Black", "Charcoal", "Navy", "Burgundy"], sizes: ["One Size"], sizeGroup: "One Size" },
+  "Bucket Hats":   { colors: ["Black", "Olive", "Khaki", "Navy"], sizes: ["One Size"], sizeGroup: "One Size" },
+  "Visors":        { colors: ["Black", "White", "Navy"], sizes: ["One Size"], sizeGroup: "One Size" },
+  // Tops
+  "T-Shirts":      { colors: ["Black", "White", "Navy", "Red", "Olive"], sizes: ["S", "M", "L", "XL", "XXL"], sizeGroup: "Apparel" },
+  "Hoodies":       { colors: ["Black", "Navy", "Charcoal", "Olive"], sizes: ["S", "M", "L", "XL", "XXL"], sizeGroup: "Apparel" },
+  "Long Sleeves":  { colors: ["Black", "White", "Navy", "Charcoal"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  "Sweaters":      { colors: ["Cream", "Navy", "Charcoal", "Burgundy"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  "Tank Tops":     { colors: ["Black", "White", "Red", "Navy"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  "Polo Shirts":   { colors: ["Black", "White", "Navy", "Royal Blue"], sizes: ["S", "M", "L", "XL", "XXL"], sizeGroup: "Apparel" },
+  "Dress Shirts":  { colors: ["White", "Navy", "Light Gray", "Sky Blue"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  "Jackets":       { colors: ["Black", "Navy", "Olive", "Charcoal"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  // Bottoms
+  "Joggers":       { colors: ["Black", "Navy", "Charcoal", "Olive"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  "Shorts":        { colors: ["Black", "Navy", "Olive", "Khaki"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  "Chinos":        { colors: ["Khaki", "Navy", "Black", "Tan"], sizes: ["28", "30", "32", "34", "36"], sizeGroup: "Numeric" },
+  "Jeans":         { colors: ["Black", "Navy", "Charcoal"], sizes: ["28", "30", "32", "34", "36"], sizeGroup: "Numeric" },
+  "Cargo Pants":   { colors: ["Black", "Olive", "Khaki", "Charcoal"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  // Footwear
+  "Sneakers":      { colors: ["Black", "White", "Navy"], sizes: ["39", "40", "41", "42", "43", "44", "45"], sizeGroup: "EU" },
+  "Slides":        { colors: ["Black", "White", "Navy"], sizes: ["39", "40", "41", "42", "43", "44"], sizeGroup: "EU" },
+  "Boots":         { colors: ["Black", "Brown", "Tan"], sizes: ["39", "40", "41", "42", "43", "44", "45"], sizeGroup: "EU" },
+  // Underwear
+  "Boxers":        { colors: ["Black", "Navy", "Gray"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel", gender: "mens" },
+  "Undershirts":   { colors: ["White", "Black", "Gray"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel", gender: "mens" },
+  "Socks":         { colors: ["Black", "White", "Gray"], sizes: ["One Size"], sizeGroup: "One Size" },
+  // Accessories
+  "Bags":          { colors: ["Black", "Brown", "Navy"], sizes: ["One Size"], sizeGroup: "One Size" },
+  "Sunglasses":    { colors: ["Black", "Brown"], sizes: ["One Size"], sizeGroup: "One Size" },
+  "Belts":         { colors: ["Black", "Brown"], sizes: ["S", "M", "L", "XL"], sizeGroup: "Apparel" },
+  "Wallets":       { colors: ["Black", "Brown", "Tan"], sizes: ["One Size"], sizeGroup: "One Size" },
 };
 
 // ─── SKU Generator ───────────────────────────────────────────────────────────
@@ -175,17 +470,26 @@ const BRAND_CODES: Record<string, string> = {
   "URBAN CORE": "UC",
   "STREET PULSE": "SP",
   "PRIME THREADS": "PT",
+  "IRONSIDE": "IS",
 };
 
 const CAT_CODES: Record<string, string> = {
-  "T-Shirts": "TS", "Hoodies": "HD", "Joggers": "JG",
-  "Caps": "CP", "Shorts": "SH", "Tank Tops": "TK",
-  "Polo Shirts": "PL", "Jackets": "JK", "Dress Shirts": "DS",
+  "Caps": "CP", "Beanies": "BN", "Bucket Hats": "BH", "Visors": "VR",
+  "T-Shirts": "TS", "Hoodies": "HD", "Long Sleeves": "LS", "Sweaters": "SW",
+  "Tank Tops": "TK", "Polo Shirts": "PL", "Dress Shirts": "DS", "Jackets": "JK",
+  "Joggers": "JG", "Shorts": "SH", "Chinos": "CH", "Jeans": "JN", "Cargo Pants": "CG",
+  "Sneakers": "SN", "Slides": "SL", "Boots": "BT",
+  "Boxers": "BX", "Undershirts": "US", "Socks": "SK",
+  "Bags": "BG", "Sunglasses": "SG", "Belts": "BL", "Wallets": "WL",
 };
 
 const COLOR_CODES: Record<string, string> = {
-  "Black": "BLK", "White": "WHT", "Navy": "NVY",
-  "Red": "RED", "Olive": "OLV",
+  "Black": "BLK", "White": "WHT", "Navy": "NVY", "Red": "RED", "Olive": "OLV",
+  "Charcoal": "CHR", "Gray": "GRY", "Light Gray": "LGR", "Burgundy": "BRG",
+  "Forest Green": "FGR", "Royal Blue": "RBL", "Sky Blue": "SKB",
+  "Cream": "CRM", "Tan": "TAN", "Sand": "SND", "Coral": "CRL",
+  "Pink": "PNK", "Yellow": "YLW", "Teal": "TEL", "Maroon": "MRN",
+  "Brown": "BRN", "Khaki": "KHK",
 };
 
 function generateSku(
@@ -195,11 +499,87 @@ function generateSku(
   color: string,
   size: string,
 ): string {
+  const bc = BRAND_CODES[brand] ?? "XX";
+  const cc = CAT_CODES[category] ?? "XX";
+  const colCode = COLOR_CODES[color] ?? color.slice(0, 3).toUpperCase();
   const sizeCode = size === "One Size" ? "OS" : size;
-  return `${BRAND_CODES[brand]}-${CAT_CODES[category]}-${String(styleIndex + 1).padStart(2, "0")}-${COLOR_CODES[color]}-${sizeCode}`;
+  return `${bc}-${cc}-${String(styleIndex + 1).padStart(2, "0")}-${colCode}-${sizeCode}`;
 }
 
-// ─── Internal Mutations ──────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// WIPE MUTATIONS — Each clears a group of tables, up to 500 rows per table
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const _wipeCatalog = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let total = 0;
+    for (const row of await ctx.db.query("variants").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("productImages").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("styles").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("categories").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("brands").take(500)) { await ctx.db.delete(row._id); total++; }
+    return total;
+  },
+});
+
+export const _wipeInventory = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let total = 0;
+    for (const row of await ctx.db.query("inventory").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("inventoryBatches").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("lowStockAlerts").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("restockSuggestions").take(500)) { await ctx.db.delete(row._id); total++; }
+    return total;
+  },
+});
+
+export const _wipeTransactions = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let total = 0;
+    for (const row of await ctx.db.query("transactionItems").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("transactions").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("reconciliations").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("cashierShifts").take(500)) { await ctx.db.delete(row._id); total++; }
+    return total;
+  },
+});
+
+export const _wipeTransfers = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let total = 0;
+    for (const row of await ctx.db.query("internalInvoiceItems").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("internalInvoices").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("transferItems").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("transfers").take(500)) { await ctx.db.delete(row._id); total++; }
+    return total;
+  },
+});
+
+export const _wipeMisc = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let total = 0;
+    for (const row of await ctx.db.query("auditLogs").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("demandLogs").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("demandWeeklySummaries").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("promotions").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("supplierProposals").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("branchScores").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("reservations").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("colors").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("sizes").take(500)) { await ctx.db.delete(row._id); total++; }
+    for (const row of await ctx.db.query("settings").take(500)) { await ctx.db.delete(row._id); total++; }
+    return total;
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SEED MUTATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export const _seedBranches = internalMutation({
   args: {
@@ -248,12 +628,52 @@ export const _seedBranches = internalMutation({
   },
 });
 
-// ─── Main Seed Action ────────────────────────────────────────────────────────
+export const _seedColors = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let count = 0;
+    for (const color of SEED_COLORS) {
+      await ctx.db.insert("colors", {
+        name: color.name,
+        hexCode: color.hexCode,
+        isActive: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      count++;
+    }
+    return count;
+  },
+});
+
+export const _seedSizeGroups = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let count = 0;
+    for (const sg of SEED_SIZE_GROUPS) {
+      await ctx.db.insert("sizes", {
+        name: sg.name,
+        sortOrder: sg.sortOrder,
+        isActive: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      count++;
+    }
+    return count;
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN SEED ACTION
+// ═══════════════════════════════════════════════════════════════════════════════
 
 export const seedDatabase = action({
   args: {},
   handler: async (ctx): Promise<{
     branches: { created: number; total: number };
+    colors: number;
+    sizeGroups: number;
     products: { created: number; skipped: number; total: number };
     inventory: { variants: number; branches: number; estimatedRows: number };
   }> => {
@@ -264,7 +684,31 @@ export const seedDatabase = action({
 
     console.log("=== RedBox Apparel Seed: Starting ===");
 
-    // 2. Seed branches
+    // 2. Wipe all data (except users)
+    console.log("Wiping existing data...");
+    const wipeFns = [
+      internal.seed._wipeTransactions,
+      internal.seed._wipeTransfers,
+      internal.seed._wipeInventory,
+      internal.seed._wipeMisc,
+      internal.seed._wipeCatalog,
+    ];
+    // Loop until all tables are empty
+    let totalWiped = 0;
+    let wipePasses = 0;
+    let keepWiping = true;
+    while (keepWiping) {
+      keepWiping = false;
+      wipePasses++;
+      for (const fn of wipeFns) {
+        const count: number = await ctx.runMutation(fn);
+        totalWiped += count;
+        if (count > 0) keepWiping = true;
+      }
+    }
+    console.log(`Wiped ${totalWiped} records in ${wipePasses} passes`);
+
+    // 3. Seed branches
     console.log("Seeding branches...");
     const branchResults: Array<{ name: string; id: Id<"branches">; created: boolean }> =
       await ctx.runMutation(internal.seed._seedBranches, {
@@ -275,7 +719,17 @@ export const seedDatabase = action({
       `Branches: ${branchesCreated} created, ${branchResults.length - branchesCreated} existing`
     );
 
-    // 3. Generate flat items array
+    // 4. Seed colors
+    console.log("Seeding colors...");
+    const colorsCreated: number = await ctx.runMutation(internal.seed._seedColors);
+    console.log(`Colors: ${colorsCreated} created`);
+
+    // 5. Seed size groups
+    console.log("Seeding size groups...");
+    const sizeGroupsCreated: number = await ctx.runMutation(internal.seed._seedSizeGroups);
+    console.log(`Size Groups: ${sizeGroupsCreated} created`);
+
+    // 6. Generate flat items array
     console.log("Generating product catalog...");
     const items: Array<{
       brand: string;
@@ -283,14 +737,21 @@ export const seedDatabase = action({
       styleName: string;
       desc: string;
       price: number;
+      cost: number;
       sku: string;
       size: string;
+      sizeGroup: string;
       color: string;
+      gender?: "mens" | "womens" | "unisex" | "kids";
     }> = [];
 
     for (const brandDef of CATALOG) {
       for (const catDef of brandDef.categories) {
         const matrix = VARIANT_MATRICES[catDef.name];
+        if (!matrix) {
+          console.warn(`No matrix for category "${catDef.name}", skipping`);
+          continue;
+        }
         for (let si = 0; si < catDef.styles.length; si++) {
           const style = catDef.styles[si];
           for (const color of matrix.colors) {
@@ -301,9 +762,12 @@ export const seedDatabase = action({
                 styleName: style.name,
                 desc: style.desc,
                 price: style.price,
+                cost: style.cost,
                 sku: generateSku(brandDef.brand, catDef.name, si, color, size),
                 size,
+                sizeGroup: matrix.sizeGroup,
                 color,
+                gender: style.gender ?? matrix.gender ?? "unisex",
               });
             }
           }
@@ -313,7 +777,7 @@ export const seedDatabase = action({
 
     console.log(`Generated ${items.length} variant items`);
 
-    // 4. Create catalog using existing bulkImport internal mutations
+    // 7. Create catalog using existing bulkImport internal mutations
     const brandCache = new Map<string, Id<"brands">>();
     const categoryCache = new Map<string, Id<"categories">>();
     const styleCache = new Map<string, Id<"styles">>();
@@ -366,20 +830,22 @@ export const seedDatabase = action({
         }
 
         // Variant
-        const variantId = await ctx.runMutation(
+        const variantResult = await ctx.runMutation(
           internal.catalog.bulkImport._createImportedVariant,
           {
             styleId,
             sku: row.sku,
+            sizeGroup: row.sizeGroup,
             size: row.size,
             color: row.color,
-            gender: "unisex",
+            gender: row.gender ?? "unisex",
             priceCentavos: row.price,
+            costPriceCentavos: row.cost,
             userId: user._id,
           }
         );
-        if (variantId.status === "created") {
-          variantIds.push(variantId.variantId);
+        if (variantResult.status === "created") {
+          variantIds.push(variantResult.variantId);
           successCount++;
         } else {
           skipCount++;
@@ -393,11 +859,12 @@ export const seedDatabase = action({
       `Products: ${successCount} created, ${skipCount} skipped`
     );
 
-    // 5. Seed inventory across branches
+    // 8. Seed inventory across branches
     if (variantIds.length > 0) {
       console.log("Seeding inventory...");
       const branchIds = branchResults.map((b: { id: Id<"branches"> }) => b.id);
-      const quantityMultipliers = [1.0, 0.7, 0.5]; // Manila full, Cebu 70%, Davao 50%
+      // Warehouse gets 2x, Manila 1x, Cebu 0.7x, Davao 0.5x
+      const quantityMultipliers = [2.0, 1.0, 0.7, 0.5];
       const baseQuantities = [15, 20, 25, 30, 35, 40, 45, 50];
 
       const BATCH_SIZE = 50;
@@ -409,9 +876,10 @@ export const seedDatabase = action({
       }> = [];
 
       for (let bi = 0; bi < branchIds.length; bi++) {
+        const multiplier = quantityMultipliers[bi] ?? 0.5;
         for (let vi = 0; vi < variantIds.length; vi++) {
           const baseQty = baseQuantities[vi % baseQuantities.length];
-          const quantity = Math.round(baseQty * quantityMultipliers[bi]);
+          const quantity = Math.max(1, Math.round(baseQty * multiplier));
           inventoryItems.push({
             branchId: branchIds[bi],
             variantId: variantIds[vi],
@@ -434,9 +902,11 @@ export const seedDatabase = action({
       );
     }
 
-    // 6. Summary
+    // 9. Summary
     const summary = {
       branches: { created: branchesCreated, total: branchResults.length },
+      colors: colorsCreated,
+      sizeGroups: sizeGroupsCreated,
       products: { created: successCount, skipped: skipCount, total: items.length },
       inventory: {
         variants: variantIds.length,
@@ -494,19 +964,13 @@ const VELOCITY_SCENARIOS = [
   },
   {
     label: "Moderate Seller (MEDIUM)",
-    // Sell 3/day × 5 days = 15 total, stock 100
-    // ADS = 15/7 = 2.14, MI = 4.59/100 = 0.046... wait
-    // Let me recalc: ADS=2.14, MI=2.14²/100 = 0.046 → SLOW
-    // Adjust: Sell 4/day × 7 days = 28, stock 80 → ADS=4, MI=16/80 = 0.20 → MEDIUM ✓
+    // Sell 4/day × 7 days = 28, stock 80 → ADS=4, MI=16/80 = 0.20 → MEDIUM ✓
     dailySales: [4, 4, 4, 4, 4, 4, 4],
     stockAfter: 80,
   },
   {
     label: "Bulk Spike (MEDIUM)",
-    // 1 big purchase of 30 on day 3, nothing else, stock 200
-    // ADS = 30/7 = 4.29, MI = 18.37/200 = 0.092 → SLOW (barely)
-    // Adjust: 50 on day 3, stock 150 → ADS=7.14, MI=51/150 = 0.34 → FAST
-    // Adjust: 25 on day 3 + 10 on day 5, stock 120 → ADS=35/7=5, MI=25/120=0.21 → MEDIUM ✓
+    // 25 on day 3 + 10 on day 5, stock 120 → ADS=35/7=5, MI=25/120=0.21 → MEDIUM ✓
     dailySales: [0, 0, 25, 0, 10, 0, 0],
     stockAfter: 120,
   },
@@ -746,111 +1210,5 @@ export const _getVariantsForVelocity = internalQuery({
       }
     }
     return picked;
-  },
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// MIGRATE: Populate colors & sizes lookup tables from existing variants
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export const migrateColorsAndSizes = action({
-  args: {},
-  handler: async (ctx): Promise<{
-    colorsCreated: number;
-    colorsSkipped: number;
-    sizesCreated: number;
-    sizesSkipped: number;
-  }> => {
-    const result = await ctx.runMutation(internal.seed._migrateColorsAndSizesBatch);
-    console.log("=== Migration Complete ===");
-    console.log(`Colors created: ${result.colorsCreated} (skipped ${result.colorsSkipped} duplicates)`);
-    console.log(`Sizes created: ${result.sizesCreated} (skipped ${result.sizesSkipped} duplicates)`);
-    return result;
-  },
-});
-
-export const _migrateColorsAndSizesBatch = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const variants = await ctx.db.query("variants").collect();
-
-    // Collect distinct colors and sizes from variants
-    const colorSet = new Set<string>();
-    const sizeSet = new Set<string>();
-    for (const v of variants) {
-      if (v.color && v.color.trim()) colorSet.add(v.color.trim());
-      if (v.size && v.size.trim()) sizeSet.add(v.size.trim());
-    }
-
-    // Get existing colors/sizes to avoid duplicates
-    const existingColors = await ctx.db.query("colors").collect();
-    const existingColorNames = new Set(existingColors.map((c) => c.name.toLowerCase()));
-
-    const existingSizes = await ctx.db.query("sizes").collect();
-    const existingSizeNames = new Set(existingSizes.map((s) => s.name.toLowerCase()));
-
-    // Insert new colors
-    let colorsCreated = 0;
-    let colorsSkipped = 0;
-    for (const colorName of colorSet) {
-      if (existingColorNames.has(colorName.toLowerCase())) {
-        colorsSkipped++;
-        continue;
-      }
-      await ctx.db.insert("colors", {
-        name: colorName,
-        isActive: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      });
-      existingColorNames.add(colorName.toLowerCase());
-      colorsCreated++;
-    }
-
-    // Insert new sizes (sortOrder based on common apparel sizing)
-    const APPAREL_ORDER: Record<string, number> = {
-      "xxs": 10, "xs": 20, "s": 30, "sm": 30, "small": 30,
-      "m": 40, "md": 40, "medium": 40,
-      "l": 50, "lg": 50, "large": 50,
-      "xl": 60, "xxl": 70, "2xl": 70, "xxxl": 80, "3xl": 80,
-      "4xl": 90, "5xl": 100,
-    };
-
-    function inferSizeType(name: string): "apparel" | "shoe_eu" | "shoe_us" | "numeric" | undefined {
-      const lower = name.toLowerCase().trim();
-      if (APPAREL_ORDER[lower] !== undefined) return "apparel";
-      // Pure number → try to classify as shoe or numeric
-      const num = parseFloat(lower);
-      if (!isNaN(num)) {
-        if (num >= 35 && num <= 48) return "shoe_eu";
-        if (num >= 4 && num <= 15 && (Number.isInteger(num) || lower.includes(".5"))) return "shoe_us";
-        return "numeric";
-      }
-      return undefined;
-    }
-
-    let nextOrder = 200; // for unknown sizes
-    let sizesCreated = 0;
-    let sizesSkipped = 0;
-    for (const sizeName of sizeSet) {
-      if (existingSizeNames.has(sizeName.toLowerCase())) {
-        sizesSkipped++;
-        continue;
-      }
-      const order = APPAREL_ORDER[sizeName.toLowerCase()] ?? nextOrder++;
-      const sizeType = inferSizeType(sizeName);
-      await ctx.db.insert("sizes", {
-        name: sizeName,
-        sizeType,
-        sortOrder: order,
-        isActive: true,
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      });
-      existingSizeNames.add(sizeName.toLowerCase());
-      sizesCreated++;
-    }
-
-    return { colorsCreated, colorsSkipped, sizesCreated, sizesSkipped };
   },
 });

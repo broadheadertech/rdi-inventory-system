@@ -33,6 +33,7 @@ export type CartItemForPromo = {
   styleId?: string;
   gender?: string;
   color?: string;
+  sizeGroup?: string;
   size?: string;
   unitPriceCentavos: number;
   quantity: number;
@@ -80,7 +81,7 @@ export function filterEligibleItems(
     filtered = filtered.filter((item) => item.color && promo.colors!.includes(item.color));
   }
   if (promo.sizes && promo.sizes.length > 0) {
-    filtered = filtered.filter((item) => item.size && promo.sizes!.includes(item.size));
+    filtered = filtered.filter((item) => item.sizeGroup && promo.sizes!.includes(item.sizeGroup));
   }
 
   // Aging tier filter (AND)

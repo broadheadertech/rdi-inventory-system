@@ -84,6 +84,7 @@ export function usePromoPreview(
         styleId: hierarchy?.styleId ?? "",
         gender: hierarchy?.gender ?? "",
         color: hierarchy?.color ?? "",
+        sizeGroup: hierarchy?.sizeGroup ?? "",
         size: hierarchy?.size ?? "",
         unitPriceCentavos: item.unitPriceCentavos,
         quantity: item.quantity,

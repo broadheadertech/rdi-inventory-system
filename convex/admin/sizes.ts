@@ -3,15 +3,6 @@ import { query, mutation } from "../_generated/server";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 
-const sizeTypeValidator = v.optional(
-  v.union(
-    v.literal("apparel"),
-    v.literal("shoe_eu"),
-    v.literal("shoe_us"),
-    v.literal("numeric")
-  )
-);
-
 // ─── Queries ────────────────────────────────────────────────────────────────
 
 export const listSizes = query({
@@ -36,7 +27,6 @@ export const listActiveSizes = query({
 export const createSize = mutation({
   args: {
     name: v.string(),
-    sizeType: sizeTypeValidator,
     sortOrder: v.number(),
   },
   handler: async (ctx, args) => {
@@ -49,13 +39,12 @@ export const createSize = mutation({
     if (duplicate) {
       throw new ConvexError({
         code: "DUPLICATE_NAME",
-        message: `A size named "${duplicate.name}" already exists`,
+        message: `A size group named "${duplicate.name}" already exists`,
       });
     }
 
     const sizeId = await ctx.db.insert("sizes", {
       name: args.name,
-      sizeType: args.sizeType,
       sortOrder: args.sortOrder,
       isActive: true,
       createdAt: Date.now(),
@@ -67,7 +56,7 @@ export const createSize = mutation({
       userId: user._id,
       entityType: "sizes",
       entityId: sizeId,
-      after: { name: args.name, sizeType: args.sizeType, sortOrder: args.sortOrder, isActive: true },
+      after: { name: args.name, sortOrder: args.sortOrder, isActive: true },
     });
 
     return sizeId;
@@ -78,7 +67,6 @@ export const updateSize = mutation({
   args: {
     sizeId: v.id("sizes"),
     name: v.optional(v.string()),
-    sizeType: sizeTypeValidator,
     sortOrder: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -86,7 +74,7 @@ export const updateSize = mutation({
 
     const existing = await ctx.db.get(args.sizeId);
     if (!existing) {
-      throw new ConvexError({ code: "NOT_FOUND", message: "Size not found" });
+      throw new ConvexError({ code: "NOT_FOUND", message: "Size group not found" });
     }
 
     if (args.name !== undefined && args.name.toLowerCase() !== existing.name.toLowerCase()) {
@@ -97,7 +85,7 @@ export const updateSize = mutation({
       if (duplicate) {
         throw new ConvexError({
           code: "DUPLICATE_NAME",
-          message: `A size named "${duplicate.name}" already exists`,
+          message: `A size group named "${duplicate.name}" already exists`,
         });
       }
     }
@@ -110,11 +98,6 @@ export const updateSize = mutation({
       before.name = existing.name;
       after.name = args.name;
       patch.name = args.name;
-    }
-    if (args.sizeType !== undefined && args.sizeType !== existing.sizeType) {
-      before.sizeType = existing.sizeType;
-      after.sizeType = args.sizeType;
-      patch.sizeType = args.sizeType;
     }
     if (args.sortOrder !== undefined && args.sortOrder !== existing.sortOrder) {
       before.sortOrder = existing.sortOrder;
@@ -147,7 +130,7 @@ export const toggleSizeStatus = mutation({
 
     const size = await ctx.db.get(args.sizeId);
     if (!size) {
-      throw new ConvexError({ code: "NOT_FOUND", message: "Size not found" });
+      throw new ConvexError({ code: "NOT_FOUND", message: "Size group not found" });
     }
 
     await ctx.db.patch(args.sizeId, {

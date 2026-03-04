@@ -1193,12 +1193,12 @@ export default function PromotionsPage() {
                     </div>
                   </div>
 
-                  {/* Sizes */}
+                  {/* Size Groups */}
                   <div className="space-y-1">
-                    <p className="text-xs font-medium text-muted-foreground">Sizes</p>
+                    <p className="text-xs font-medium text-muted-foreground">Size Groups</p>
                     <div className="border rounded-md p-3 flex flex-wrap gap-3">
                       {!sizesList || sizesList.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">No sizes — add them in Sizes page</p>
+                        <p className="text-xs text-muted-foreground">No size groups — add them in Sizes page</p>
                       ) : (
                         sizesList.filter((s) => s.isActive).map((size) => (
                           <label key={size._id} className="flex items-center gap-2 text-sm cursor-pointer">

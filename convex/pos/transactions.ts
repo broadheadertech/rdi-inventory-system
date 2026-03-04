@@ -226,6 +226,7 @@ export const createTransaction = mutation({
           styleId: String(variant.styleId),
           gender: variant.gender ?? "",
           color: variant.color,
+          sizeGroup: variant.sizeGroup ?? "",
           size: variant.size,
           unitPriceCentavos: vi.unitPriceCentavos,
           quantity: vi.quantity,

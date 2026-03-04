@@ -83,6 +83,7 @@ export default defineSchema({
     styleId: v.id("styles"),
     sku: v.string(),
     barcode: v.optional(v.string()),
+    sizeGroup: v.optional(v.string()),
     size: v.string(),
     color: v.string(),
     gender: v.optional(
@@ -504,21 +505,13 @@ export default defineSchema({
 
   sizes: defineTable({
     name: v.string(),
-    sizeType: v.optional(
-      v.union(
-        v.literal("apparel"),
-        v.literal("shoe_eu"),
-        v.literal("shoe_us"),
-        v.literal("numeric")
-      )
-    ),
     sortOrder: v.number(),
+    // TODO: remove after DB wipe — legacy field from old schema
+    sizeType: v.optional(v.string()),
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  })
-    .index("by_sortOrder", ["sortOrder"])
-    .index("by_sizeType", ["sizeType"]),
+  }).index("by_sortOrder", ["sortOrder"]),
 
   settings: defineTable({
     key: v.string(),
