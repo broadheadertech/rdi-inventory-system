@@ -465,6 +465,8 @@ export default defineSchema({
     brandIds: v.array(v.id("brands")),
     categoryIds: v.array(v.id("categories")),
     variantIds: v.array(v.id("variants")),
+    // aging tier scope (empty/undefined = all stock)
+    agingTiers: v.optional(v.array(v.union(v.literal("green"), v.literal("yellow"), v.literal("red")))),
     // date range (endDate optional = no expiration)
     startDate: v.number(),
     endDate: v.optional(v.number()),

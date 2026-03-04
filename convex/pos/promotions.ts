@@ -50,12 +50,13 @@ export const getActivePromotions = query({
       categoryIds: p.categoryIds.map(String),
       variantIds: p.variantIds.map(String),
       priority: p.priority,
+      agingTiers: p.agingTiers ?? [],
     }));
   },
 });
 
 // ─── getVariantHierarchy ────────────────────────────────────────────────────
-// Returns brandId + categoryId for each variant in the cart.
+// Returns brandId + categoryId + agingTier for each variant in the cart.
 // Used by client for promo eligibility preview.
 
 export const getVariantHierarchy = query({
@@ -68,7 +69,8 @@ export const getVariantHierarchy = query({
       throw new ConvexError({ code: "UNAUTHORIZED" });
     }
 
-    const result: Record<string, { brandId: string; categoryId: string }> = {};
+    const branchId = scope.branchId;
+    const result: Record<string, { brandId: string; categoryId: string; agingTier: "green" | "yellow" | "red" }> = {};
 
     // Cache to avoid repeated lookups
     const categoryBrandCache = new Map<string, string>();
@@ -91,9 +93,27 @@ export const getVariantHierarchy = query({
         }
       }
 
+      // Determine aging tier from oldest batch at this branch
+      let agingTier: "green" | "yellow" | "red" = "green";
+      if (branchId) {
+        const oldestBatch = await ctx.db
+          .query("inventoryBatches")
+          .withIndex("by_branch_variant_received", (q) =>
+            q.eq("branchId", branchId).eq("variantId", variantId)
+          )
+          .first(); // ascending by receivedAt = oldest first
+
+        if (oldestBatch && oldestBatch.quantity > 0) {
+          const ageDays = Math.floor((Date.now() - oldestBatch.receivedAt) / 86_400_000);
+          if (ageDays > 180) agingTier = "red";
+          else if (ageDays > 90) agingTier = "yellow";
+        }
+      }
+
       result[String(variantId)] = {
         brandId: brandId ?? "",
         categoryId,
+        agingTier,
       };
     }
 

@@ -154,6 +154,8 @@ interface PromoForm {
   branchIds: Id<"branches">[];
   allProducts: boolean;
   brandIds: Id<"brands">[];
+  allStock: boolean;
+  agingTiers: ("green" | "yellow" | "red")[];
 }
 
 function emptyForm(): PromoForm {
@@ -177,6 +179,8 @@ function emptyForm(): PromoForm {
     branchIds: [],
     allProducts: true,
     brandIds: [],
+    allStock: true,
+    agingTiers: [],
   };
 }
 
@@ -240,6 +244,7 @@ export default function PromotionsPage() {
   function scopeSummary(promo: {
     branchIds: Id<"branches">[];
     brandIds: Id<"brands">[];
+    agingTiers?: string[];
   }): string {
     const parts: string[] = [];
     if (promo.branchIds.length === 0) {
@@ -255,6 +260,10 @@ export default function PromotionsPage() {
       parts.push(
         `${promo.brandIds.length} brand${promo.brandIds.length !== 1 ? "s" : ""}`
       );
+    }
+    if (promo.agingTiers && promo.agingTiers.length > 0) {
+      const tierLabels: Record<string, string> = { green: "Green", yellow: "Yellow", red: "Red" };
+      parts.push(promo.agingTiers.map((t) => tierLabels[t] ?? t).join(", ") + " stock");
     }
     return parts.join(" / ");
   }
@@ -295,6 +304,8 @@ export default function PromotionsPage() {
       branchIds: promo.branchIds,
       allProducts: promo.brandIds.length === 0,
       brandIds: promo.brandIds,
+      allStock: !promo.agingTiers || promo.agingTiers.length === 0,
+      agingTiers: (promo.agingTiers ?? []) as ("green" | "yellow" | "red")[],
     });
     setShowCreateDialog(true);
   }
@@ -348,6 +359,7 @@ export default function PromotionsPage() {
       endDate: endTs,
       isActive: form.isActive,
       priority: parseInt(form.priority, 10) || 0,
+      agingTiers: form.allStock ? undefined : form.agingTiers,
     };
   }
 
@@ -950,6 +962,59 @@ export default function PromotionsPage() {
                       </label>
                     ))
                   )}
+                </div>
+              )}
+            </div>
+
+            {/* Scope: Inventory Aging */}
+            <div className="space-y-3">
+              <Label>Inventory Aging Scope</Label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={form.allStock}
+                  onChange={(e) => {
+                    updateField("allStock", e.target.checked);
+                    if (e.target.checked) updateField("agingTiers", []);
+                  }}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+                All Stock (no aging filter)
+              </label>
+              {!form.allStock && (
+                <div className="border rounded-md p-3 space-y-1">
+                  {(
+                    [
+                      { value: "green" as const, label: "Green (New, 0-90 days)", color: "text-green-700" },
+                      { value: "yellow" as const, label: "Yellow (Mid-cycle, 91-180 days)", color: "text-yellow-700" },
+                      { value: "red" as const, label: "Red (Old, 180+ days)", color: "text-red-700" },
+                    ] as const
+                  ).map((tier) => (
+                    <label
+                      key={tier.value}
+                      className={`flex items-center gap-2 text-sm cursor-pointer py-0.5 ${tier.color}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={form.agingTiers.includes(tier.value)}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            updateField("agingTiers", [...form.agingTiers, tier.value]);
+                          } else {
+                            updateField(
+                              "agingTiers",
+                              form.agingTiers.filter((t) => t !== tier.value)
+                            );
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      {tier.label}
+                    </label>
+                  ))}
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Only items with batches in the selected aging tiers will be eligible for this promotion.
+                  </p>
                 </div>
               )}
             </div>

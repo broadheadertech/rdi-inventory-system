@@ -49,6 +49,7 @@ const commonArgs = {
   endDate: v.optional(v.number()),
   isActive: v.boolean(),
   priority: v.number(),
+  agingTiers: v.optional(v.array(v.union(v.literal("green"), v.literal("yellow"), v.literal("red")))),
 };
 
 function validatePromoFields(args: {

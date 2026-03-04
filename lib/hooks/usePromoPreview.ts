@@ -27,6 +27,7 @@ type ActivePromo = {
   categoryIds: string[];
   variantIds: string[];
   priority: number;
+  agingTiers: string[];
 };
 
 export function usePromoPreview(
@@ -78,10 +79,14 @@ export function usePromoPreview(
         categoryId: hierarchy?.categoryId ?? "",
         unitPriceCentavos: item.unitPriceCentavos,
         quantity: item.quantity,
+        agingTier: hierarchy?.agingTier,
       };
     });
 
-    return calculatePromoDiscount(enrichedItems, promo as PromoInput);
+    return calculatePromoDiscount(enrichedItems, {
+      ...promo,
+      agingTiers: promo.agingTiers ?? [],
+    } as PromoInput);
   }, [items, selectedPromoId, discountType, activePromos, variantHierarchy]);
 
   return {

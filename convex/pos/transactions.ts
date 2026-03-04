@@ -194,12 +194,28 @@ export const createTransaction = mutation({
           categoryBrandCache.set(categoryId, brandId2);
         }
 
+        // Determine aging tier from oldest batch
+        const oldestBatch = await ctx.db
+          .query("inventoryBatches")
+          .withIndex("by_branch_variant_received", (q) =>
+            q.eq("branchId", branchId).eq("variantId", vi.variantId)
+          )
+          .first();
+
+        let agingTier: "green" | "yellow" | "red" = "green";
+        if (oldestBatch && oldestBatch.quantity > 0) {
+          const ageDays = Math.floor((Date.now() - oldestBatch.receivedAt) / 86_400_000);
+          if (ageDays > 180) agingTier = "red";
+          else if (ageDays > 90) agingTier = "yellow";
+        }
+
         enrichedItems.push({
           variantId: String(vi.variantId),
           brandId: brandId2,
           categoryId,
           unitPriceCentavos: vi.unitPriceCentavos,
           quantity: vi.quantity,
+          agingTier,
         });
       }
 
@@ -216,6 +232,7 @@ export const createTransaction = mutation({
         brandIds: promo.brandIds.map(String),
         categoryIds: promo.categoryIds.map(String),
         variantIds: promo.variantIds.map(String),
+        agingTiers: promo.agingTiers ?? [],
       });
 
       if (promoResult.applicable) {

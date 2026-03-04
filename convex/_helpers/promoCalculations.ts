@@ -17,6 +17,8 @@ export type PromoInput = {
   brandIds: string[];
   categoryIds: string[];
   variantIds: string[];
+  // Aging tier scope (empty = all stock)
+  agingTiers?: string[];
 };
 
 export type CartItemForPromo = {
@@ -25,6 +27,7 @@ export type CartItemForPromo = {
   categoryId: string;
   unitPriceCentavos: number;
   quantity: number;
+  agingTier?: "green" | "yellow" | "red";
 };
 
 export type PromoResult = {
@@ -47,12 +50,17 @@ export function filterEligibleItems(
   const hasCategoryScope = promo.categoryIds.length > 0;
   const hasBrandScope = promo.brandIds.length > 0;
 
-  // No product scope restrictions — all items eligible
+  // No product scope restrictions — all items eligible (but may still filter by aging tier)
   if (!hasVariantScope && !hasCategoryScope && !hasBrandScope) {
+    if (promo.agingTiers && promo.agingTiers.length > 0) {
+      return items.filter(
+        (item) => item.agingTier && promo.agingTiers!.includes(item.agingTier)
+      );
+    }
     return items;
   }
 
-  return items.filter((item) => {
+  let filtered = items.filter((item) => {
     // Most specific scope wins: variant > category > brand
     if (hasVariantScope && promo.variantIds.includes(item.variantId)) return true;
     if (hasCategoryScope && promo.categoryIds.includes(item.categoryId)) return true;
@@ -60,6 +68,15 @@ export function filterEligibleItems(
     // If scope exists but item doesn't match any, exclude it
     return false;
   });
+
+  // Apply aging tier filter if specified
+  if (promo.agingTiers && promo.agingTiers.length > 0) {
+    filtered = filtered.filter(
+      (item) => item.agingTier && promo.agingTiers!.includes(item.agingTier)
+    );
+  }
+
+  return filtered;
 }
 
 // ─── Main Calculator ────────────────────────────────────────────────────────
