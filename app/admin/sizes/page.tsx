@@ -18,7 +18,17 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { Pencil, Plus, ToggleLeft, ToggleRight } from "lucide-react";
+
+const SIZE_TYPE_LABELS: Record<string, string> = {
+  apparel: "Apparel",
+  shoe_eu: "Shoe (EU)",
+  shoe_us: "Shoe (US)",
+  numeric: "Numeric",
+};
 
 export default function SizesPage() {
   const sizes = useQuery(api.admin.sizes.listSizes);
@@ -29,6 +39,7 @@ export default function SizesPage() {
   const [showDialog, setShowDialog] = useState(false);
   const [editingId, setEditingId] = useState<Id<"sizes"> | null>(null);
   const [name, setName] = useState("");
+  const [sizeType, setSizeType] = useState<string>("none");
   const [sortOrder, setSortOrder] = useState("0");
   const [saving, setSaving] = useState(false);
 
@@ -37,6 +48,7 @@ export default function SizesPage() {
   function openCreate() {
     setEditingId(null);
     setName("");
+    setSizeType("none");
     setSortOrder(String((sizes?.length ?? 0) * 10));
     setShowDialog(true);
   }
@@ -46,6 +58,7 @@ export default function SizesPage() {
     if (!size) return;
     setEditingId(sizeId);
     setName(size.name);
+    setSizeType(size.sizeType ?? "none");
     setSortOrder(size.sortOrder.toString());
     setShowDialog(true);
   }
@@ -57,16 +70,19 @@ export default function SizesPage() {
     }
     setSaving(true);
     try {
+      const parsedSizeType = sizeType !== "none" ? sizeType as "apparel" | "shoe_eu" | "shoe_us" | "numeric" : undefined;
       if (editingId) {
         await updateSize({
           sizeId: editingId,
           name: name.trim(),
+          sizeType: parsedSizeType,
           sortOrder: parseInt(sortOrder, 10) || 0,
         });
         toast.success("Size updated");
       } else {
         await createSize({
           name: name.trim(),
+          sizeType: parsedSizeType,
           sortOrder: parseInt(sortOrder, 10) || 0,
         });
         toast.success("Size created");
@@ -116,6 +132,7 @@ export default function SizesPage() {
             <TableHeader>
               <TableRow>
                 <TableHead>Name</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Sort Order</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -125,6 +142,9 @@ export default function SizesPage() {
               {pagination.paginatedData.map((size) => (
                 <TableRow key={size._id}>
                   <TableCell className="font-medium">{size.name}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {size.sizeType ? SIZE_TYPE_LABELS[size.sizeType] ?? size.sizeType : "—"}
+                  </TableCell>
                   <TableCell className="text-muted-foreground tabular-nums">{size.sortOrder}</TableCell>
                   <TableCell>
                     <Badge variant={size.isActive ? "default" : "secondary"}>
@@ -175,6 +195,21 @@ export default function SizesPage() {
             <div className="space-y-2">
               <Label>Name</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. XL, 2XL, 42" />
+            </div>
+            <div className="space-y-2">
+              <Label>Size Type</Label>
+              <Select value={sizeType} onValueChange={setSizeType}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not specified</SelectItem>
+                  <SelectItem value="apparel">Apparel (S, M, L, XL…)</SelectItem>
+                  <SelectItem value="shoe_eu">Shoe — EU (36, 37, 38…)</SelectItem>
+                  <SelectItem value="shoe_us">Shoe — US (6, 7, 8…)</SelectItem>
+                  <SelectItem value="numeric">Numeric (28, 30, 32…)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Sort Order</Label>

@@ -84,6 +84,10 @@ export default function VariantsPage() {
   });
   const style = useQuery(api.catalog.styles.getStyleById, { styleId });
   const variants = useQuery(api.catalog.variants.listVariants, { styleId });
+
+  // Lookup tables for color/size pickers
+  const activeColors = useQuery(api.admin.colors.listActiveColors);
+  const activeSizes = useQuery(api.admin.sizes.listActiveSizes);
   const createVariant = useMutation(api.catalog.variants.createVariant);
   const updateVariant = useMutation(api.catalog.variants.updateVariant);
   const deactivateVariant = useMutation(
@@ -541,7 +545,22 @@ export default function VariantsPage() {
                     {variant.barcode || "—"}
                   </TableCell>
                   <TableCell>{variant.size}</TableCell>
-                  <TableCell>{variant.color}</TableCell>
+                  <TableCell>
+                    <span className="flex items-center gap-1.5">
+                      {(() => {
+                        const matchedColor = activeColors?.find(
+                          (c) => c.name.toLowerCase() === variant.color.toLowerCase()
+                        );
+                        return matchedColor?.hexCode ? (
+                          <span
+                            className="inline-block w-3 h-3 rounded-full border border-gray-300 flex-shrink-0"
+                            style={{ backgroundColor: matchedColor.hexCode }}
+                          />
+                        ) : null;
+                      })()}
+                      {variant.color}
+                    </span>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     {variant.gender
                       ? GENDER_LABELS[variant.gender] ?? variant.gender
@@ -664,16 +683,32 @@ export default function VariantsPage() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="create-var-size">
+                <Label>
                   Size <span className="text-destructive">*</span>
                 </Label>
-                <Input
-                  id="create-var-size"
-                  placeholder="e.g. 42, M, XL"
-                  value={createForm.size}
-                  onChange={(e) => updateCreateField("size", e.target.value)}
-                  className={createErrors.size ? "border-destructive" : ""}
-                />
+                <Select
+                  value={createForm.size || "__none"}
+                  onValueChange={(val) => updateCreateField("size", val === "__none" ? "" : val)}
+                >
+                  <SelectTrigger className={createErrors.size ? "border-destructive" : ""}>
+                    <SelectValue placeholder="Select size" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none" disabled>Select size</SelectItem>
+                    {activeSizes?.map((s) => (
+                      <SelectItem key={s._id} value={s.name}>
+                        <span className="flex items-center gap-2">
+                          {s.name}
+                          {s.sizeType && (
+                            <span className="text-xs text-muted-foreground">
+                              ({s.sizeType === "shoe_eu" ? "EU" : s.sizeType === "shoe_us" ? "US" : s.sizeType === "apparel" ? "Apparel" : "Numeric"})
+                            </span>
+                          )}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {createErrors.size && (
                   <p className="text-sm text-destructive">
                     {createErrors.size}
@@ -681,16 +716,31 @@ export default function VariantsPage() {
                 )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="create-var-color">
+                <Label>
                   Color <span className="text-destructive">*</span>
                 </Label>
-                <Input
-                  id="create-var-color"
-                  placeholder="e.g. Black, Red"
-                  value={createForm.color}
-                  onChange={(e) => updateCreateField("color", e.target.value)}
-                  className={createErrors.color ? "border-destructive" : ""}
-                />
+                <Select
+                  value={createForm.color || "__none"}
+                  onValueChange={(val) => updateCreateField("color", val === "__none" ? "" : val)}
+                >
+                  <SelectTrigger className={createErrors.color ? "border-destructive" : ""}>
+                    <SelectValue placeholder="Select color" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none" disabled>Select color</SelectItem>
+                    {activeColors?.map((c) => (
+                      <SelectItem key={c._id} value={c.name}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="inline-block w-3 h-3 rounded-full border border-gray-300 flex-shrink-0"
+                            style={{ backgroundColor: c.hexCode || "#ccc" }}
+                          />
+                          {c.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {createErrors.color && (
                   <p className="text-sm text-destructive">
                     {createErrors.color}
@@ -799,15 +849,32 @@ export default function VariantsPage() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="edit-var-size">
+                <Label>
                   Size <span className="text-destructive">*</span>
                 </Label>
-                <Input
-                  id="edit-var-size"
-                  value={editForm.size}
-                  onChange={(e) => updateEditField("size", e.target.value)}
-                  className={editErrors.size ? "border-destructive" : ""}
-                />
+                <Select
+                  value={editForm.size || "__none"}
+                  onValueChange={(val) => updateEditField("size", val === "__none" ? "" : val)}
+                >
+                  <SelectTrigger className={editErrors.size ? "border-destructive" : ""}>
+                    <SelectValue placeholder="Select size" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none" disabled>Select size</SelectItem>
+                    {activeSizes?.map((s) => (
+                      <SelectItem key={s._id} value={s.name}>
+                        <span className="flex items-center gap-2">
+                          {s.name}
+                          {s.sizeType && (
+                            <span className="text-xs text-muted-foreground">
+                              ({s.sizeType === "shoe_eu" ? "EU" : s.sizeType === "shoe_us" ? "US" : s.sizeType === "apparel" ? "Apparel" : "Numeric"})
+                            </span>
+                          )}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {editErrors.size && (
                   <p className="text-sm text-destructive">
                     {editErrors.size}
@@ -815,15 +882,31 @@ export default function VariantsPage() {
                 )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-var-color">
+                <Label>
                   Color <span className="text-destructive">*</span>
                 </Label>
-                <Input
-                  id="edit-var-color"
-                  value={editForm.color}
-                  onChange={(e) => updateEditField("color", e.target.value)}
-                  className={editErrors.color ? "border-destructive" : ""}
-                />
+                <Select
+                  value={editForm.color || "__none"}
+                  onValueChange={(val) => updateEditField("color", val === "__none" ? "" : val)}
+                >
+                  <SelectTrigger className={editErrors.color ? "border-destructive" : ""}>
+                    <SelectValue placeholder="Select color" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none" disabled>Select color</SelectItem>
+                    {activeColors?.map((c) => (
+                      <SelectItem key={c._id} value={c.name}>
+                        <span className="flex items-center gap-2">
+                          <span
+                            className="inline-block w-3 h-3 rounded-full border border-gray-300 flex-shrink-0"
+                            style={{ backgroundColor: c.hexCode || "#ccc" }}
+                          />
+                          {c.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {editErrors.color && (
                   <p className="text-sm text-destructive">
                     {editErrors.color}

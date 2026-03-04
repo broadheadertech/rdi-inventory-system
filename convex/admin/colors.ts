@@ -14,6 +14,17 @@ export const listColors = query({
   },
 });
 
+export const listActiveColors = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, HQ_ROLES);
+    const colors = await ctx.db.query("colors").collect();
+    return colors
+      .filter((c) => c.isActive)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  },
+});
+
 // ─── Mutations ──────────────────────────────────────────────────────────────
 
 export const createColor = mutation({

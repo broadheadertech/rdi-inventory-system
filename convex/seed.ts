@@ -748,3 +748,109 @@ export const _getVariantsForVelocity = internalQuery({
     return picked;
   },
 });
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MIGRATE: Populate colors & sizes lookup tables from existing variants
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const migrateColorsAndSizes = action({
+  args: {},
+  handler: async (ctx): Promise<{
+    colorsCreated: number;
+    colorsSkipped: number;
+    sizesCreated: number;
+    sizesSkipped: number;
+  }> => {
+    const result = await ctx.runMutation(internal.seed._migrateColorsAndSizesBatch);
+    console.log("=== Migration Complete ===");
+    console.log(`Colors created: ${result.colorsCreated} (skipped ${result.colorsSkipped} duplicates)`);
+    console.log(`Sizes created: ${result.sizesCreated} (skipped ${result.sizesSkipped} duplicates)`);
+    return result;
+  },
+});
+
+export const _migrateColorsAndSizesBatch = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const variants = await ctx.db.query("variants").collect();
+
+    // Collect distinct colors and sizes from variants
+    const colorSet = new Set<string>();
+    const sizeSet = new Set<string>();
+    for (const v of variants) {
+      if (v.color && v.color.trim()) colorSet.add(v.color.trim());
+      if (v.size && v.size.trim()) sizeSet.add(v.size.trim());
+    }
+
+    // Get existing colors/sizes to avoid duplicates
+    const existingColors = await ctx.db.query("colors").collect();
+    const existingColorNames = new Set(existingColors.map((c) => c.name.toLowerCase()));
+
+    const existingSizes = await ctx.db.query("sizes").collect();
+    const existingSizeNames = new Set(existingSizes.map((s) => s.name.toLowerCase()));
+
+    // Insert new colors
+    let colorsCreated = 0;
+    let colorsSkipped = 0;
+    for (const colorName of colorSet) {
+      if (existingColorNames.has(colorName.toLowerCase())) {
+        colorsSkipped++;
+        continue;
+      }
+      await ctx.db.insert("colors", {
+        name: colorName,
+        isActive: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      existingColorNames.add(colorName.toLowerCase());
+      colorsCreated++;
+    }
+
+    // Insert new sizes (sortOrder based on common apparel sizing)
+    const APPAREL_ORDER: Record<string, number> = {
+      "xxs": 10, "xs": 20, "s": 30, "sm": 30, "small": 30,
+      "m": 40, "md": 40, "medium": 40,
+      "l": 50, "lg": 50, "large": 50,
+      "xl": 60, "xxl": 70, "2xl": 70, "xxxl": 80, "3xl": 80,
+      "4xl": 90, "5xl": 100,
+    };
+
+    function inferSizeType(name: string): "apparel" | "shoe_eu" | "shoe_us" | "numeric" | undefined {
+      const lower = name.toLowerCase().trim();
+      if (APPAREL_ORDER[lower] !== undefined) return "apparel";
+      // Pure number → try to classify as shoe or numeric
+      const num = parseFloat(lower);
+      if (!isNaN(num)) {
+        if (num >= 35 && num <= 48) return "shoe_eu";
+        if (num >= 4 && num <= 15 && (Number.isInteger(num) || lower.includes(".5"))) return "shoe_us";
+        return "numeric";
+      }
+      return undefined;
+    }
+
+    let nextOrder = 200; // for unknown sizes
+    let sizesCreated = 0;
+    let sizesSkipped = 0;
+    for (const sizeName of sizeSet) {
+      if (existingSizeNames.has(sizeName.toLowerCase())) {
+        sizesSkipped++;
+        continue;
+      }
+      const order = APPAREL_ORDER[sizeName.toLowerCase()] ?? nextOrder++;
+      const sizeType = inferSizeType(sizeName);
+      await ctx.db.insert("sizes", {
+        name: sizeName,
+        sizeType,
+        sortOrder: order,
+        isActive: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      existingSizeNames.add(sizeName.toLowerCase());
+      sizesCreated++;
+    }
+
+    return { colorsCreated, colorsSkipped, sizesCreated, sizesSkipped };
+  },
+});

@@ -504,11 +504,21 @@ export default defineSchema({
 
   sizes: defineTable({
     name: v.string(),
+    sizeType: v.optional(
+      v.union(
+        v.literal("apparel"),
+        v.literal("shoe_eu"),
+        v.literal("shoe_us"),
+        v.literal("numeric")
+      )
+    ),
     sortOrder: v.number(),
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_sortOrder", ["sortOrder"]),
+  })
+    .index("by_sortOrder", ["sortOrder"])
+    .index("by_sizeType", ["sizeType"]),
 
   settings: defineTable({
     key: v.string(),
