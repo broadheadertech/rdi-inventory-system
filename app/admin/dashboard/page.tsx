@@ -115,6 +115,16 @@ export default function HqDashboardPage() {
   const attentionItems = useQuery(api.dashboards.hqDashboard.getAttentionItems);
   const branchScores = useQuery(api.ai.branchScoring.getLatestBranchScores);
 
+  // Product Movers snapshot — 30-day window
+  const moversOverview = useQuery(api.dashboards.productMovers.getMoversOverview, useMemo(() => {
+    const now = new Date();
+    const end = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    const start = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+    return { dateStart: start, dateEnd: end };
+  }, []));
+
   const [sortBy, setSortBy] = useState<"score" | "name">("score");
 
   const enrichedBranches = useMemo(() => {
@@ -364,6 +374,59 @@ export default function HqDashboardPage() {
               </Link>
             ))}
           </div>
+        )}
+      </section>
+
+      {/* ── Product Movers Snapshot ── */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold">Product Movers</h2>
+          <Link
+            href="/admin/reports/movers"
+            className="text-sm text-primary hover:underline"
+          >
+            View Full Report &rarr;
+          </Link>
+        </div>
+
+        {moversOverview === undefined ? (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-20 animate-pulse rounded-lg bg-muted" />
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="rounded-lg border bg-card p-4 space-y-1">
+                <p className="text-sm text-muted-foreground">Fast Movers</p>
+                <p className="text-2xl font-bold text-green-600">{moversOverview.fastMovers}</p>
+              </div>
+              <div className="rounded-lg border bg-card p-4 space-y-1">
+                <p className="text-sm text-muted-foreground">Normal</p>
+                <p className="text-2xl font-bold text-blue-600">{moversOverview.normal}</p>
+              </div>
+              <div className="rounded-lg border bg-card p-4 space-y-1">
+                <p className="text-sm text-muted-foreground">Slow Movers</p>
+                <p className="text-2xl font-bold text-amber-600">{moversOverview.slowMovers}</p>
+              </div>
+              <div className="rounded-lg border bg-card p-4 space-y-1">
+                <p className="text-sm text-muted-foreground">Dead Stock</p>
+                <p className="text-2xl font-bold text-red-600">{moversOverview.deadStock}</p>
+              </div>
+            </div>
+
+            {moversOverview.urgentRestock.length > 0 && (
+              <div className="rounded-md border-l-4 border-l-red-500 bg-red-50 p-3 text-sm">
+                <p className="font-medium text-red-800">Urgent Restock Needed</p>
+                {moversOverview.urgentRestock.map((item, i) => (
+                  <p key={i} className="text-red-700 mt-0.5">
+                    {item.styleName} ({item.size}/{item.color}) &mdash; {item.daysOfSupply}d left
+                  </p>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>

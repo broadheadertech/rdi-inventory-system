@@ -511,13 +511,29 @@ export default function HqReportsPage() {
             Revenue and transaction summaries by branch and brand
           </p>
         </div>
-        <Link
-          href="/admin/reports/bir"
-          className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          <FileText className="h-4 w-4" />
-          BIR VAT Report
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/admin/reports/movers"
+            className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+          >
+            <TrendingUp className="h-4 w-4" />
+            Product Movers
+          </Link>
+          <Link
+            href="/admin/reports/aging"
+            className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors"
+          >
+            <Package className="h-4 w-4" />
+            Inventory Aging
+          </Link>
+          <Link
+            href="/admin/reports/bir"
+            className="flex items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+          >
+            <FileText className="h-4 w-4" />
+            BIR VAT Report
+          </Link>
+        </div>
       </div>
 
       {/* Filters */}
