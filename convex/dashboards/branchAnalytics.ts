@@ -352,24 +352,26 @@ export const getProductVelocity = query({
 
     const entries: {
       variantId: string; totalSold: number; ads: number; dsi: number;
-      mi: number; classification: "FAST_MOVING" | "MEDIUM_MOVING" | "SLOW_MOVING";
+      mi: number; classification: "FAST_MOVING" | "MEDIUM_MOVING" | "SLOW_MOVING" | "NO_MOVEMENT";
       sellDays: number; currentStock: number;
     }[] = [];
 
     for (const vid of allVariantIds) {
       const totalSold = variantSales.get(vid) ?? 0;
       const currentStock = inventoryMap.get(vid) ?? 0;
+      if (totalSold === 0 && currentStock === 0) continue; // skip empty variants
       const sellDays = variantSellDays.get(vid)?.size ?? 0;
       const ads = totalSold / durationDays;
-      const dsi = ads > 0 ? currentStock / ads : (currentStock > 0 ? 9999 : 0);
-      const mi = dsi > 0 ? ads / dsi : (ads > 0 ? 999 : 0);
-      const classification = mi >= 0.30 ? "FAST_MOVING" as const : mi >= 0.10 ? "MEDIUM_MOVING" as const : "SLOW_MOVING" as const;
+      const dsi = ads > 0 ? currentStock / ads : 0;
+      const mi = ads > 0 && currentStock > 0 ? (ads * ads) / currentStock : (ads > 0 ? 999 : 0);
+      const classification = totalSold === 0 ? "NO_MOVEMENT" as const : mi >= 0.30 ? "FAST_MOVING" as const : mi >= 0.10 ? "MEDIUM_MOVING" as const : "SLOW_MOVING" as const;
       entries.push({ variantId: vid, totalSold, ads: Math.round(ads), dsi: Math.round(dsi), mi: Math.round(mi * 100) / 100, classification, sellDays, currentStock });
     }
 
     const fastMoving = entries.filter((e) => e.classification === "FAST_MOVING").sort((a, b) => b.mi - a.mi).slice(0, 10);
     const mediumMoving = entries.filter((e) => e.classification === "MEDIUM_MOVING").sort((a, b) => b.mi - a.mi).slice(0, 10);
     const slowMoving = entries.filter((e) => e.classification === "SLOW_MOVING").sort((a, b) => a.mi - b.mi).slice(0, 10);
+    const noMovement = entries.filter((e) => e.classification === "NO_MOVEMENT").sort((a, b) => b.currentStock - a.currentStock).slice(0, 10);
 
     const variantCache = new Map<string, { sku: string; styleName: string; size: string; color: string }>();
     async function enrich(items: typeof fastMoving) {
@@ -396,6 +398,7 @@ export const getProductVelocity = query({
       fastMoving: await enrich(fastMoving),
       mediumMoving: await enrich(mediumMoving),
       slowMoving: await enrich(slowMoving),
+      noMovement: await enrich(noMovement),
     };
   },
 });

@@ -173,6 +173,7 @@ const MI_COLORS = {
   FAST_MOVING: { badge: "bg-green-100 text-green-800 border-green-200", text: "text-green-600", label: "Fast" },
   MEDIUM_MOVING: { badge: "bg-amber-100 text-amber-800 border-amber-200", text: "text-amber-600", label: "Medium" },
   SLOW_MOVING: { badge: "bg-red-100 text-red-800 border-red-200", text: "text-red-600", label: "Slow" },
+  NO_MOVEMENT: { badge: "bg-gray-100 text-gray-800 border-gray-200", text: "text-gray-500", label: "Dead Stock" },
 } as const;
 
 // ─── Tab Types ────────────────────────────────────────────────────────────────
@@ -547,8 +548,8 @@ export default function HQAnalyticsPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {(["FAST_MOVING", "MEDIUM_MOVING", "SLOW_MOVING"] as const).map((tier) => {
-                  const items = (tier === "FAST_MOVING" ? velocity.fastMoving : tier === "MEDIUM_MOVING" ? velocity.mediumMoving : velocity.slowMoving) ?? [];
+                {(["FAST_MOVING", "MEDIUM_MOVING", "SLOW_MOVING", "NO_MOVEMENT"] as const).map((tier) => {
+                  const items = (tier === "FAST_MOVING" ? velocity.fastMoving : tier === "MEDIUM_MOVING" ? velocity.mediumMoving : tier === "SLOW_MOVING" ? velocity.slowMoving : velocity.noMovement) ?? [];
                   const colors = MI_COLORS[tier];
                   return (
                     <div key={tier} className="space-y-2">
@@ -561,6 +562,7 @@ export default function HQAnalyticsPage() {
                           {tier === "FAST_MOVING" && " — MI ≥ 0.30"}
                           {tier === "MEDIUM_MOVING" && " — MI 0.10–0.29"}
                           {tier === "SLOW_MOVING" && " — MI < 0.10"}
+                          {tier === "NO_MOVEMENT" && " — No sales in period"}
                         </span>
                       </div>
                       {items.length === 0 ? (
