@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const userPrompt = `Here is the analytics data snapshot for the selected period:\n\n${JSON.stringify(snapshot, null, 2)}\n\nGenerate business insights based on this data.`;
 
