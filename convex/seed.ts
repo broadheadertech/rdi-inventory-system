@@ -677,10 +677,9 @@ export const seedDatabase = action({
     products: { created: number; skipped: number; total: number };
     inventory: { variants: number; branches: number; estimatedRows: number };
   }> => {
-    // 1. Verify admin
-    const user = await ctx.runQuery(
-      internal.catalog.bulkImport._verifyAdminRole
-    );
+    // 1. Find admin user (no auth needed — this runs from CLI/dashboard)
+    const user = await ctx.runQuery(internal.seed._getAdminUser);
+    if (!user) throw new Error("No admin user found in DB. Create one first via Clerk.");
 
     console.log("=== RedBox Apparel Seed: Starting ===");
 
@@ -1210,5 +1209,653 @@ export const _getVariantsForVelocity = internalQuery({
       }
     }
     return picked;
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Transactions & Promotions Seeder
+// Seeds 6 promotions (all types) + ~150 transactions across 30 days
+// demonstrating regular sales, promo discounts, senior/pwd, payment methods.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Tax Helpers ─────────────────────────────────────────────────────────────
+
+function removeVat(priceCentavos: number): number {
+  return Math.round(priceCentavos / 1.12);
+}
+
+function vatAmount(priceCentavos: number): number {
+  return priceCentavos - removeVat(priceCentavos);
+}
+
+// Deterministic pseudo-random (no Math.random in Convex actions is fine,
+// but we use a simple seeded LCG so results are reproducible)
+function seededRng(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 1664525 + 1013904223) & 0x7fffffff;
+    return s / 0x7fffffff;
+  };
+}
+
+// ─── Helper Query: Variants with Hierarchy ──────────────────────────────────
+
+export const _getVariantsWithHierarchy = internalQuery({
+  args: { limit: v.number() },
+  handler: async (ctx, args) => {
+    const variants = await ctx.db.query("variants").take(args.limit);
+    const styleCache = new Map<string, { categoryId: string; brandId: string }>();
+    const results: Array<{
+      _id: string;
+      sku: string;
+      priceCentavos: number;
+      color: string;
+      sizeGroup: string;
+      gender: string;
+      brandId: string;
+      categoryId: string;
+      styleId: string;
+    }> = [];
+
+    for (const v of variants) {
+      const sKey = String(v.styleId);
+      let hierarchy = styleCache.get(sKey);
+      if (!hierarchy) {
+        const style = await ctx.db.get(v.styleId);
+        if (!style) continue;
+        const category = await ctx.db.get(style.categoryId);
+        if (!category) continue;
+        hierarchy = {
+          categoryId: String(style.categoryId),
+          brandId: String(category.brandId),
+        };
+        styleCache.set(sKey, hierarchy);
+      }
+      results.push({
+        _id: String(v._id),
+        sku: v.sku,
+        priceCentavos: v.priceCentavos,
+        color: v.color,
+        sizeGroup: v.sizeGroup ?? "",
+        gender: v.gender ?? "unisex",
+        brandId: hierarchy.brandId,
+        categoryId: hierarchy.categoryId,
+        styleId: sKey,
+      });
+    }
+    return results;
+  },
+});
+
+// ─── Helper Query: Get Brand/Category IDs by Name ──────────────────────────
+
+export const _getCatalogIds = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const brands = await ctx.db.query("brands").collect();
+    const categories = await ctx.db.query("categories").collect();
+    return {
+      brands: brands.map((b) => ({ _id: String(b._id), name: b.name })),
+      categories: categories.map((c) => ({
+        _id: String(c._id),
+        name: c.name,
+        brandId: String(c.brandId),
+      })),
+    };
+  },
+});
+
+// ─── Seed Promotions ────────────────────────────────────────────────────────
+
+export const _seedPromotions = internalMutation({
+  args: {
+    userId: v.id("users"),
+    promos: v.array(v.object({
+      name: v.string(),
+      description: v.string(),
+      promoType: v.union(
+        v.literal("percentage"),
+        v.literal("fixedAmount"),
+        v.literal("buyXGetY"),
+        v.literal("tiered")
+      ),
+      percentageValue: v.optional(v.number()),
+      maxDiscountCentavos: v.optional(v.number()),
+      fixedAmountCentavos: v.optional(v.number()),
+      buyQuantity: v.optional(v.number()),
+      getQuantity: v.optional(v.number()),
+      minSpendCentavos: v.optional(v.number()),
+      tieredDiscountCentavos: v.optional(v.number()),
+      brandIds: v.array(v.id("brands")),
+      categoryIds: v.array(v.id("categories")),
+      colors: v.optional(v.array(v.string())),
+      genders: v.optional(v.array(v.union(
+        v.literal("mens"), v.literal("womens"), v.literal("unisex"), v.literal("kids")
+      ))),
+      priority: v.number(),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+    const results: Array<{ promoId: string; name: string; promoType: string }> = [];
+
+    for (const p of args.promos) {
+      const promoId = await ctx.db.insert("promotions", {
+        name: p.name,
+        description: p.description,
+        promoType: p.promoType,
+        percentageValue: p.percentageValue,
+        maxDiscountCentavos: p.maxDiscountCentavos,
+        fixedAmountCentavos: p.fixedAmountCentavos,
+        buyQuantity: p.buyQuantity,
+        getQuantity: p.getQuantity,
+        minSpendCentavos: p.minSpendCentavos,
+        tieredDiscountCentavos: p.tieredDiscountCentavos,
+        branchIds: [],
+        brandIds: p.brandIds,
+        categoryIds: p.categoryIds,
+        variantIds: [],
+        colors: p.colors,
+        genders: p.genders,
+        startDate: thirtyDaysAgo,
+        isActive: true,
+        priority: p.priority,
+        createdById: args.userId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      results.push({ promoId: String(promoId), name: p.name, promoType: p.promoType });
+    }
+    return results;
+  },
+});
+
+// ─── Seed Transaction Batch ─────────────────────────────────────────────────
+
+export const _seedTransactionsBatch = internalMutation({
+  args: {
+    transactions: v.array(v.object({
+      branchId: v.id("branches"),
+      cashierId: v.id("users"),
+      receiptNumber: v.string(),
+      subtotalCentavos: v.number(),
+      vatAmountCentavos: v.number(),
+      discountAmountCentavos: v.number(),
+      totalCentavos: v.number(),
+      paymentMethod: v.union(v.literal("cash"), v.literal("gcash"), v.literal("maya")),
+      discountType: v.union(v.literal("senior"), v.literal("pwd"), v.literal("none")),
+      amountTenderedCentavos: v.optional(v.number()),
+      changeCentavos: v.optional(v.number()),
+      promotionId: v.optional(v.id("promotions")),
+      promoDiscountAmountCentavos: v.optional(v.number()),
+      createdAt: v.number(),
+      items: v.array(v.object({
+        variantId: v.id("variants"),
+        quantity: v.number(),
+        unitPriceCentavos: v.number(),
+        lineTotalCentavos: v.number(),
+      })),
+    })),
+  },
+  handler: async (ctx, args) => {
+    let txnCount = 0;
+    let itemCount = 0;
+    for (const txn of args.transactions) {
+      const txnId = await ctx.db.insert("transactions", {
+        branchId: txn.branchId,
+        cashierId: txn.cashierId,
+        receiptNumber: txn.receiptNumber,
+        subtotalCentavos: txn.subtotalCentavos,
+        vatAmountCentavos: txn.vatAmountCentavos,
+        discountAmountCentavos: txn.discountAmountCentavos,
+        totalCentavos: txn.totalCentavos,
+        paymentMethod: txn.paymentMethod,
+        discountType: txn.discountType,
+        amountTenderedCentavos: txn.amountTenderedCentavos,
+        changeCentavos: txn.changeCentavos,
+        promotionId: txn.promotionId,
+        promoDiscountAmountCentavos: txn.promoDiscountAmountCentavos,
+        isOffline: false,
+        createdAt: txn.createdAt,
+      });
+      for (const item of txn.items) {
+        await ctx.db.insert("transactionItems", {
+          transactionId: txnId,
+          variantId: item.variantId,
+          quantity: item.quantity,
+          unitPriceCentavos: item.unitPriceCentavos,
+          lineTotalCentavos: item.lineTotalCentavos,
+        });
+        itemCount++;
+      }
+      txnCount++;
+    }
+    return { txnCount, itemCount };
+  },
+});
+
+// ─── Seed Inventory Batches (for aging tiers) ───────────────────────────────
+
+export const _seedInventoryBatches = internalMutation({
+  args: {
+    batches: v.array(v.object({
+      branchId: v.id("branches"),
+      variantId: v.id("variants"),
+      quantity: v.number(),
+      costPriceCentavos: v.number(),
+      receivedAt: v.number(),
+    })),
+  },
+  handler: async (ctx, args) => {
+    let count = 0;
+    for (const b of args.batches) {
+      await ctx.db.insert("inventoryBatches", {
+        branchId: b.branchId,
+        variantId: b.variantId,
+        quantity: b.quantity,
+        costPriceCentavos: b.costPriceCentavos,
+        receivedAt: b.receivedAt,
+        source: "legacy",
+        createdAt: Date.now(),
+      });
+      count++;
+    }
+    return count;
+  },
+});
+
+// ─── Orchestrator Action ────────────────────────────────────────────────────
+
+export const seedTransactionsAndPromos = action({
+  args: {},
+  handler: async (ctx): Promise<{
+    promotions: number;
+    transactions: number;
+    transactionItems: number;
+    inventoryBatches: number;
+  }> => {
+    const user = await ctx.runQuery(internal.seed._getAdminUser);
+    if (!user) throw new Error("No admin user found. Run seedDatabase first.");
+
+    console.log("=== Transactions & Promos Seed: Starting ===");
+
+    // 1. Get branches
+    const branches = await ctx.runQuery(internal.seed._getRetailBranches);
+    if (branches.length === 0) throw new Error("No retail branches. Run seedDatabase first.");
+
+    // 2. Get catalog IDs
+    const catalog = await ctx.runQuery(internal.seed._getCatalogIds);
+    const findBrand = (name: string) =>
+      catalog.brands.find((b) => b.name === name)?._id;
+    const findCatsByName = (names: string[]) =>
+      catalog.categories.filter((c) => names.includes(c.name)).map((c) => c._id);
+
+    // 3. Get variants with hierarchy
+    const allVariants = await ctx.runQuery(internal.seed._getVariantsWithHierarchy, { limit: 200 });
+    if (allVariants.length < 20) throw new Error("Need at least 20 variants. Run seedDatabase first.");
+
+    // 4. Build and seed promotions
+    console.log("Seeding promotions...");
+
+    const urbanCoreId = findBrand("URBAN CORE");
+    const primeThreadsId = findBrand("PRIME THREADS");
+    const ironsideId = findBrand("IRONSIDE");
+
+    const tShirtCatIds = findCatsByName(["T-Shirts"]);
+    const poloCatIds = findCatsByName(["Polo Shirts"]);
+    const socksCatIds = findCatsByName(["Socks"]);
+    const footwearCatIds = findCatsByName(["Sneakers", "Slides", "Boots"]);
+
+    type PromoArg = {
+      name: string;
+      description: string;
+      promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered";
+      percentageValue?: number;
+      maxDiscountCentavos?: number;
+      fixedAmountCentavos?: number;
+      buyQuantity?: number;
+      getQuantity?: number;
+      minSpendCentavos?: number;
+      tieredDiscountCentavos?: number;
+      brandIds: Id<"brands">[];
+      categoryIds: Id<"categories">[];
+      colors?: string[];
+      genders?: ("mens" | "womens" | "unisex" | "kids")[];
+      priority: number;
+    };
+
+    const promoArgs: PromoArg[] = [
+      {
+        name: "Summer Tee Sale",
+        description: "15% off all Urban Core T-Shirts (max P200 discount)",
+        promoType: "percentage",
+        percentageValue: 15,
+        maxDiscountCentavos: 20000,
+        brandIds: urbanCoreId ? [urbanCoreId as Id<"brands">] : [],
+        categoryIds: tShirtCatIds as Id<"categories">[],
+        priority: 1,
+      },
+      {
+        name: "Flat P100 Off Polos",
+        description: "P100 off any Prime Threads Polo Shirt",
+        promoType: "fixedAmount",
+        fixedAmountCentavos: 10000,
+        brandIds: primeThreadsId ? [primeThreadsId as Id<"brands">] : [],
+        categoryIds: poloCatIds as Id<"categories">[],
+        priority: 2,
+      },
+      {
+        name: "Buy 2 Get 1 Free Socks",
+        description: "Buy 2 pairs of Ironside socks, get the cheapest one free",
+        promoType: "buyXGetY",
+        buyQuantity: 2,
+        getQuantity: 1,
+        brandIds: ironsideId ? [ironsideId as Id<"brands">] : [],
+        categoryIds: socksCatIds as Id<"categories">[],
+        priority: 3,
+      },
+      {
+        name: "Spend P3000 Save P500",
+        description: "Spend at least P3,000 and save P500 instantly",
+        promoType: "tiered",
+        minSpendCentavos: 300000,
+        tieredDiscountCentavos: 50000,
+        brandIds: [],
+        categoryIds: [],
+        priority: 4,
+      },
+      {
+        name: "Red Items 10% Off",
+        description: "10% off all red-colored items",
+        promoType: "percentage",
+        percentageValue: 10,
+        brandIds: [],
+        categoryIds: [],
+        colors: ["Red"],
+        priority: 5,
+      },
+      {
+        name: "Footwear Flash Sale",
+        description: "20% off all mens footwear",
+        promoType: "percentage",
+        percentageValue: 20,
+        brandIds: [],
+        categoryIds: footwearCatIds as Id<"categories">[],
+        genders: ["mens"] as ("mens" | "womens" | "unisex" | "kids")[],
+        priority: 6,
+      },
+    ];
+
+    const promoResults = await ctx.runMutation(internal.seed._seedPromotions, {
+      userId: user._id,
+      promos: promoArgs,
+    });
+    console.log(`Promotions: ${promoResults.length} created`);
+
+    // 5. Build transactions
+    console.log("Generating transactions...");
+    const rng = seededRng(42);
+    const now = Date.now();
+
+    type TxnItem = {
+      variantId: Id<"variants">;
+      quantity: number;
+      unitPriceCentavos: number;
+      lineTotalCentavos: number;
+    };
+    type TxnRecord = {
+      branchId: Id<"branches">;
+      cashierId: Id<"users">;
+      receiptNumber: string;
+      subtotalCentavos: number;
+      vatAmountCentavos: number;
+      discountAmountCentavos: number;
+      totalCentavos: number;
+      paymentMethod: "cash" | "gcash" | "maya";
+      discountType: "senior" | "pwd" | "none";
+      amountTenderedCentavos?: number;
+      changeCentavos?: number;
+      promotionId?: Id<"promotions">;
+      promoDiscountAmountCentavos?: number;
+      createdAt: number;
+      items: TxnItem[];
+    };
+
+    const allTxns: TxnRecord[] = [];
+    const branchWeights = [0.5, 0.3, 0.2]; // Manila, Cebu, Davao
+    let globalCounter = 0;
+
+    // Pick a random variant from the pool
+    const pickVariant = () => allVariants[Math.floor(rng() * allVariants.length)];
+
+    // Pick payment method by distribution
+    const pickPayment = (): "cash" | "gcash" | "maya" => {
+      const r = rng();
+      if (r < 0.6) return "cash";
+      if (r < 0.85) return "gcash";
+      return "maya";
+    };
+
+    // Round up to nearest P100 for cash tender
+    const roundUpTender = (amountCentavos: number): number => {
+      return Math.ceil(amountCentavos / 10000) * 10000;
+    };
+
+    // Pick branch by weight
+    const pickBranch = () => {
+      const r = rng();
+      let cumulative = 0;
+      for (let i = 0; i < branches.length; i++) {
+        cumulative += branchWeights[i] ?? 0.2;
+        if (r < cumulative) return branches[i];
+      }
+      return branches[0];
+    };
+
+    // Generate ~150 transactions over 30 days
+    for (let dayOffset = 29; dayOffset >= 0; dayOffset--) {
+      const dayBase = now - dayOffset * DAY_MS;
+      const txnsPerDay = 4 + Math.floor(rng() * 3); // 4-6 per day
+
+      for (let t = 0; t < txnsPerDay; t++) {
+        const branch = pickBranch();
+        const hourOffset = (10 + Math.floor(rng() * 10)) * 60 * 60 * 1000; // 10am-8pm
+        const txnTime = dayBase + hourOffset;
+        const payment = pickPayment();
+        globalCounter++;
+
+        // Decide transaction type
+        const typeRoll = rng();
+        const isSeniorPwd = typeRoll > 0.85;
+        const isPromo = !isSeniorPwd && typeRoll > 0.70;
+
+        // Number of items
+        const itemCount = isSeniorPwd
+          ? 1 + Math.floor(rng() * 2)        // 1-2
+          : isPromo
+            ? 1 + Math.floor(rng() * 3)      // 1-3
+            : 1 + Math.floor(rng() * 4);     // 1-4
+
+        const items: TxnItem[] = [];
+        for (let i = 0; i < itemCount; i++) {
+          const variant = pickVariant();
+          const qty = 1 + Math.floor(rng() * 3); // 1-3
+          items.push({
+            variantId: variant._id as Id<"variants">,
+            quantity: qty,
+            unitPriceCentavos: variant.priceCentavos,
+            lineTotalCentavos: variant.priceCentavos * qty,
+          });
+        }
+
+        const subtotal = items.reduce((sum, it) => sum + it.lineTotalCentavos, 0);
+
+        if (isSeniorPwd) {
+          // Senior/PWD: remove VAT, then 20% discount
+          const discType = rng() < 0.5 ? "senior" : "pwd";
+          let vatExemptBase = 0;
+          for (const it of items) {
+            vatExemptBase += removeVat(it.unitPriceCentavos) * it.quantity;
+          }
+          const discountAmount = Math.round(vatExemptBase * 0.20);
+          const total = vatExemptBase - discountAmount;
+
+          const txn: TxnRecord = {
+            branchId: branch._id,
+            cashierId: user._id,
+            receiptNumber: `SEED-TXN-${dayOffset}-${globalCounter}`,
+            subtotalCentavos: subtotal,
+            vatAmountCentavos: 0,
+            discountAmountCentavos: discountAmount,
+            totalCentavos: total,
+            paymentMethod: payment,
+            discountType: discType as "senior" | "pwd",
+            createdAt: txnTime,
+            items,
+          };
+          if (payment === "cash") {
+            txn.amountTenderedCentavos = roundUpTender(total);
+            txn.changeCentavos = txn.amountTenderedCentavos - total;
+          }
+          allTxns.push(txn);
+        } else if (isPromo) {
+          // Promo transaction — pick a random promo and apply simple discount
+          const promoIdx = Math.floor(rng() * promoResults.length);
+          const promo = promoResults[promoIdx];
+          const promoArg = promoArgs[promoIdx];
+
+          let promoDiscount = 0;
+          if (promoArg.promoType === "percentage") {
+            promoDiscount = Math.round(subtotal * (promoArg.percentageValue ?? 0) / 100);
+            if (promoArg.maxDiscountCentavos && promoDiscount > promoArg.maxDiscountCentavos) {
+              promoDiscount = promoArg.maxDiscountCentavos;
+            }
+          } else if (promoArg.promoType === "fixedAmount") {
+            promoDiscount = Math.min(promoArg.fixedAmountCentavos ?? 0, subtotal);
+          } else if (promoArg.promoType === "buyXGetY") {
+            // Simplified: give 1 free item (cheapest)
+            const cheapest = Math.min(...items.map((it) => it.unitPriceCentavos));
+            promoDiscount = cheapest;
+          } else if (promoArg.promoType === "tiered") {
+            if (subtotal >= (promoArg.minSpendCentavos ?? 0)) {
+              promoDiscount = Math.min(promoArg.tieredDiscountCentavos ?? 0, subtotal);
+            }
+          }
+
+          const vat = items.reduce((sum, it) => sum + vatAmount(it.unitPriceCentavos) * it.quantity, 0);
+          const total = subtotal - promoDiscount;
+
+          const txn: TxnRecord = {
+            branchId: branch._id,
+            cashierId: user._id,
+            receiptNumber: `SEED-TXN-${dayOffset}-${globalCounter}`,
+            subtotalCentavos: subtotal,
+            vatAmountCentavos: vat,
+            discountAmountCentavos: 0,
+            totalCentavos: total,
+            paymentMethod: payment,
+            discountType: "none",
+            promotionId: promo.promoId as Id<"promotions">,
+            promoDiscountAmountCentavos: promoDiscount > 0 ? promoDiscount : undefined,
+            createdAt: txnTime,
+            items,
+          };
+          if (payment === "cash") {
+            txn.amountTenderedCentavos = roundUpTender(total);
+            txn.changeCentavos = txn.amountTenderedCentavos - total;
+          }
+          allTxns.push(txn);
+        } else {
+          // Regular sale — no promo, no senior/pwd
+          const vat = items.reduce((sum, it) => sum + vatAmount(it.unitPriceCentavos) * it.quantity, 0);
+          const txn: TxnRecord = {
+            branchId: branch._id,
+            cashierId: user._id,
+            receiptNumber: `SEED-TXN-${dayOffset}-${globalCounter}`,
+            subtotalCentavos: subtotal,
+            vatAmountCentavos: vat,
+            discountAmountCentavos: 0,
+            totalCentavos: subtotal,
+            paymentMethod: payment,
+            discountType: "none",
+            createdAt: txnTime,
+            items,
+          };
+          if (payment === "cash") {
+            txn.amountTenderedCentavos = roundUpTender(subtotal);
+            txn.changeCentavos = txn.amountTenderedCentavos - subtotal;
+          }
+          allTxns.push(txn);
+        }
+      }
+    }
+
+    console.log(`Built ${allTxns.length} transactions`);
+
+    // 6. Insert transactions in batches
+    let totalTxns = 0;
+    let totalItems = 0;
+    const TXN_BATCH = 20;
+    for (let i = 0; i < allTxns.length; i += TXN_BATCH) {
+      const batch = allTxns.slice(i, i + TXN_BATCH);
+      const result = await ctx.runMutation(internal.seed._seedTransactionsBatch, {
+        transactions: batch,
+      });
+      totalTxns += result.txnCount;
+      totalItems += result.itemCount;
+    }
+    console.log(`Inserted ${totalTxns} transactions, ${totalItems} items`);
+
+    // 7. Seed inventory batches for aging tiers
+    console.log("Seeding inventory batches for aging tiers...");
+    const batchVariants = allVariants.slice(0, 30); // first 30 variants
+    const inventoryBatches: Array<{
+      branchId: Id<"branches">;
+      variantId: Id<"variants">;
+      quantity: number;
+      costPriceCentavos: number;
+      receivedAt: number;
+    }> = [];
+
+    for (let i = 0; i < batchVariants.length; i++) {
+      const v = batchVariants[i];
+      const branch = branches[i % branches.length];
+      let receivedAt: number;
+
+      if (i < 5) {
+        // Red tier: 200+ days old
+        receivedAt = now - (200 + Math.floor(rng() * 60)) * DAY_MS;
+      } else if (i < 12) {
+        // Yellow tier: 91-180 days old
+        receivedAt = now - (100 + Math.floor(rng() * 70)) * DAY_MS;
+      } else {
+        // Green tier: < 90 days
+        receivedAt = now - (5 + Math.floor(rng() * 60)) * DAY_MS;
+      }
+
+      inventoryBatches.push({
+        branchId: branch._id,
+        variantId: v._id as Id<"variants">,
+        quantity: 10 + Math.floor(rng() * 40),
+        costPriceCentavos: Math.round(v.priceCentavos * 0.5),
+        receivedAt,
+      });
+    }
+
+    const batchesCreated = await ctx.runMutation(internal.seed._seedInventoryBatches, {
+      batches: inventoryBatches,
+    });
+    console.log(`Inventory batches: ${batchesCreated} created`);
+
+    const summary = {
+      promotions: promoResults.length,
+      transactions: totalTxns,
+      transactionItems: totalItems,
+      inventoryBatches: batchesCreated,
+    };
+
+    console.log("=== Transactions & Promos Seed: Complete ===");
+    return summary;
   },
 });
