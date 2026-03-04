@@ -455,7 +455,7 @@ export default function BranchesPage() {
           }
         }}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Create New Branch</DialogTitle>
           </DialogHeader>
@@ -626,7 +626,7 @@ export default function BranchesPage() {
         open={editingBranch !== null}
         onOpenChange={(open) => !open && setEditingBranch(null)}
       >
-        <DialogContent>
+        <DialogContent className="max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit Branch</DialogTitle>
           </DialogHeader>
