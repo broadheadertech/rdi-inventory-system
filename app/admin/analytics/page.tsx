@@ -548,7 +548,7 @@ export default function HQAnalyticsPage() {
             ) : (
               <div className="space-y-4">
                 {(["FAST_MOVING", "MEDIUM_MOVING", "SLOW_MOVING"] as const).map((tier) => {
-                  const items = tier === "FAST_MOVING" ? velocity.fastMoving : tier === "MEDIUM_MOVING" ? velocity.mediumMoving : velocity.slowMoving;
+                  const items = (tier === "FAST_MOVING" ? velocity.fastMoving : tier === "MEDIUM_MOVING" ? velocity.mediumMoving : velocity.slowMoving) ?? [];
                   const colors = MI_COLORS[tier];
                   return (
                     <div key={tier} className="space-y-2">
