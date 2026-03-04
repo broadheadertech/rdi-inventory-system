@@ -350,7 +350,7 @@ export const getProductVelocity = query({
       entries.push({
         variantId: vid,
         totalSold,
-        avgDaily: Math.round((totalSold / durationDays) * 10) / 10,
+        avgDaily: Math.round(totalSold / durationDays),
         sellDays: variantSellDays.get(vid)?.size ?? 0,
         currentStock: inventoryMap.get(vid) ?? 0,
       });
