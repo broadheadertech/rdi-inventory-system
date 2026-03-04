@@ -21,6 +21,8 @@ import {
   FileText,
   Settings,
   Tag,
+  Palette,
+  Ruler,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -41,6 +43,8 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/branches", label: "Branches", icon: Building2, roles: ["admin"] },
   { href: "/admin/catalog", label: "Catalog", icon: Package, roles: ["admin"] },
   { href: "/admin/inventory", label: "Inventory", icon: PackageSearch, roles: ["admin"] },
+  { href: "/admin/colors", label: "Colors", icon: Palette, roles: ["admin"] },
+  { href: "/admin/sizes", label: "Sizes", icon: Ruler, roles: ["admin"] },
   { href: "/admin/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   { href: "/admin/seed", label: "Seed Data", icon: Database, roles: ["admin"] },
 ];

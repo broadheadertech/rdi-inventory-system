@@ -134,6 +134,8 @@ function formatPromoValue(promo: {
 
 // ─── Form State ─────────────────────────────────────────────────────────────
 
+type GenderValue = "mens" | "womens" | "unisex" | "kids";
+
 interface PromoForm {
   name: string;
   description: string;
@@ -155,6 +157,11 @@ interface PromoForm {
   branchClassifications: ("premium" | "aclass" | "bnc" | "outlet")[];
   allProducts: boolean;
   brandIds: Id<"brands">[];
+  categoryIds: Id<"categories">[];
+  styleIds: Id<"styles">[];
+  genders: GenderValue[];
+  selectedColors: string[];
+  selectedSizes: string[];
   allStock: boolean;
   agingTiers: ("green" | "yellow" | "red")[];
 }
@@ -181,6 +188,11 @@ function emptyForm(): PromoForm {
     branchClassifications: [],
     allProducts: true,
     brandIds: [],
+    categoryIds: [],
+    styleIds: [],
+    genders: [],
+    selectedColors: [],
+    selectedSizes: [],
     allStock: true,
     agingTiers: [],
   };
@@ -193,6 +205,10 @@ export default function PromotionsPage() {
   const promotions = useQuery(api.admin.promotions.listPromotions);
   const branches = useQuery(api.auth.branches.listBranches);
   const brands = useQuery(api.pos.products.listPOSBrands);
+  const categories = useQuery(api.admin.promotions.listCategoriesForPromo);
+  const styles = useQuery(api.admin.promotions.listStylesForPromo);
+  const colorsList = useQuery(api.admin.colors.listColors);
+  const sizesList = useQuery(api.admin.sizes.listSizes);
 
   // Mutations
   const createPromotion = useMutation(api.admin.promotions.createPromotion);
@@ -247,6 +263,11 @@ export default function PromotionsPage() {
     branchIds: Id<"branches">[];
     branchClassifications?: string[];
     brandIds: Id<"brands">[];
+    categoryIds?: Id<"categories">[];
+    styleIds?: Id<"styles">[];
+    genders?: string[];
+    colors?: string[];
+    sizes?: string[];
     agingTiers?: string[];
   }): string {
     const parts: string[] = [];
@@ -265,13 +286,14 @@ export default function PromotionsPage() {
       }
       parts.push(branchParts.join(" + "));
     }
-    if (promo.brandIds.length === 0) {
-      parts.push("All products");
-    } else {
-      parts.push(
-        `${promo.brandIds.length} brand${promo.brandIds.length !== 1 ? "s" : ""}`
-      );
-    }
+    const productParts: string[] = [];
+    if (promo.brandIds.length > 0) productParts.push(`${promo.brandIds.length} brand(s)`);
+    if (promo.categoryIds && promo.categoryIds.length > 0) productParts.push(`${promo.categoryIds.length} cat(s)`);
+    if (promo.styleIds && promo.styleIds.length > 0) productParts.push(`${promo.styleIds.length} style(s)`);
+    if (promo.genders && promo.genders.length > 0) productParts.push(promo.genders.join(", "));
+    if (promo.colors && promo.colors.length > 0) productParts.push(`${promo.colors.length} color(s)`);
+    if (promo.sizes && promo.sizes.length > 0) productParts.push(`${promo.sizes.length} size(s)`);
+    parts.push(productParts.length > 0 ? productParts.join(", ") : "All products");
     if (promo.agingTiers && promo.agingTiers.length > 0) {
       const tierLabels: Record<string, string> = { green: "Green", yellow: "Yellow", red: "Red" };
       parts.push(promo.agingTiers.map((t) => tierLabels[t] ?? t).join(", ") + " stock");
@@ -319,8 +341,19 @@ export default function PromotionsPage() {
             : "all",
       branchIds: promo.branchIds,
       branchClassifications: (promo.branchClassifications ?? []) as ("premium" | "aclass" | "bnc" | "outlet")[],
-      allProducts: promo.brandIds.length === 0,
+      allProducts:
+        promo.brandIds.length === 0 &&
+        (promo.categoryIds?.length ?? 0) === 0 &&
+        (promo.styleIds?.length ?? 0) === 0 &&
+        (promo.genders?.length ?? 0) === 0 &&
+        (promo.colors?.length ?? 0) === 0 &&
+        (promo.sizes?.length ?? 0) === 0,
       brandIds: promo.brandIds,
+      categoryIds: (promo.categoryIds ?? []) as Id<"categories">[],
+      styleIds: (promo.styleIds ?? []) as Id<"styles">[],
+      genders: (promo.genders ?? []) as GenderValue[],
+      selectedColors: promo.colors ?? [],
+      selectedSizes: promo.sizes ?? [],
       allStock: !promo.agingTiers || promo.agingTiers.length === 0,
       agingTiers: (promo.agingTiers ?? []) as ("green" | "yellow" | "red")[],
     });
@@ -371,8 +404,12 @@ export default function PromotionsPage() {
       branchIds: form.branchScopeMode === "specific" ? form.branchIds : [],
       branchClassifications: form.branchScopeMode === "byClassification" ? form.branchClassifications : undefined,
       brandIds: form.allProducts ? [] : form.brandIds,
-      categoryIds: [] as Id<"categories">[],
+      categoryIds: form.allProducts ? [] as Id<"categories">[] : form.categoryIds,
       variantIds: [] as Id<"variants">[],
+      styleIds: form.allProducts ? undefined : (form.styleIds.length > 0 ? form.styleIds : undefined),
+      genders: form.allProducts ? undefined : (form.genders.length > 0 ? form.genders : undefined),
+      colors: form.allProducts ? undefined : (form.selectedColors.length > 0 ? form.selectedColors : undefined),
+      sizes: form.allProducts ? undefined : (form.selectedSizes.length > 0 ? form.selectedSizes : undefined),
       startDate: startTs,
       endDate: endTs,
       isActive: form.isActive,
@@ -983,58 +1020,206 @@ export default function PromotionsPage() {
               )}
             </div>
 
-            {/* Scope: Brands (Products) */}
+            {/* Scope: Product Filters */}
             <div className="space-y-3">
-              <Label>Product Scope (Brands)</Label>
+              <Label>Product Scope</Label>
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
                   type="checkbox"
                   checked={form.allProducts}
                   onChange={(e) => {
                     updateField("allProducts", e.target.checked);
-                    if (e.target.checked) updateField("brandIds", []);
+                    if (e.target.checked) {
+                      updateField("brandIds", []);
+                      updateField("categoryIds", []);
+                      updateField("styleIds", []);
+                      updateField("genders", []);
+                      updateField("selectedColors", []);
+                      updateField("selectedSizes", []);
+                    }
                   }}
                   className="h-4 w-4 rounded border-gray-300"
                 />
                 All Products
               </label>
               {!form.allProducts && (
-                <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-1">
-                  {!brands || brands.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      No brands available
-                    </p>
-                  ) : (
-                    brands.map((brand) => (
-                      <label
-                        key={brand._id}
-                        className="flex items-center gap-2 text-sm cursor-pointer py-0.5"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={form.brandIds.includes(
-                            brand._id as Id<"brands">
-                          )}
-                          onChange={(e) => {
-                            const bid = brand._id as Id<"brands">;
-                            if (e.target.checked) {
-                              updateField("brandIds", [
-                                ...form.brandIds,
-                                bid,
-                              ]);
-                            } else {
-                              updateField(
-                                "brandIds",
-                                form.brandIds.filter((id) => id !== bid)
-                              );
-                            }
-                          }}
-                          className="h-4 w-4 rounded border-gray-300"
-                        />
-                        {brand.name}
-                      </label>
-                    ))
-                  )}
+                <div className="space-y-3">
+                  {/* Brands */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Brands</p>
+                    <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+                      {!brands || brands.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No brands</p>
+                      ) : (
+                        brands.map((brand) => (
+                          <label key={brand._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={form.brandIds.includes(brand._id as Id<"brands">)}
+                              onChange={(e) => {
+                                const bid = brand._id as Id<"brands">;
+                                if (e.target.checked) {
+                                  updateField("brandIds", [...form.brandIds, bid]);
+                                } else {
+                                  updateField("brandIds", form.brandIds.filter((id) => id !== bid));
+                                }
+                              }}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                            {brand.name}
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Categories */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Categories</p>
+                    <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+                      {!categories || categories.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No categories</p>
+                      ) : (
+                        categories
+                          .filter((cat) => form.brandIds.length === 0 || form.brandIds.includes(cat.brandId))
+                          .map((cat) => (
+                            <label key={cat._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                              <input
+                                type="checkbox"
+                                checked={form.categoryIds.includes(cat._id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    updateField("categoryIds", [...form.categoryIds, cat._id]);
+                                  } else {
+                                    updateField("categoryIds", form.categoryIds.filter((id) => id !== cat._id));
+                                  }
+                                }}
+                                className="h-4 w-4 rounded border-gray-300"
+                              />
+                              {cat.name}
+                            </label>
+                          ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Styles */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Styles</p>
+                    <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+                      {!styles || styles.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No styles</p>
+                      ) : (
+                        styles
+                          .filter((s) => form.categoryIds.length === 0 || form.categoryIds.includes(s.categoryId))
+                          .map((style) => (
+                            <label key={style._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                              <input
+                                type="checkbox"
+                                checked={form.styleIds.includes(style._id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    updateField("styleIds", [...form.styleIds, style._id]);
+                                  } else {
+                                    updateField("styleIds", form.styleIds.filter((id) => id !== style._id));
+                                  }
+                                }}
+                                className="h-4 w-4 rounded border-gray-300"
+                              />
+                              {style.name}
+                            </label>
+                          ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Genders */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Genders</p>
+                    <div className="border rounded-md p-3 flex flex-wrap gap-3">
+                      {([
+                        { value: "mens" as const, label: "Mens" },
+                        { value: "womens" as const, label: "Womens" },
+                        { value: "unisex" as const, label: "Unisex" },
+                        { value: "kids" as const, label: "Kids" },
+                      ]).map((g) => (
+                        <label key={g.value} className="flex items-center gap-2 text-sm cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={form.genders.includes(g.value)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                updateField("genders", [...form.genders, g.value]);
+                              } else {
+                                updateField("genders", form.genders.filter((v) => v !== g.value));
+                              }
+                            }}
+                            className="h-4 w-4 rounded border-gray-300"
+                          />
+                          {g.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Colors */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Colors</p>
+                    <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+                      {!colorsList || colorsList.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No colors — add them in Colors page</p>
+                      ) : (
+                        colorsList.filter((c) => c.isActive).map((color) => (
+                          <label key={color._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
+                            <input
+                              type="checkbox"
+                              checked={form.selectedColors.includes(color.name)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  updateField("selectedColors", [...form.selectedColors, color.name]);
+                                } else {
+                                  updateField("selectedColors", form.selectedColors.filter((n) => n !== color.name));
+                                }
+                              }}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                            {color.hexCode && (
+                              <span className="w-4 h-4 rounded-full border border-gray-300 inline-block flex-shrink-0" style={{ backgroundColor: color.hexCode }} />
+                            )}
+                            {color.name}
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Sizes */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">Sizes</p>
+                    <div className="border rounded-md p-3 flex flex-wrap gap-3">
+                      {!sizesList || sizesList.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No sizes — add them in Sizes page</p>
+                      ) : (
+                        sizesList.filter((s) => s.isActive).map((size) => (
+                          <label key={size._id} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={form.selectedSizes.includes(size.name)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  updateField("selectedSizes", [...form.selectedSizes, size.name]);
+                                } else {
+                                  updateField("selectedSizes", form.selectedSizes.filter((n) => n !== size.name));
+                                }
+                              }}
+                              className="h-4 w-4 rounded border-gray-300"
+                            />
+                            {size.name}
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

@@ -61,6 +61,10 @@ export const getActivePromotions = query({
       brandIds: p.brandIds.map(String),
       categoryIds: p.categoryIds.map(String),
       variantIds: p.variantIds.map(String),
+      styleIds: (p.styleIds ?? []).map(String),
+      genders: p.genders ?? [],
+      colors: p.colors ?? [],
+      sizes: p.sizes ?? [],
       priority: p.priority,
       agingTiers: p.agingTiers ?? [],
       branchClassifications: p.branchClassifications ?? [],
@@ -83,7 +87,7 @@ export const getVariantHierarchy = query({
     }
 
     const branchId = scope.branchId;
-    const result: Record<string, { brandId: string; categoryId: string; agingTier: "green" | "yellow" | "red" }> = {};
+    const result: Record<string, { brandId: string; categoryId: string; styleId: string; gender: string; color: string; size: string; agingTier: "green" | "yellow" | "red" }> = {};
 
     // Cache to avoid repeated lookups
     const categoryBrandCache = new Map<string, string>();
@@ -126,6 +130,10 @@ export const getVariantHierarchy = query({
       result[String(variantId)] = {
         brandId: brandId ?? "",
         categoryId,
+        styleId: String(variant.styleId),
+        gender: variant.gender ?? "",
+        color: variant.color,
+        size: variant.size,
         agingTier,
       };
     }

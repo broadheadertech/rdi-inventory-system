@@ -48,6 +48,12 @@ const commonArgs = {
   brandIds: v.array(v.id("brands")),
   categoryIds: v.array(v.id("categories")),
   variantIds: v.array(v.id("variants")),
+  styleIds: v.optional(v.array(v.id("styles"))),
+  genders: v.optional(
+    v.array(v.union(v.literal("mens"), v.literal("womens"), v.literal("unisex"), v.literal("kids")))
+  ),
+  colors: v.optional(v.array(v.string())),
+  sizes: v.optional(v.array(v.string())),
   startDate: v.number(),
   endDate: v.optional(v.number()),
   isActive: v.boolean(),
@@ -196,5 +202,25 @@ export const togglePromotionStatus = mutation({
     });
 
     return { promotionId: args.promotionId };
+  },
+});
+
+// ─── Helper Queries for Form Pickers ────────────────────────────────────────
+
+export const listCategoriesForPromo = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, ADMIN_ROLES);
+    const categories = await ctx.db.query("categories").collect();
+    return categories.filter((c) => c.isActive);
+  },
+});
+
+export const listStylesForPromo = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireRole(ctx, ADMIN_ROLES);
+    const styles = await ctx.db.query("styles").collect();
+    return styles.filter((s) => s.isActive);
   },
 });

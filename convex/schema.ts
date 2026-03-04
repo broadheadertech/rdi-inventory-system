@@ -471,6 +471,13 @@ export default defineSchema({
     brandIds: v.array(v.id("brands")),
     categoryIds: v.array(v.id("categories")),
     variantIds: v.array(v.id("variants")),
+    // extended scoping (all optional — empty/undefined = all)
+    styleIds: v.optional(v.array(v.id("styles"))),
+    genders: v.optional(
+      v.array(v.union(v.literal("mens"), v.literal("womens"), v.literal("unisex"), v.literal("kids")))
+    ),
+    colors: v.optional(v.array(v.string())),
+    sizes: v.optional(v.array(v.string())),
     // aging tier scope (empty/undefined = all stock)
     agingTiers: v.optional(v.array(v.union(v.literal("green"), v.literal("yellow"), v.literal("red")))),
     // date range (endDate optional = no expiration)
@@ -486,6 +493,22 @@ export default defineSchema({
   })
     .index("by_isActive", ["isActive"])
     .index("by_startDate", ["startDate"]),
+
+  colors: defineTable({
+    name: v.string(),
+    hexCode: v.optional(v.string()),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_name", ["name"]),
+
+  sizes: defineTable({
+    name: v.string(),
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_sortOrder", ["sortOrder"]),
 
   settings: defineTable({
     key: v.string(),

@@ -223,6 +223,10 @@ export const createTransaction = mutation({
           variantId: String(vi.variantId),
           brandId: brandId2,
           categoryId,
+          styleId: String(variant.styleId),
+          gender: variant.gender ?? "",
+          color: variant.color,
+          size: variant.size,
           unitPriceCentavos: vi.unitPriceCentavos,
           quantity: vi.quantity,
           agingTier,
@@ -242,6 +246,10 @@ export const createTransaction = mutation({
         brandIds: promo.brandIds.map(String),
         categoryIds: promo.categoryIds.map(String),
         variantIds: promo.variantIds.map(String),
+        styleIds: (promo.styleIds ?? []).map(String),
+        genders: promo.genders ?? [],
+        colors: promo.colors ?? [],
+        sizes: promo.sizes ?? [],
         agingTiers: promo.agingTiers ?? [],
       });
 

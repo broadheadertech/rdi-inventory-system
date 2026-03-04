@@ -17,6 +17,11 @@ export type PromoInput = {
   brandIds: string[];
   categoryIds: string[];
   variantIds: string[];
+  // Extended scope (optional — empty/undefined = all)
+  styleIds?: string[];
+  genders?: string[];
+  colors?: string[];
+  sizes?: string[];
   // Aging tier scope (empty = all stock)
   agingTiers?: string[];
 };
@@ -25,6 +30,10 @@ export type CartItemForPromo = {
   variantId: string;
   brandId: string;
   categoryId: string;
+  styleId?: string;
+  gender?: string;
+  color?: string;
+  size?: string;
   unitPriceCentavos: number;
   quantity: number;
   agingTier?: "green" | "yellow" | "red";
@@ -40,36 +49,41 @@ export type PromoResult = {
 
 /**
  * Filter cart items to only those within the promo's product scope.
- * Empty scope arrays mean "all products".
+ * All filters are AND-based — item must match every non-empty filter.
+ * Empty/undefined scope = skip that filter (match all).
  */
 export function filterEligibleItems(
   items: CartItemForPromo[],
   promo: PromoInput
 ): CartItemForPromo[] {
-  const hasVariantScope = promo.variantIds.length > 0;
-  const hasCategoryScope = promo.categoryIds.length > 0;
-  const hasBrandScope = promo.brandIds.length > 0;
+  let filtered = items;
 
-  // No product scope restrictions — all items eligible (but may still filter by aging tier)
-  if (!hasVariantScope && !hasCategoryScope && !hasBrandScope) {
-    if (promo.agingTiers && promo.agingTiers.length > 0) {
-      return items.filter(
-        (item) => item.agingTier && promo.agingTiers!.includes(item.agingTier)
-      );
-    }
-    return items;
+  // Product hierarchy filters (AND)
+  if (promo.brandIds.length > 0) {
+    filtered = filtered.filter((item) => promo.brandIds.includes(item.brandId));
+  }
+  if (promo.categoryIds.length > 0) {
+    filtered = filtered.filter((item) => promo.categoryIds.includes(item.categoryId));
+  }
+  if (promo.styleIds && promo.styleIds.length > 0) {
+    filtered = filtered.filter((item) => item.styleId && promo.styleIds!.includes(item.styleId));
+  }
+  if (promo.variantIds.length > 0) {
+    filtered = filtered.filter((item) => promo.variantIds.includes(item.variantId));
   }
 
-  let filtered = items.filter((item) => {
-    // Most specific scope wins: variant > category > brand
-    if (hasVariantScope && promo.variantIds.includes(item.variantId)) return true;
-    if (hasCategoryScope && promo.categoryIds.includes(item.categoryId)) return true;
-    if (hasBrandScope && promo.brandIds.includes(item.brandId)) return true;
-    // If scope exists but item doesn't match any, exclude it
-    return false;
-  });
+  // Extended filters (AND)
+  if (promo.genders && promo.genders.length > 0) {
+    filtered = filtered.filter((item) => item.gender && promo.genders!.includes(item.gender));
+  }
+  if (promo.colors && promo.colors.length > 0) {
+    filtered = filtered.filter((item) => item.color && promo.colors!.includes(item.color));
+  }
+  if (promo.sizes && promo.sizes.length > 0) {
+    filtered = filtered.filter((item) => item.size && promo.sizes!.includes(item.size));
+  }
 
-  // Apply aging tier filter if specified
+  // Aging tier filter (AND)
   if (promo.agingTiers && promo.agingTiers.length > 0) {
     filtered = filtered.filter(
       (item) => item.agingTier && promo.agingTiers!.includes(item.agingTier)

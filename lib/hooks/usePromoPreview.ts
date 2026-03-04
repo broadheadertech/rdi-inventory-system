@@ -26,6 +26,10 @@ type ActivePromo = {
   brandIds: string[];
   categoryIds: string[];
   variantIds: string[];
+  styleIds: string[];
+  genders: string[];
+  colors: string[];
+  sizes: string[];
   priority: number;
   agingTiers: string[];
 };
@@ -77,6 +81,10 @@ export function usePromoPreview(
         variantId: String(item.variantId),
         brandId: hierarchy?.brandId ?? "",
         categoryId: hierarchy?.categoryId ?? "",
+        styleId: hierarchy?.styleId ?? "",
+        gender: hierarchy?.gender ?? "",
+        color: hierarchy?.color ?? "",
+        size: hierarchy?.size ?? "",
         unitPriceCentavos: item.unitPriceCentavos,
         quantity: item.quantity,
         agingTier: hierarchy?.agingTier,
