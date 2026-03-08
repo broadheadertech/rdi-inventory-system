@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -11,10 +12,126 @@ import {
   ChevronRight,
   LogOut,
   ShoppingBag,
+  RefreshCw,
+  Ruler,
+  X,
+  Award,
 } from "lucide-react";
 import { useClerk } from "@clerk/nextjs";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { formatPrice } from "@/lib/utils";
+import { useSizePreferences } from "@/lib/hooks/useSizePreferences";
+import SizeFeedbackSection from "@/components/customer/SizeFeedback";
+
+function MySizesSection() {
+  const { allPreferences, removePreferredSize } = useSizePreferences();
+  const entries = Object.entries(allPreferences);
+
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center gap-2 mb-4">
+        <Ruler className="h-5 w-5 text-primary" />
+        <h2 className="font-display text-lg font-bold uppercase tracking-tight">
+          My Sizes
+        </h2>
+      </div>
+      <div className="rounded-lg border border-border bg-card p-4">
+        <p className="mb-3 text-xs text-muted-foreground">
+          Your preferred sizes are auto-selected when browsing products.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {entries.map(([category, size]) => (
+            <span
+              key={category}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted px-3 py-1.5 text-sm"
+            >
+              <span className="font-medium">{category}:</span>
+              <span className="text-muted-foreground">{size}</span>
+              <button
+                onClick={() => removePreferredSize(category)}
+                className="ml-0.5 rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                aria-label={`Remove ${category} size preference`}
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BuyAgainSection() {
+  const products = useQuery(api.storefront.orders.getBuyAgainProducts, {});
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  if (!products || products.length === 0) return null;
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center gap-2 mb-4">
+        <RefreshCw className="h-5 w-5 text-primary" />
+        <h2 className="font-display text-lg font-bold uppercase tracking-tight">
+          Buy Again
+        </h2>
+        <Link
+          href="/account/buy-again"
+          className="ml-auto text-xs font-medium text-primary hover:underline"
+        >
+          See All
+        </Link>
+      </div>
+      <div
+        ref={scrollRef}
+        className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide snap-x snap-mandatory"
+      >
+        {products.slice(0, 6).map((product) => (
+          <Link
+            key={product.styleId}
+            href={`/browse/style/${product.styleId}`}
+            className="group flex-shrink-0 snap-start overflow-hidden rounded-lg border border-border bg-card"
+            style={{ width: 160 }}
+          >
+            <div className="relative aspect-[3/4] w-full bg-secondary">
+              {product.primaryImageUrl ? (
+                <Image
+                  src={product.primaryImageUrl}
+                  alt={product.name}
+                  fill
+                  sizes="160px"
+                  className="object-cover transition-transform group-hover:scale-105"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center">
+                  <ShoppingBag className="h-8 w-8 text-muted-foreground/40" />
+                </div>
+              )}
+            </div>
+            <div className="p-2.5">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                {product.brandName}
+              </p>
+              <p className="mt-0.5 text-sm font-medium leading-tight line-clamp-2">
+                {product.name}
+              </p>
+              <p className="mt-1 font-mono text-sm font-bold text-primary">
+                {formatPrice(product.basePriceCentavos)}
+              </p>
+              <span className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">
+                <RefreshCw className="h-3 w-3" />
+                Buy Again
+              </span>
+            </div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function AccountPage() {
   const profile = useQuery(api.storefront.customers.getMyProfile);
@@ -69,6 +186,18 @@ export default function AccountPage() {
       icon: Heart,
       label: "Wishlist",
       desc: "Your saved items",
+    },
+    {
+      href: "/account/buy-again",
+      icon: RefreshCw,
+      label: "Buy Again",
+      desc: "Reorder past purchases",
+    },
+    {
+      href: "/account/loyalty",
+      icon: Award,
+      label: "Loyalty",
+      desc: "Points, tiers & rewards",
     },
   ];
 
@@ -133,6 +262,15 @@ export default function AccountPage() {
           </Link>
         ))}
       </div>
+
+      {/* My Sizes */}
+      <MySizesSection />
+
+      {/* Size Feedback */}
+      <SizeFeedbackSection />
+
+      {/* Buy Again */}
+      <BuyAgainSection />
 
       {/* Sign out */}
       <button

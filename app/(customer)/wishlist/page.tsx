@@ -3,16 +3,62 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useQuery, useMutation } from "convex/react";
+import { useUser, SignInButton } from "@clerk/nextjs";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
-import { Heart, ShoppingBag } from "lucide-react";
+import { Heart, ShoppingBag, LogIn, Share2 } from "lucide-react";
 import { formatPrice, cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 export default function WishlistPage() {
+  const { isSignedIn, isLoaded } = useUser();
   const wishlist = useQuery(api.storefront.wishlist.getMyWishlist);
   const removeItem = useMutation(api.storefront.wishlist.removeFromWishlist);
   const addToCart = useMutation(api.storefront.cart.addToCart);
+  const generateShareLink = useMutation(
+    api.storefront.wishlist.generateShareLink
+  );
+
+  const handleShare = async () => {
+    try {
+      const { token } = await generateShareLink();
+      const shareUrl = `${window.location.origin}/wishlist/shared/${token}`;
+      await navigator.clipboard.writeText(shareUrl);
+      toast.success("Link copied!");
+    } catch {
+      toast.error("Failed to generate share link");
+    }
+  };
+
+  // Sign-in prompt for guests
+  if (isLoaded && !isSignedIn) {
+    return (
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4">
+        <div className="mx-auto max-w-sm rounded-xl border border-border bg-card p-8 text-center shadow-sm">
+          <Heart className="mx-auto h-12 w-12 text-primary" />
+          <h1 className="mt-4 font-display text-xl font-bold">
+            Sign in to save your favorites
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Create an account or sign in to save items to your wishlist and
+            access them from any device.
+          </p>
+          <SignInButton mode="modal">
+            <button className="mt-6 inline-flex h-11 w-full items-center justify-center gap-2 rounded-md bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90">
+              <LogIn className="h-4 w-4" />
+              Sign In
+            </button>
+          </SignInButton>
+          <Link
+            href="/browse"
+            className="mt-3 block text-sm text-muted-foreground hover:text-foreground"
+          >
+            Continue browsing
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   // Loading skeleton
   if (wishlist === undefined) {
@@ -72,12 +118,21 @@ export default function WishlistPage() {
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-8">
-      <h1 className="font-display text-2xl font-bold uppercase">
-        My Wishlist{" "}
-        <span className="text-lg font-normal text-muted-foreground">
-          ({wishlist.length} {wishlist.length === 1 ? "item" : "items"})
-        </span>
-      </h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="font-display text-2xl font-bold uppercase">
+          My Wishlist{" "}
+          <span className="text-lg font-normal text-muted-foreground">
+            ({wishlist.length} {wishlist.length === 1 ? "item" : "items"})
+          </span>
+        </h1>
+        <button
+          onClick={handleShare}
+          className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+        >
+          <Share2 className="h-4 w-4" />
+          <span className="hidden sm:inline">Share</span>
+        </button>
+      </div>
 
       <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
         {wishlist.map((item) => (

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { ShoppingCart, X, Layers, Check } from "lucide-react";
+import { ShoppingCart, X, Layers, Check, BellRing } from "lucide-react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
@@ -101,10 +101,12 @@ export function QuickViewSheet({ styleId, onClose }: QuickViewSheetProps) {
     styleId ? { styleId } : "skip"
   );
   const addToCart = useMutation(api.storefront.cart.addToCart);
+  const toggleWishlist = useMutation(api.storefront.wishlist.toggleWishlist);
 
   const [selectedColor, setSelectedColor] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [restockSubmitting, setRestockSubmitting] = useState(false);
   const [visible, setVisible] = useState(false);
 
   // Reset selections when a new style loads
@@ -177,6 +179,15 @@ export function QuickViewSheet({ styleId, onClose }: QuickViewSheetProps) {
     if (data) return data.basePriceCentavos;
     return 0;
   }, [data, selectedVariant]);
+
+  const isOutOfStock = selectedVariant
+    ? selectedVariant.branchesInStock === 0
+    : false;
+
+  const isInWishlist = useQuery(
+    api.storefront.wishlist.isInWishlist,
+    selectedVariant ? { variantId: selectedVariant._id } : "skip"
+  );
 
   const primaryImage = useMemo(() => {
     if (!data) return null;
@@ -354,20 +365,61 @@ export function QuickViewSheet({ styleId, onClose }: QuickViewSheetProps) {
                 </div>
               </div>
 
-              {/* Add to Cart button */}
-              <button
-                onClick={handleAddToCart}
-                disabled={!selectedVariant || adding}
-                className={cn(
-                  "flex w-full items-center justify-center gap-2 rounded-lg py-3 text-sm font-bold uppercase tracking-wide transition-colors",
-                  selectedVariant && !adding
-                    ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                    : "bg-muted text-muted-foreground cursor-not-allowed"
+              {/* Stock urgency indicator */}
+              {selectedVariant &&
+                selectedVariant.totalStock > 0 &&
+                selectedVariant.totalStock <= 5 && (
+                  <p className="text-xs font-semibold text-[#E8192C]">
+                    Only {selectedVariant.totalStock} left in your size!
+                  </p>
                 )}
-              >
-                <ShoppingCart className="h-4 w-4" />
-                {adding ? "Adding..." : "Add to Cart"}
-              </button>
+
+              {/* Add to Cart / Restock Notification button */}
+              {selectedVariant && isOutOfStock ? (
+                isInWishlist ? (
+                  <button
+                    disabled
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 py-3 text-sm font-medium text-zinc-400 cursor-default"
+                  >
+                    <BellRing className="h-4 w-4" />
+                    Watching for Restock
+                  </button>
+                ) : (
+                  <button
+                    onClick={async () => {
+                      if (!selectedVariant) return;
+                      setRestockSubmitting(true);
+                      try {
+                        await toggleWishlist({ variantId: selectedVariant._id });
+                        toast.success("We\u2019ll notify you when this is back in stock!");
+                      } catch {
+                        toast.error("Please sign in to get restock notifications");
+                      } finally {
+                        setRestockSubmitting(false);
+                      }
+                    }}
+                    disabled={restockSubmitting}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-zinc-700 bg-zinc-900 py-3 text-sm font-bold uppercase tracking-wide text-zinc-100 hover:bg-zinc-800 disabled:opacity-50"
+                  >
+                    <BellRing className="h-4 w-4" />
+                    {restockSubmitting ? "Saving..." : "Notify Me When Back in Stock"}
+                  </button>
+                )
+              ) : (
+                <button
+                  onClick={handleAddToCart}
+                  disabled={!selectedVariant || adding}
+                  className={cn(
+                    "flex w-full items-center justify-center gap-2 rounded-lg py-3 text-sm font-bold uppercase tracking-wide transition-colors",
+                    selectedVariant && !adding
+                      ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                      : "bg-muted text-muted-foreground cursor-not-allowed"
+                  )}
+                >
+                  <ShoppingCart className="h-4 w-4" />
+                  {adding ? "Adding..." : "Add to Cart"}
+                </button>
+              )}
 
               {/* View Full Details link */}
               <Link

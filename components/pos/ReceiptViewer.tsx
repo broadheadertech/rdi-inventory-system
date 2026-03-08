@@ -236,7 +236,34 @@ function ReceiptViewerInner({
           <hr className="my-2 border-dashed" />
 
           {/* Payment */}
-          {txn.paymentMethod === "cash" ? (
+          {txn.splitPayment ? (
+            <div className="space-y-0.5">
+              <div className="flex justify-between">
+                <span>{txn.paymentMethod === "cash" ? "Cash" : txn.paymentMethod === "gcash" ? "GCash" : "Maya"}:</span>
+                <span className="font-bold">
+                  {formatCurrency(txn.totalCentavos - txn.splitPayment.amountCentavos)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span>{txn.splitPayment.method === "cash" ? "Cash" : txn.splitPayment.method === "gcash" ? "GCash" : "Maya"}:</span>
+                <span className="font-bold">
+                  {formatCurrency(txn.splitPayment.amountCentavos)}
+                </span>
+              </div>
+              {txn.paymentMethod === "cash" && (
+                <>
+                  <div className="flex justify-between">
+                    <span>Cash Tendered:</span>
+                    <span>{formatCurrency(txn.amountTenderedCentavos ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Change:</span>
+                    <span>{formatCurrency(txn.changeCentavos ?? 0)}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : txn.paymentMethod === "cash" ? (
             <div className="space-y-0.5">
               <div className="flex justify-between">
                 <span>Cash Tendered:</span>

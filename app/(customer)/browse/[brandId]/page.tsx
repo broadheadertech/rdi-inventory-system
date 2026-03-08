@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -11,12 +11,14 @@ import {
   ArrowLeft,
   ArrowUpDown,
   SlidersHorizontal,
-  X,
   Check,
   ChevronRight,
+  ChevronUp,
+  Loader2,
 } from "lucide-react";
 import { CustomerProductCard } from "@/components/customer/CustomerProductCard";
 import { QuickViewSheet } from "@/components/customer/QuickViewSheet";
+import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -37,6 +39,8 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "price_asc", label: "Price Low to High" },
   { key: "name_asc", label: "Name A-Z" },
 ];
+
+const PAGE_SIZE = 12;
 
 function matchesGender(genders: string[], tab: GenderTab): boolean {
   if (tab === "all") return true;
@@ -77,6 +81,13 @@ export default function BrandPage() {
 
   // QuickView state
   const [quickViewStyleId, setQuickViewStyleId] = useState<Id<"styles"> | null>(null);
+
+  // Infinite scroll state
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  // Back to top visibility
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
   const activeFilterCount =
     selectedCategories.size + selectedColors.size + selectedSizes.size;
@@ -143,6 +154,43 @@ export default function BrandPage() {
 
     return sorted;
   }, [data, genderTab, sortKey, selectedCategories, selectedColors, selectedSizes]);
+
+  // Reset visible count when filters/sort change
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [genderTab, sortKey, selectedCategories, selectedColors, selectedSizes]);
+
+  // Visible slice for infinite scroll
+  const visibleStyles = useMemo(
+    () => filteredStyles.slice(0, visibleCount),
+    [filteredStyles, visibleCount]
+  );
+  const hasMore = visibleCount < filteredStyles.length;
+
+  // Load more callback
+  const loadMore = useCallback(() => {
+    setIsLoadingMore(true);
+    // Small delay to show spinner and avoid overwhelming re-renders
+    setTimeout(() => {
+      setVisibleCount((prev) => prev + PAGE_SIZE);
+      setIsLoadingMore(false);
+    }, 300);
+  }, []);
+
+  const { sentinelRef } = useInfiniteScroll(loadMore, hasMore, isLoadingMore);
+
+  // Back to top scroll listener
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(window.scrollY > window.innerHeight * 2);
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  const scrollToTop = useCallback(() => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, []);
 
   // ── Loading ──
   if (data === undefined) {
@@ -241,54 +289,57 @@ export default function BrandPage() {
           </Link>
         </div>
 
-        {/* ── Gender tabs ── */}
-        <div className="border-b border-border">
-          <div className="flex px-4">
-            {GENDER_TABS.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setGenderTab(tab.key)}
-                className={cn(
-                  "relative px-4 py-3 text-sm font-medium transition-colors",
-                  genderTab === tab.key
-                    ? "text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {tab.label}
-                {genderTab === tab.key && (
-                  <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground" />
-                )}
-              </button>
-            ))}
+        {/* ── Sticky Filter Bar (Gender tabs + Sort/Filter/Count) ── */}
+        <div className="sticky top-0 z-10 bg-background/80 backdrop-blur-md border-b border-border/50 transition-shadow [&:not(:first-child)]:shadow-sm">
+          {/* Gender tabs */}
+          <div className="overflow-x-auto scrollbar-none">
+            <div className="flex px-4 min-w-max">
+              {GENDER_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setGenderTab(tab.key)}
+                  className={cn(
+                    "relative whitespace-nowrap px-4 py-3 text-sm font-medium transition-colors",
+                    genderTab === tab.key
+                      ? "text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {tab.label}
+                  {genderTab === tab.key && (
+                    <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground" />
+                  )}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        {/* ── Sort / Filter / Count bar ── */}
-        <div className="flex items-center border-b border-border px-4">
-          <button
-            onClick={() => setShowSort(true)}
-            className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-foreground"
-          >
-            <ArrowUpDown className="h-3.5 w-3.5" />
-            Sort
-          </button>
-          <div className="h-5 w-px bg-border" />
-          <button
-            onClick={() => { setShowFilter(true); setFilterSection(null); }}
-            className="relative flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-foreground"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            Filter
-            {activeFilterCount > 0 && (
-              <span className="absolute -right-1 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-          <div className="h-5 w-px bg-border" />
-          <div className="flex flex-1 items-center justify-center py-2.5 text-xs text-muted-foreground">
-            {filteredStyles.length} items
+          {/* Sort / Filter / Count bar */}
+          <div className="flex items-center border-t border-border/50 px-4">
+            <button
+              onClick={() => setShowSort(true)}
+              className="flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-foreground"
+            >
+              <ArrowUpDown className="h-3.5 w-3.5" />
+              Sort
+            </button>
+            <div className="h-5 w-px bg-border" />
+            <button
+              onClick={() => { setShowFilter(true); setFilterSection(null); }}
+              className="relative flex flex-1 items-center justify-center gap-1.5 py-2.5 text-xs font-medium text-foreground"
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              Filter
+              {activeFilterCount > 0 && (
+                <span className="absolute -right-1 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+            <div className="h-5 w-px bg-border" />
+            <div className="flex flex-1 items-center justify-center py-2.5 text-xs text-muted-foreground">
+              {filteredStyles.length} items
+            </div>
           </div>
         </div>
 
@@ -299,9 +350,9 @@ export default function BrandPage() {
               No products found. Try adjusting your filters.
             </p>
           )}
-          {filteredStyles.length > 0 && (
+          {visibleStyles.length > 0 && (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4">
-              {filteredStyles.map((style) => (
+              {visibleStyles.map((style) => (
                 <CustomerProductCard
                   key={style._id}
                   styleId={style._id}
@@ -313,13 +364,41 @@ export default function BrandPage() {
                   variantCount={style.variantCount}
                   branchCount={style.branchCount}
                   sizes={style.sizes}
+                  createdAt={style.createdAt}
                   onQuickView={setQuickViewStyleId}
                 />
               ))}
             </div>
           )}
+
+          {/* Infinite scroll sentinel */}
+          {hasMore && (
+            <div ref={sentinelRef} className="flex items-center justify-center py-8">
+              {isLoadingMore && (
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          )}
+
+          {/* End of results indicator */}
+          {!hasMore && filteredStyles.length > PAGE_SIZE && (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              Showing all {filteredStyles.length} items
+            </p>
+          )}
         </div>
       </div>
+
+      {/* ═══ Back to Top FAB ═══ */}
+      {showBackToTop && (
+        <button
+          onClick={scrollToTop}
+          className="fixed bottom-6 right-6 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-foreground text-background shadow-lg transition-all hover:bg-foreground/90 active:scale-95"
+          aria-label="Back to top"
+        >
+          <ChevronUp className="h-5 w-5" />
+        </button>
+      )}
 
       {/* ═══ Quick View Sheet ═══ */}
       <QuickViewSheet

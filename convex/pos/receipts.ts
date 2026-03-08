@@ -97,6 +97,7 @@ export const getReceiptData = query({
         discountType: transaction.discountType ?? "none",
         amountTenderedCentavos: transaction.amountTenderedCentavos,
         changeCentavos: transaction.changeCentavos,
+        splitPayment: transaction.splitPayment ?? null,
       },
       items: enrichedItems,
       branch: {

@@ -104,6 +104,20 @@
   }
 }
 
+/* Live ticker animation — slower continuous scroll for longer content */
+@keyframes ticker {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+.animate-ticker {
+  animation: ticker 60s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-ticker {
+    animation: none;
+  }
+}
+
 /* POS Theme — larger touch targets and font for tablet POS interface */
 .theme-pos {
   font-size: 18px;

@@ -319,6 +319,7 @@ export default function TagProductsPage() {
                   variantCount={style.variantCount}
                   branchCount={style.branchCount}
                   sizes={style.sizes}
+                  createdAt={style.createdAt}
                   onQuickView={setQuickViewStyleId}
                 />
               ))}

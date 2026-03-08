@@ -1,14 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
-import { Home, Search, Heart, User, ShoppingBag, X, LayoutList } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { Home, Heart, User, ShoppingBag, LayoutList, Ticket, Sparkles, Palette, TrendingUp } from "lucide-react";
 import { Syne, Space_Mono, DM_Sans } from "next/font/google";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { AnnouncementBar } from "@/components/customer/AnnouncementBar";
+import { SearchAutocomplete } from "@/components/customer/SearchAutocomplete";
 import { cn } from "@/lib/utils";
 
 const syne = Syne({
@@ -43,16 +43,7 @@ export default function CustomerLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
-  const [searchQuery, setSearchQuery] = useState("");
   const cartCount = useQuery(api.storefront.cart.getCartItemCount);
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery.trim())}`);
-    }
-  };
 
   return (
     <ErrorBoundary>
@@ -78,31 +69,8 @@ export default function CustomerLayout({
               <span className="text-primary">RED</span>BOX
             </Link>
 
-            {/* Universal search bar */}
-            <form
-              onSubmit={handleSearchSubmit}
-              className="relative flex-1"
-            >
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="text"
-                placeholder="Got You Lookin' Great"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-10 w-full rounded-lg border border-border bg-secondary pl-10 pr-10 text-sm text-foreground outline-none placeholder:text-muted-foreground focus:border-primary focus:ring-2 focus:ring-primary/20"
-              />
-              {searchQuery ? (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              ) : (
-                <Search className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/40 pointer-events-none" />
-              )}
-            </form>
+            {/* Universal search bar with autocomplete */}
+            <SearchAutocomplete />
 
             {/* Right icons */}
             <div className="flex flex-shrink-0 items-center gap-1">
@@ -146,6 +114,42 @@ export default function CustomerLayout({
                 Shop
               </Link>
               <Link
+                href="/styles"
+                className={cn(
+                  "flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary",
+                  pathname.startsWith("/styles")
+                    ? "text-primary"
+                    : "text-muted-foreground"
+                )}
+              >
+                <Palette className="h-3.5 w-3.5" />
+                Styles
+              </Link>
+              <Link
+                href="/new-arrivals"
+                className={cn(
+                  "flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary",
+                  pathname.startsWith("/new-arrivals")
+                    ? "text-primary"
+                    : "text-muted-foreground"
+                )}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                New
+              </Link>
+              <Link
+                href="/bestsellers"
+                className={cn(
+                  "flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary",
+                  pathname.startsWith("/bestsellers")
+                    ? "text-primary"
+                    : "text-muted-foreground"
+                )}
+              >
+                <TrendingUp className="h-3.5 w-3.5" />
+                Bestsellers
+              </Link>
+              <Link
                 href="/branches"
                 className={cn(
                   "text-sm font-medium transition-colors hover:text-primary",
@@ -155,6 +159,18 @@ export default function CustomerLayout({
                 )}
               >
                 Stores
+              </Link>
+              <Link
+                href="/vouchers"
+                className={cn(
+                  "flex items-center gap-1 text-sm font-medium transition-colors hover:text-primary",
+                  pathname.startsWith("/vouchers")
+                    ? "text-primary"
+                    : "text-muted-foreground"
+                )}
+              >
+                <Ticket className="h-3.5 w-3.5" />
+                Vouchers
               </Link>
             </div>
           </div>

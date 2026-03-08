@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
-import { ArrowLeft, Package, Truck, CheckCircle2, XCircle, Clock } from "lucide-react";
+import { ArrowLeft, Package, Truck, CheckCircle2, XCircle, Clock, RotateCcw } from "lucide-react";
 import { formatPrice, cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -211,6 +211,17 @@ export default function OrderDetailPage() {
           </p>
           <p className="text-xs text-muted-foreground">{order.shippingAddress.phone}</p>
         </div>
+      )}
+
+      {/* Request Return button */}
+      {order.status === "delivered" && (
+        <Link
+          href={`/account/orders/${order._id}/return`}
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-md border border-primary py-3 text-sm font-medium text-primary hover:bg-primary/5"
+        >
+          <RotateCcw className="h-4 w-4" />
+          Request Return
+        </Link>
       )}
 
       {/* Cancel button */}

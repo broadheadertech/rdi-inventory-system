@@ -46,9 +46,20 @@ export const getActiveShift = query({
 
     for (const t of myTxns) {
       transactionCount++;
-      if (t.paymentMethod === "cash") cashSalesCentavos += t.totalCentavos;
-      else if (t.paymentMethod === "gcash") gcashSalesCentavos += t.totalCentavos;
-      else if (t.paymentMethod === "maya") mayaSalesCentavos += t.totalCentavos;
+      const splitAmt = t.splitPayment?.amountCentavos ?? 0;
+      const primaryAmt = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
+
+      // Primary payment method
+      if (t.paymentMethod === "cash") cashSalesCentavos += primaryAmt;
+      else if (t.paymentMethod === "gcash") gcashSalesCentavos += primaryAmt;
+      else if (t.paymentMethod === "maya") mayaSalesCentavos += primaryAmt;
+
+      // Secondary (split) payment method
+      if (t.splitPayment) {
+        if (t.splitPayment.method === "cash") cashSalesCentavos += splitAmt;
+        else if (t.splitPayment.method === "gcash") gcashSalesCentavos += splitAmt;
+        else if (t.splitPayment.method === "maya") mayaSalesCentavos += splitAmt;
+      }
     }
 
     // Cash in drawer = starting fund + net cash sales
@@ -150,9 +161,13 @@ export const closeShift = mutation({
       (t) => (t.cashierId as string) === (scope.userId as string)
     );
 
-    const cashSales = myTxns
-      .filter((t) => t.paymentMethod === "cash")
-      .reduce((s, t) => s + t.totalCentavos, 0);
+    let cashSales = 0;
+    for (const t of myTxns) {
+      const splitAmt = t.splitPayment?.amountCentavos ?? 0;
+      const primaryAmt = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
+      if (t.paymentMethod === "cash") cashSales += primaryAmt;
+      if (t.splitPayment?.method === "cash") cashSales += splitAmt;
+    }
 
     const finalBalance = shift.cashFundCentavos + cashSales;
 

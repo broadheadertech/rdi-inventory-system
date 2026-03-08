@@ -18,6 +18,7 @@ import {
   ArrowRight,
   TrendingUp,
 } from "lucide-react";
+import { FlashSaleCountdown } from "@/components/customer/FlashSaleCountdown";
 
 // ─── Horizontal Scroll Helper ────────────────────────────────────────────────
 function HScrollRow({
@@ -441,7 +442,13 @@ export default function BrowsePage() {
     return <HomepageSkeleton />;
   }
 
-  const { brands, categories, availableTags, featuredProducts, promotions, heroBanners } = data;
+  const { brands, categories, availableTags, featuredProducts, promotions, heroBanners, promoBanners } = data;
+
+  // Find the first flash sale banner with an endDate for the countdown
+  const flashSaleBanner = promoBanners?.find(
+    (b: { placement?: string; endDate?: number }) =>
+      b.placement === "flash_sale" && b.endDate
+  );
 
   // ── Gender filter → categories ──
   const genderFilteredCategories =
@@ -579,6 +586,13 @@ export default function BrowsePage() {
       <div className="mt-5">
         <HeroBannerCarousel dbBanners={heroBanners} />
       </div>
+
+      {/* ── 3a. Flash Sale Countdown ── */}
+      {flashSaleBanner && (
+        <div className="mx-auto max-w-7xl px-4 pt-5">
+          <FlashSaleCountdown endDate={flashSaleBanner.endDate!} />
+        </div>
+      )}
 
       {/* ── 3b. Trending Now ── */}
       <TrendingNowSection />
@@ -849,11 +863,19 @@ function TrendingNowSection() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 pt-6">
-      <div className="flex items-center gap-2">
-        <TrendingUp className="h-5 w-5 text-primary" />
-        <h2 className="font-display text-lg font-bold uppercase tracking-tight">
-          Trending Now
-        </h2>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-5 w-5 text-primary" />
+          <h2 className="font-display text-lg font-bold uppercase tracking-tight">
+            Trending Now
+          </h2>
+        </div>
+        <Link
+          href="/bestsellers"
+          className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+        >
+          View All <ArrowRight className="h-3 w-3" />
+        </Link>
       </div>
       <HScrollRow className="mt-4">
         {trending.map((product) => (
@@ -890,7 +912,7 @@ function TrendingNowSection() {
               {/* Sold count badge */}
               <div className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur-sm">
                 <TrendingUp className="h-3 w-3" />
-                {product.soldCount} sold
+                {product.soldCount} sold this month
               </div>
             </div>
             <div className="p-2.5">

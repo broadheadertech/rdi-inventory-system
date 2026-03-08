@@ -7,6 +7,7 @@ import {
   useCallback,
   useRef,
   useMemo,
+  useEffect,
   type ReactNode,
 } from "react";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -27,8 +28,9 @@ export type CartItem = {
   unitPriceCentavos: number;
 };
 
-type HeldTransaction = {
+export type HeldTransaction = {
   id: string;
+  label: string;
   items: CartItem[];
   heldAt: number;
   discountType: DiscountType;
@@ -41,6 +43,7 @@ type CartState = {
   activeTransactionId: string;
   discountType: DiscountType;
   selectedPromoId: string | null;
+  holdCounter: number;
 };
 
 type CartAction =
@@ -50,6 +53,8 @@ type CartAction =
   | { type: "CLEAR_CART" }
   | { type: "HOLD_TRANSACTION" }
   | { type: "RESUME_TRANSACTION"; transactionId: string }
+  | { type: "DISCARD_HELD"; transactionId: string }
+  | { type: "RESTORE_HELD"; heldTransactions: HeldTransaction[]; holdCounter: number }
   | { type: "SET_DISCOUNT_TYPE"; discountType: DiscountType }
   | { type: "SET_PROMO"; promoId: string | null }
   | { type: "RESTORE_CART"; items: CartItem[]; discountType: DiscountType };
@@ -70,6 +75,7 @@ type POSCartContextValue = {
   clearCart: () => void;
   holdTransaction: () => string | null;
   resumeTransaction: (id: string) => void;
+  discardHeldTransaction: (id: string) => void;
   restoreCart: (items: CartItem[], discountType: DiscountType) => void;
   discountType: DiscountType;
   setDiscountType: (type: DiscountType) => void;
@@ -132,22 +138,24 @@ function cartReducer(state: CartState, action: CartAction): CartState {
 
     case "HOLD_TRANSACTION": {
       if (state.items.length === 0) return state;
-      // Enforce max 5 held transactions
+      if (state.heldTransactions.length >= 5) return state;
+      const nextCounter = state.holdCounter + 1;
       const held: HeldTransaction = {
         id: state.activeTransactionId,
+        label: `Hold #${nextCounter}`,
         items: [...state.items],
         heldAt: Date.now(),
         discountType: state.discountType,
         selectedPromoId: state.selectedPromoId,
       };
-      const updatedHeld = [...state.heldTransactions, held].slice(-5);
       return {
         ...state,
         items: [],
-        heldTransactions: updatedHeld,
+        heldTransactions: [...state.heldTransactions, held],
         activeTransactionId: generateTransactionId(),
         discountType: "none",
         selectedPromoId: null,
+        holdCounter: nextCounter,
       };
     }
 
@@ -163,8 +171,10 @@ function cartReducer(state: CartState, action: CartAction): CartState {
 
       // If current cart has items, hold it first
       if (state.items.length > 0) {
+        const swapCounter = state.holdCounter + 1;
         const currentHeld: HeldTransaction = {
           id: state.activeTransactionId,
+          label: `Hold #${swapCounter}`,
           items: [...state.items],
           heldAt: Date.now(),
           discountType: state.discountType,
@@ -176,10 +186,12 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           activeTransactionId: toResume.id,
           discountType: toResume.discountType,
           selectedPromoId: toResume.selectedPromoId,
+          holdCounter: swapCounter,
         };
       }
 
       return {
+        ...state,
         items: toResume.items,
         heldTransactions: remainingHeld,
         activeTransactionId: toResume.id,
@@ -198,6 +210,21 @@ function cartReducer(state: CartState, action: CartAction): CartState {
 
     case "SET_PROMO":
       return { ...state, selectedPromoId: action.promoId };
+
+    case "DISCARD_HELD":
+      return {
+        ...state,
+        heldTransactions: state.heldTransactions.filter(
+          (t) => t.id !== action.transactionId
+        ),
+      };
+
+    case "RESTORE_HELD":
+      return {
+        ...state,
+        heldTransactions: action.heldTransactions,
+        holdCounter: action.holdCounter,
+      };
 
     case "RESTORE_CART":
       return { ...state, items: action.items, discountType: action.discountType };
@@ -221,13 +248,47 @@ export function usePOSCart(): POSCartContextValue {
 
 // ─── Provider ────────────────────────────────────────────────────────────────
 
+const HELD_STORAGE_KEY = "pos-held-transactions";
+
+function saveHeldToStorage(held: HeldTransaction[], holdCounter: number) {
+  try {
+    localStorage.setItem(HELD_STORAGE_KEY, JSON.stringify({ held, holdCounter }));
+  } catch {
+    // Storage full or unavailable — silently ignore
+  }
+}
+
+function loadHeldFromStorage(): { held: HeldTransaction[]; holdCounter: number } | null {
+  try {
+    const raw = localStorage.getItem(HELD_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed.held)) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function clearHeldFromStorage() {
+  try {
+    localStorage.removeItem(HELD_STORAGE_KEY);
+  } catch {
+    // Silently ignore
+  }
+}
+
 export function POSCartProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(cartReducer, {
-    items: [],
-    heldTransactions: [],
-    activeTransactionId: generateTransactionId(),
-    discountType: "none",
-    selectedPromoId: null,
+  const [state, dispatch] = useReducer(cartReducer, undefined, () => {
+    const saved = loadHeldFromStorage();
+    return {
+      items: [],
+      heldTransactions: saved?.held ?? [],
+      activeTransactionId: generateTransactionId(),
+      discountType: "none" as DiscountType,
+      selectedPromoId: null,
+      holdCounter: saved?.holdCounter ?? 0,
+    };
   });
 
   // Refs for stable callback identities (avoid re-renders on every cart change)
@@ -235,6 +296,8 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
   itemsRef.current = state.items;
   const activeIdRef = useRef(state.activeTransactionId);
   activeIdRef.current = state.activeTransactionId;
+  const heldRef = useRef(state.heldTransactions);
+  heldRef.current = state.heldTransactions;
 
   const addItem = useCallback(
     (
@@ -273,12 +336,17 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
 
   const holdTransaction = useCallback((): string | null => {
     if (itemsRef.current.length === 0) return null;
+    if (heldRef.current.length >= 5) return null;
     dispatch({ type: "HOLD_TRANSACTION" });
     return activeIdRef.current;
   }, []);
 
   const resumeTransaction = useCallback((id: string) => {
     dispatch({ type: "RESUME_TRANSACTION", transactionId: id });
+  }, []);
+
+  const discardHeldTransaction = useCallback((id: string) => {
+    dispatch({ type: "DISCARD_HELD", transactionId: id });
   }, []);
 
   const setDiscountType = useCallback(
@@ -302,6 +370,15 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  // Persist held transactions to localStorage
+  useEffect(() => {
+    if (state.heldTransactions.length > 0) {
+      saveHeldToStorage(state.heldTransactions, state.holdCounter);
+    } else {
+      clearHeldFromStorage();
+    }
+  }, [state.heldTransactions, state.holdCounter]);
+
   const taxBreakdown = useMemo(
     () => calculateTaxBreakdown(state.items, state.discountType),
     [state.items, state.discountType]
@@ -319,6 +396,7 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
         clearCart,
         holdTransaction,
         resumeTransaction,
+        discardHeldTransaction,
         restoreCart,
         discountType: state.discountType,
         setDiscountType,

@@ -76,9 +76,18 @@ async function _buildReadingData(
     vatAmountCentavos += txn.vatAmountCentavos;
     discountAmountCentavos += txn.discountAmountCentavos;
 
-    if (txn.paymentMethod === "cash") cashSalesCentavos += txn.totalCentavos;
-    else if (txn.paymentMethod === "gcash") gcashSalesCentavos += txn.totalCentavos;
-    else if (txn.paymentMethod === "maya") mayaSalesCentavos += txn.totalCentavos;
+    const splitAmt = txn.splitPayment?.amountCentavos ?? 0;
+    const primaryAmt = splitAmt > 0 ? txn.totalCentavos - splitAmt : txn.totalCentavos;
+
+    if (txn.paymentMethod === "cash") cashSalesCentavos += primaryAmt;
+    else if (txn.paymentMethod === "gcash") gcashSalesCentavos += primaryAmt;
+    else if (txn.paymentMethod === "maya") mayaSalesCentavos += primaryAmt;
+
+    if (txn.splitPayment) {
+      if (txn.splitPayment.method === "cash") cashSalesCentavos += splitAmt;
+      else if (txn.splitPayment.method === "gcash") gcashSalesCentavos += splitAmt;
+      else if (txn.splitPayment.method === "maya") mayaSalesCentavos += splitAmt;
+    }
 
     // Hourly bucket
     const hour = toPHTHour(txn.createdAt);
@@ -366,9 +375,19 @@ export const getZReading = query({
       if (cashierData) {
         cashierData.transactionCount++;
         cashierData.totalSalesCentavos += txn.totalCentavos;
-        if (txn.paymentMethod === "cash") cashierData.cashSalesCentavos += txn.totalCentavos;
-        else if (txn.paymentMethod === "gcash") cashierData.gcashSalesCentavos += txn.totalCentavos;
-        else if (txn.paymentMethod === "maya") cashierData.mayaSalesCentavos += txn.totalCentavos;
+
+        const splitAmt = txn.splitPayment?.amountCentavos ?? 0;
+        const primaryAmt = splitAmt > 0 ? txn.totalCentavos - splitAmt : txn.totalCentavos;
+
+        if (txn.paymentMethod === "cash") cashierData.cashSalesCentavos += primaryAmt;
+        else if (txn.paymentMethod === "gcash") cashierData.gcashSalesCentavos += primaryAmt;
+        else if (txn.paymentMethod === "maya") cashierData.mayaSalesCentavos += primaryAmt;
+
+        if (txn.splitPayment) {
+          if (txn.splitPayment.method === "cash") cashierData.cashSalesCentavos += splitAmt;
+          else if (txn.splitPayment.method === "gcash") cashierData.gcashSalesCentavos += splitAmt;
+          else if (txn.splitPayment.method === "maya") cashierData.mayaSalesCentavos += splitAmt;
+        }
       }
     }
 

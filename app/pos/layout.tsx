@@ -201,6 +201,15 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
               Log Demand
             </Link>
           )}
+          {/* Returns quick-access link — hidden when already on that page */}
+          {pathname !== "/pos/returns" && (
+            <Link
+              href="/pos/returns"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Returns
+            </Link>
+          )}
           {/* Task 5.5: Override status to "syncing" during offline queue replay */}
           <ConnectionIndicator
             status={syncStatus === "syncing" ? "syncing" : undefined}

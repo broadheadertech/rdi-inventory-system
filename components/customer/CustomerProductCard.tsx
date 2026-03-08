@@ -6,6 +6,8 @@ import { Eye, Layers } from "lucide-react";
 import { Id } from "@/convex/_generated/dataModel";
 import { formatPrice } from "@/lib/utils";
 
+const MAX_VISIBLE_SIZES = 5;
+
 interface CustomerProductCardProps {
   styleId: Id<"styles">;
   name: string;
@@ -16,6 +18,9 @@ interface CustomerProductCardProps {
   variantCount: number;
   branchCount: number;
   sizes?: string[];
+  availableSizes?: string[];
+  createdAt?: number;
+  soldCount?: number;
   onQuickView?: (styleId: Id<"styles">) => void;
 }
 
@@ -38,8 +43,20 @@ export function CustomerProductCard({
   brandLogoUrl,
   branchCount,
   sizes,
+  availableSizes,
+  createdAt,
+  soldCount,
   onQuickView,
 }: CustomerProductCardProps) {
+  const isNew =
+    createdAt != null &&
+    Date.now() - createdAt < 7 * 24 * 60 * 60 * 1000;
+  const isHot = soldCount != null && soldCount > 10;
+  const sizesToShow = availableSizes ?? sizes;
+  const visibleSizes = sizesToShow?.slice(0, MAX_VISIBLE_SIZES);
+  const overflowCount = sizesToShow
+    ? Math.max(0, sizesToShow.length - MAX_VISIBLE_SIZES)
+    : 0;
   return (
     <Link
       href={`/browse/style/${styleId}`}
@@ -47,6 +64,21 @@ export function CustomerProductCard({
     >
       {/* Image container — 3:4 portrait aspect ratio */}
       <div className="relative aspect-[3/4] w-full bg-secondary">
+        {/* NEW / HOT badges */}
+        {(isNew || isHot) && (
+          <div className="absolute left-2 top-2 z-10 flex flex-col gap-1">
+            {isNew && (
+              <span className="rounded bg-[#E8192C] px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
+                NEW
+              </span>
+            )}
+            {isHot && (
+              <span className="rounded bg-orange-500 px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
+                HOT
+              </span>
+            )}
+          </div>
+        )}
         {/* Quick View button */}
         {onQuickView && (
           <button
@@ -103,17 +135,27 @@ export function CustomerProductCard({
         >
           {formatPrice(priceCentavos)}
         </p>
-        {/* Size availability dots */}
-        {sizes && sizes.length > 0 && (
+        {soldCount != null && soldCount > 0 && (
+          <p className="text-[11px] text-muted-foreground">
+            {soldCount} sold this month
+          </p>
+        )}
+        {/* Size availability pills */}
+        {visibleSizes && visibleSizes.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {sizes.map((size) => (
+            {visibleSizes.map((size) => (
               <span
                 key={size}
-                className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full border border-border px-1 text-[10px] text-muted-foreground"
+                className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full border border-[#2A2A2A] px-1.5 text-[10px] text-gray-400"
               >
                 {size}
               </span>
             ))}
+            {overflowCount > 0 && (
+              <span className="inline-flex h-5 items-center justify-center px-1 text-[10px] text-gray-400">
+                +{overflowCount} more
+              </span>
+            )}
           </div>
         )}
         {/* Inline branch availability */}

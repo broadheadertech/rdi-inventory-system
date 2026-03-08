@@ -15,6 +15,7 @@ const PUBLIC_PREFIXES = [
   "/search",
   "/cart",
   "/checkout",
+  "/wishlist",
   "/account",
 ];
 

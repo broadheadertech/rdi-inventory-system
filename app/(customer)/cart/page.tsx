@@ -114,27 +114,38 @@ export default function CartPage() {
       </div>
 
       {/* Free shipping progress */}
-      {amountToFreeShipping > 0 && (
-        <div className="mt-4 rounded-lg border border-border bg-card p-3">
-          <p className="text-sm text-muted-foreground">
-            Add {formatPrice(amountToFreeShipping)} more for{" "}
-            <span className="font-medium text-primary">FREE shipping</span>
+      <div className="mt-4 rounded-lg border border-border bg-card p-3">
+        {amountToFreeShipping > 0 ? (
+          <>
+            <p className="text-sm text-muted-foreground">
+              Add{" "}
+              <span className="font-semibold text-foreground">
+                {formatPrice(amountToFreeShipping)}
+              </span>{" "}
+              more for{" "}
+              <span className="font-semibold" style={{ color: "#E8192C" }}>
+                FREE shipping!
+              </span>
+            </p>
+            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full transition-all duration-500 ease-out"
+                style={{
+                  width: `${progressPercent}%`,
+                  backgroundColor: "#E8192C",
+                }}
+              />
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              {formatPrice(cart.totalCentavos)} / {formatPrice(FREE_SHIPPING_THRESHOLD)}
+            </p>
+          </>
+        ) : (
+          <p className="text-sm font-semibold text-green-500">
+            🎉 You qualify for FREE shipping!
           </p>
-          <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary transition-all"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-        </div>
-      )}
-      {amountToFreeShipping <= 0 && (
-        <div className="mt-4 rounded-lg border border-green-200 bg-green-50 p-3 dark:border-green-900 dark:bg-green-950">
-          <p className="text-sm font-medium text-green-700 dark:text-green-400">
-            You qualify for FREE shipping!
-          </p>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Cart items */}
       <div className="mt-6 space-y-4">
@@ -246,7 +257,16 @@ export default function CartPage() {
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Shipping</span>
-            <span>{shippingFee === 0 ? "FREE" : formatPrice(shippingFee)}</span>
+            {shippingFee === 0 ? (
+              <span className="flex items-center gap-1.5">
+                <span className="text-xs text-muted-foreground line-through">
+                  {formatPrice(9900)}
+                </span>
+                <span className="font-semibold text-green-500">FREE</span>
+              </span>
+            ) : (
+              <span>{formatPrice(shippingFee)}</span>
+            )}
           </div>
           <div className="border-t border-border pt-2">
             <div className="flex justify-between text-base font-bold">

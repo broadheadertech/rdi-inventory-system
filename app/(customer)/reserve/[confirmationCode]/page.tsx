@@ -3,35 +3,13 @@
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, Clock, XCircle, MapPin, Copy, Check } from "lucide-react";
 import { cn, formatPrice } from "@/lib/utils";
+import { ReservationCountdown } from "@/components/customer/ReservationCountdown";
+import BranchRating from "@/components/customer/BranchRating";
 import { toast } from "sonner";
-
-// ─── Countdown Hook ─────────────────────────────────────────────────────────
-
-function useCountdown(expiresAt: number) {
-  const [remaining, setRemaining] = useState(expiresAt - Date.now());
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setRemaining(expiresAt - Date.now());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [expiresAt]);
-
-  return remaining;
-}
-
-function formatCountdown(ms: number): string {
-  if (ms <= 0) return "Expired";
-  const totalSeconds = Math.floor(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  if (hours > 0) return `${hours}h ${minutes}m remaining`;
-  return `${minutes}m remaining`;
-}
 
 // ─── Status Badge ───────────────────────────────────────────────────────────
 
@@ -85,8 +63,6 @@ export default function ReservationConfirmationPage() {
     api.reservations.reservations.getReservationByConfirmation,
     { confirmationCode }
   );
-
-  const remaining = useCountdown(reservation?.expiresAt ?? 0);
 
   const handleCopy = async () => {
     try {
@@ -212,21 +188,10 @@ export default function ReservationConfirmationPage() {
                 timeStyle: "short",
               })}
             </p>
-            <p
-              className={cn(
-                "mt-1 text-sm font-medium",
-                remaining > 0 ? "text-blue-600" : "text-red-600"
-              )}
-            >
-              {remaining > 0 ? (
-                <>
-                  <Clock className="mr-1 inline h-3.5 w-3.5" />
-                  {formatCountdown(remaining)}
-                </>
-              ) : (
-                "Pickup window has expired"
-              )}
-            </p>
+            <ReservationCountdown
+              expiresAt={reservation.expiresAt}
+              className="mt-1"
+            />
           </div>
         )}
 
@@ -236,6 +201,14 @@ export default function ReservationConfirmationPage() {
           <p className="font-medium">{reservation.customerName}</p>
         </div>
       </div>
+
+      {/* Branch Rating (shown after fulfillment) */}
+      {reservation.status === "fulfilled" && (
+        <BranchRating
+          reservationId={reservation._id}
+          branchName={reservation.branchName}
+        />
+      )}
 
       {/* Actions */}
       <div className="mt-6 space-y-3 text-center">

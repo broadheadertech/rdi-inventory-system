@@ -20,11 +20,12 @@ import {
   Loader2,
   Tag,
   X,
+  Split,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/formatters";
-import { usePOSCart, type CartItem } from "@/components/providers/POSCartProvider";
+import { usePOSCart, type CartItem, type HeldTransaction } from "@/components/providers/POSCartProvider";
 import { calculateTaxBreakdown, type TaxBreakdown } from "@/convex/_helpers/taxCalculations";
 import { useConnectionStatus } from "@/components/shared/ConnectionIndicator";
 import { encrypt } from "@/lib/encryption";
@@ -46,7 +47,7 @@ type TransactionResult = {
 export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
   const {
     items, heldTransactions, updateQuantity, removeItem, clearCart,
-    holdTransaction, resumeTransaction, discountType, setDiscountType, taxBreakdown,
+    holdTransaction, resumeTransaction, discardHeldTransaction, discountType, setDiscountType, taxBreakdown,
     selectedPromoId, setPromoId,
   } = usePOSCart();
 
@@ -112,6 +113,7 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
           removeItem={removeItem}
           holdTransaction={holdTransaction}
           resumeTransaction={resumeTransaction}
+          discardHeldTransaction={discardHeldTransaction}
           showClearConfirm={showClearConfirm}
           setShowClearConfirm={setShowClearConfirm}
           handleClearCart={handleClearCart}
@@ -176,6 +178,7 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
                   <HeldTransactionBadges
                     heldTransactions={heldTransactions}
                     resumeTransaction={resumeTransaction}
+                    discardHeldTransaction={discardHeldTransaction}
                   />
                 )}
 
@@ -230,6 +233,12 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
           <span className="font-medium">
             {totalItems} item{totalItems !== 1 ? "s" : ""}
           </span>
+          {heldTransactions.length > 0 && (
+            <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+              <Pause className="h-3 w-3" />
+              {heldTransactions.length}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="font-bold">{formatCurrency(taxBreakdown.totalCentavos - (promoPreview?.applicable ? promoPreview.discountCentavos : 0))}</span>
@@ -246,35 +255,68 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
 
 // ─── Held Transactions ────────────────────────────────────────────────────────
 
+function formatTimeAgo(heldAt: number): string {
+  const diffMs = Date.now() - heldAt;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  return `${diffHr}h ${diffMin % 60}m ago`;
+}
+
 function HeldTransactionBadges({
   heldTransactions,
   resumeTransaction,
+  discardHeldTransaction,
 }: {
-  heldTransactions: { id: string; items: CartItem[]; heldAt: number; discountType: DiscountType }[];
+  heldTransactions: HeldTransaction[];
   resumeTransaction: (id: string) => void;
+  discardHeldTransaction: (id: string) => void;
 }) {
   return (
-    <div className="mb-3 flex flex-wrap gap-2">
+    <div className="mb-3 space-y-2">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        Held Orders ({heldTransactions.length}/5)
+      </p>
       {heldTransactions.map((txn) => {
         const itemCount = txn.items.reduce((s, i) => s + i.quantity, 0);
         const breakdown = calculateTaxBreakdown(txn.items, txn.discountType);
         const isDiscounted = txn.discountType !== "none";
         return (
-          <button
+          <div
             key={txn.id}
-            onClick={() => resumeTransaction(txn.id)}
-            className="flex items-center gap-1.5 rounded-md border border-dashed border-muted-foreground/40 bg-muted/50 px-3 py-2 text-sm opacity-70 transition-opacity hover:opacity-100"
+            className="flex items-center gap-2 rounded-md border border-dashed border-amber-400/60 bg-amber-50/50 px-3 py-2"
           >
-            <Play className="h-3.5 w-3.5" />
-            <span>
-              {itemCount} item{itemCount !== 1 ? "s" : ""} · {formatCurrency(breakdown.totalCentavos)}
-              {isDiscounted && (
-                <span className="ml-1 text-xs text-green-600">
-                  {txn.discountType === "senior" ? "SC" : "PWD"}
-                </span>
-              )}
-            </span>
-          </button>
+            <Pause className="h-4 w-4 text-amber-600 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">
+                {txn.label}
+                {isDiscounted && (
+                  <span className="ml-1.5 text-xs text-green-600">
+                    {txn.discountType === "senior" ? "SC" : "PWD"}
+                  </span>
+                )}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {itemCount} item{itemCount !== 1 ? "s" : ""} · {formatCurrency(breakdown.totalCentavos)} · {formatTimeAgo(txn.heldAt)}
+              </p>
+            </div>
+            <button
+              onClick={() => resumeTransaction(txn.id)}
+              className="shrink-0 flex items-center gap-1 rounded-md border border-primary/30 bg-primary/10 px-2 py-1.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+              title="Recall this order"
+            >
+              <Play className="h-3 w-3" />
+              Recall
+            </button>
+            <button
+              onClick={() => discardHeldTransaction(txn.id)}
+              className="shrink-0 rounded-md p-1.5 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title="Discard this held order"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         );
       })}
     </div>
@@ -627,6 +669,7 @@ function CartContent({
   removeItem,
   holdTransaction,
   resumeTransaction,
+  discardHeldTransaction,
   showClearConfirm,
   setShowClearConfirm,
   handleClearCart,
@@ -644,11 +687,12 @@ function CartContent({
   setPromoId: (promoId: string | null) => void;
   activePromos: ActivePromo[];
   promoPreview: PromoResult | null;
-  heldTransactions: { id: string; items: CartItem[]; heldAt: number; discountType: DiscountType }[];
+  heldTransactions: HeldTransaction[];
   updateQuantity: (variantId: CartItem["variantId"], delta: number) => void;
   removeItem: (variantId: CartItem["variantId"]) => void;
   holdTransaction: () => string | null;
   resumeTransaction: (id: string) => void;
+  discardHeldTransaction: (id: string) => void;
   showClearConfirm: boolean;
   setShowClearConfirm: (v: boolean) => void;
   handleClearCart: () => void;
@@ -668,6 +712,12 @@ function CartContent({
             {totalItems}
           </span>
         )}
+        {heldTransactions.length > 0 && (
+          <span className="ml-auto flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+            <Pause className="h-3 w-3" />
+            {heldTransactions.length} held
+          </span>
+        )}
       </div>
 
       {/* Held transactions */}
@@ -676,6 +726,7 @@ function CartContent({
           <HeldTransactionBadges
             heldTransactions={heldTransactions}
             resumeTransaction={resumeTransaction}
+            discardHeldTransaction={discardHeldTransaction}
           />
         </div>
       )}
@@ -784,16 +835,55 @@ function PaymentPanel({
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Split payment state
+  const [isSplit, setIsSplit] = useState(false);
+  const [splitMethod, setSplitMethod] = useState<PaymentMethod>("gcash");
+  const [splitAmountInput, setSplitAmountInput] = useState("");
+
   const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
   const totalCentavos = taxBreakdown.totalCentavos - promoDiscount;
+
+  // Split amount in centavos (secondary payment)
+  const splitAmountCentavos = (() => {
+    if (!isSplit) return 0;
+    const parsed = parseFloat(splitAmountInput);
+    if (isNaN(parsed) || parsed < 0) return 0;
+    return Math.round(parsed * 100);
+  })();
+
+  // Primary payment portion
+  const primaryPortion = isSplit ? totalCentavos - splitAmountCentavos : totalCentavos;
+
+  // Change calculation (only for cash primary)
   const changeCentavos =
-    amountTendered !== null ? amountTendered - totalCentavos : null;
-  const isCashSufficient = amountTendered !== null && amountTendered >= totalCentavos;
-  const canProcess =
-    paymentMethod !== "cash" || isCashSufficient;
+    paymentMethod === "cash" && amountTendered !== null
+      ? amountTendered - primaryPortion
+      : null;
+  const isCashSufficient =
+    paymentMethod !== "cash" || (amountTendered !== null && amountTendered >= primaryPortion);
+
+  // Validation
+  const isSplitValid = !isSplit || (
+    splitAmountCentavos > 0 &&
+    splitAmountCentavos < totalCentavos &&
+    splitMethod !== paymentMethod
+  );
+
+  const canProcess = isCashSufficient && isSplitValid;
+
+  // When toggling split, auto-pick a secondary method different from primary
+  const handleToggleSplit = () => {
+    if (!isSplit) {
+      const alt = PAYMENT_OPTIONS.find((o) => o.value !== paymentMethod);
+      if (alt) setSplitMethod(alt.value);
+      setSplitAmountInput("");
+    }
+    setIsSplit(!isSplit);
+    setError(null);
+  };
 
   const handleQuickDenomination = (value: number) => {
-    setAmountTendered(value === 0 ? totalCentavos : value);
+    setAmountTendered(value === 0 ? primaryPortion : value);
     setError(null);
   };
 
@@ -813,6 +903,10 @@ function PaymentPanel({
     setIsProcessing(true);
     setError(null);
 
+    const splitPaymentArg = isSplit && splitAmountCentavos > 0
+      ? { method: splitMethod, amountCentavos: splitAmountCentavos }
+      : undefined;
+
     // Task 4.2: Offline interception — queue instead of calling Convex
     if (connectionStatus === "offline") {
       try {
@@ -825,6 +919,7 @@ function PaymentPanel({
           paymentMethod,
           discountType,
           amountTenderedCentavos: paymentMethod === "cash" ? amountTendered! : undefined,
+          splitPayment: splitPaymentArg,
         };
         const encryptedPayload = await encrypt(JSON.stringify(payload));
         const branchId = String(currentUser?.branchId ?? "unknown");
@@ -845,7 +940,7 @@ function PaymentPanel({
         toast.info("Transaction queued — will sync when online");
         clearCart();
         setIsProcessing(false);
-        onCancel(); // Close payment panel — cart cleared, cashier continues
+        onCancel();
       } catch {
         setIsProcessing(false);
         setError("Failed to queue offline transaction. Please try again.");
@@ -867,6 +962,7 @@ function PaymentPanel({
         promotionId: selectedPromoId && discountType === "none"
           ? (selectedPromoId as Id<"promotions">)
           : undefined,
+        splitPayment: splitPaymentArg,
       });
 
       onComplete({
@@ -907,6 +1003,9 @@ function PaymentPanel({
     }
   };
 
+  // Available secondary methods (exclude the primary)
+  const secondaryOptions = PAYMENT_OPTIONS.filter((o) => o.value !== paymentMethod);
+
   return (
     <div className="border-t pt-4">
       {/* Back button */}
@@ -926,12 +1025,17 @@ function PaymentPanel({
       </div>
 
       {/* Payment method selector */}
-      <div className="mb-4 flex gap-1 rounded-md border p-1">
+      <div className="mb-2 flex gap-1 rounded-md border p-1">
         {PAYMENT_OPTIONS.map((opt) => (
           <button
             key={opt.value}
             onClick={() => {
               setPaymentMethod(opt.value);
+              // If split is on and new primary matches split method, change split method
+              if (isSplit && opt.value === splitMethod) {
+                const alt = PAYMENT_OPTIONS.find((o) => o.value !== opt.value);
+                if (alt) setSplitMethod(alt.value);
+              }
               setError(null);
             }}
             disabled={isProcessing}
@@ -947,7 +1051,110 @@ function PaymentPanel({
         ))}
       </div>
 
-      {/* Cash tendered section */}
+      {/* Split payment toggle */}
+      <button
+        onClick={handleToggleSplit}
+        disabled={isProcessing}
+        className={cn(
+          "mb-4 flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2.5 text-sm font-medium transition-colors",
+          isSplit
+            ? "border-blue-500 bg-blue-500/10 text-blue-400"
+            : "border-muted hover:border-muted-foreground/30 text-muted-foreground hover:text-foreground"
+        )}
+      >
+        <Split className="h-4 w-4" />
+        {isSplit ? "Split Payment On" : "Split Payment"}
+      </button>
+
+      {/* Split payment configuration */}
+      {isSplit && (
+        <div className="mb-4 space-y-3 rounded-md border border-blue-500/30 bg-blue-500/5 p-3">
+          <p className="text-xs font-semibold text-blue-400 uppercase tracking-wider">
+            Split Payment
+          </p>
+
+          {/* Primary payment summary */}
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">
+              {PAYMENT_OPTIONS.find((o) => o.value === paymentMethod)?.label} (Primary)
+            </span>
+            <span className="font-semibold">
+              {primaryPortion > 0 ? formatCurrency(primaryPortion) : "--"}
+            </span>
+          </div>
+
+          {/* Secondary method selector */}
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              Second payment method
+            </label>
+            <div className="flex gap-1 rounded-md border p-1">
+              {secondaryOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => {
+                    setSplitMethod(opt.value);
+                    setError(null);
+                  }}
+                  disabled={isProcessing}
+                  className={cn(
+                    "flex-1 rounded-sm py-2 text-sm font-medium transition-colors",
+                    splitMethod === opt.value
+                      ? "bg-blue-500 text-white shadow-sm"
+                      : "hover:bg-muted"
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Secondary amount input */}
+          <div>
+            <label className="mb-1 block text-xs text-muted-foreground">
+              {PAYMENT_OPTIONS.find((o) => o.value === splitMethod)?.label} amount
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="0.00"
+              className="h-12 w-full rounded-md border bg-background px-3 text-lg"
+              value={splitAmountInput}
+              onChange={(e) => {
+                setSplitAmountInput(e.target.value);
+                setError(null);
+              }}
+              disabled={isProcessing}
+            />
+          </div>
+
+          {/* Remainder display */}
+          {splitAmountCentavos > 0 && (
+            <div
+              className={cn(
+                "rounded-md px-3 py-2 text-center text-sm",
+                primaryPortion > 0
+                  ? "border border-blue-500/40 bg-blue-500/10"
+                  : "border border-destructive bg-destructive/10"
+              )}
+            >
+              {primaryPortion > 0 ? (
+                <p className="font-medium text-blue-400">
+                  {PAYMENT_OPTIONS.find((o) => o.value === paymentMethod)?.label} portion: {formatCurrency(primaryPortion)}
+                </p>
+              ) : (
+                <p className="font-medium text-destructive">
+                  Amount exceeds total
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Cash tendered section (shown when primary is Cash) */}
       {paymentMethod === "cash" && (
         <div className="mb-4 space-y-3">
           {/* Quick denomination buttons */}
@@ -990,12 +1197,12 @@ function PaymentPanel({
               className={cn(
                 "rounded-md px-3 py-2 text-center",
                 isCashSufficient
-                  ? "border border-green-500 bg-green-50"
+                  ? "border border-green-500 bg-green-500/10"
                   : "border border-destructive bg-destructive/10"
               )}
             >
               {isCashSufficient ? (
-                <p className="text-xl font-bold text-green-600">
+                <p className="text-xl font-bold text-green-400">
                   Change: {formatCurrency(changeCentavos!)}
                 </p>
               ) : (

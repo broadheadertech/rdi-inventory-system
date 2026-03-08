@@ -290,6 +290,8 @@ export const getHomepageData = query({
           subtitle: b.subtitle,
           imageUrl: await ctx.storage.getUrl(b.imageStorageId),
           linkUrl: b.linkUrl,
+          placement: b.placement,
+          endDate: b.endDate,
         }))
     );
 

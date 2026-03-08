@@ -119,6 +119,7 @@ function SearchContent() {
                   variantCount={style.variantCount}
                   branchCount={style.branchCount}
                   sizes={style.sizes}
+                  createdAt={style.createdAt}
                 />
               ))}
             </div>

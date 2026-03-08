@@ -7,9 +7,12 @@ import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { ArrowLeft, ShoppingBag, Heart } from "lucide-react";
+import { ArrowLeft, ShoppingBag, Heart, BellRing, Star, ThumbsUp, X } from "lucide-react";
+import { PriceDropAlert } from "@/components/storefront/PriceDropAlert";
+import { ImageLightbox } from "@/components/customer/ImageLightbox";
 import { toast } from "sonner";
 import { cn, formatPrice } from "@/lib/utils";
+import { useSizePreferences } from "@/lib/hooks/useSizePreferences";
 import { BranchStockDisplay } from "@/components/shared/BranchStockDisplay";
 import {
   Sheet,
@@ -23,31 +26,26 @@ const GARMENT_SIZE_ORDER: Record<string, number> = {
   XS: 0, S: 1, M: 2, L: 3, XL: 4, XXL: 5, XXXL: 6,
 };
 
-// Simple color name to CSS color mapping for swatch circles
-const COLOR_MAP: Record<string, string> = {
-  white: "#ffffff",
-  black: "#1a1a1a",
-  red: "#dc2626",
-  blue: "#2563eb",
-  navy: "#1e3a5f",
-  green: "#16a34a",
-  yellow: "#eab308",
-  orange: "#ea580c",
-  pink: "#ec4899",
-  purple: "#9333ea",
-  gray: "#6b7280",
-  grey: "#6b7280",
-  brown: "#92400e",
-  beige: "#d4b896",
-  cream: "#fffdd0",
-  maroon: "#7f1d1d",
-  teal: "#0d9488",
-  coral: "#f87171",
-  khaki: "#bdb76b",
+// Color name to hex mapping for swatch circles
+const COLOR_HEX_MAP: Record<string, string> = {
+  "Black": "#000000", "White": "#FFFFFF", "Red": "#E8192C",
+  "Blue": "#2563EB", "Navy": "#1E3A5F", "Gray": "#6B7280",
+  "Green": "#16A34A", "Yellow": "#EAB308", "Orange": "#F97316",
+  "Pink": "#EC4899", "Purple": "#9333EA", "Brown": "#92400E",
+  "Beige": "#D2B48C", "Maroon": "#800000", "Olive": "#808000",
+  "Teal": "#14B8A6", "Coral": "#FF7F50",
+  // Extra aliases
+  "Grey": "#6B7280", "Cream": "#FFFDD0", "Khaki": "#BDB76B",
 };
 
 function colorToHex(colorName: string): string {
-  return COLOR_MAP[colorName.toLowerCase()] ?? "#d4d4d8";
+  if (COLOR_HEX_MAP[colorName]) return COLOR_HEX_MAP[colorName];
+  const titleCase = colorName.charAt(0).toUpperCase() + colorName.slice(1).toLowerCase();
+  if (COLOR_HEX_MAP[titleCase]) return COLOR_HEX_MAP[titleCase];
+  const found = Object.entries(COLOR_HEX_MAP).find(
+    ([k]) => k.toLowerCase() === colorName.toLowerCase()
+  );
+  return found ? found[1] : "#A1A1AA"; // zinc-400 fallback for unknown colors
 }
 
 export default function StyleDetailPage() {
@@ -77,6 +75,38 @@ export default function StyleDetailPage() {
   const addToCart = useMutation(api.storefront.cart.addToCart);
   const [addingToCart, setAddingToCart] = useState(false);
   const trackView = useMutation(api.storefront.recentlyViewed.trackView);
+  const toggleWishlist = useMutation(api.storefront.wishlist.toggleWishlist);
+  const isInWishlist = useQuery(
+    api.storefront.wishlist.isInWishlist,
+    selectedVariantId ? { variantId: selectedVariantId } : "skip"
+  );
+  const [restockSubmitting, setRestockSubmitting] = useState(false);
+  const { getPreferredSize, savePreferredSize } = useSizePreferences();
+  const sizeAutoSelected = useRef(false);
+
+  // Complete the Look recommendations
+  const recommendations = useQuery(
+    api.storefront.recommendations.getCompleteTheLook,
+    { styleId }
+  );
+
+  // Frequently Bought Together recommendations
+  const frequentlyBought = useQuery(
+    api.storefront.recommendations.getFrequentlyBoughtTogether,
+    { styleId }
+  );
+
+  // Reviews
+  const reviewsData = useQuery(api.storefront.reviews.getStyleReviews, { styleId, limit: 50 });
+  const submitReview = useMutation(api.storefront.reviews.submitReview);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewHoverRating, setReviewHoverRating] = useState(0);
+  const [reviewTitle, setReviewTitle] = useState("");
+  const [reviewBody, setReviewBody] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [enlargedImageUrl, setEnlargedImageUrl] = useState<string | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
 
   // Track product view
   useEffect(() => {
@@ -128,6 +158,22 @@ export default function StyleDetailPage() {
     }
   }, [selectedColor, style]);
 
+  // Auto-select preferred size from saved size preferences
+  useEffect(() => {
+    if (!style || !selectedColor || sizeAutoSelected.current) return;
+    const categoryName = style.categoryName;
+    const preferred = getPreferredSize(categoryName);
+    if (!preferred) return;
+    const filtered = style.variants.filter((v) => v.color === selectedColor);
+    const match = filtered.find(
+      (v) => v.size === preferred && v.branchesInStock > 0
+    );
+    if (match) {
+      setSelectedVariantId(match._id);
+      sizeAutoSelected.current = true;
+    }
+  }, [selectedColor, style, getPreferredSize]);
+
   // Get the selected variant for price display
   const selectedVariant = style?.variants.find((v) => v._id === selectedVariantId);
 
@@ -140,6 +186,15 @@ export default function StyleDetailPage() {
   const isOutOfStock = selectedVariant
     ? selectedVariant.branchesInStock === 0
     : sizesForColor.length > 0 && sizesForColor.every((v) => v.branchesInStock === 0);
+
+  // Resolve the variant image URL for the selected color (first variant with an imageUrl)
+  const colorVariantImageUrl = useMemo(() => {
+    if (!style || !selectedColor) return null;
+    const variantWithImage = style.variants.find(
+      (v) => v.color === selectedColor && v.imageUrl
+    );
+    return variantWithImage?.imageUrl ?? null;
+  }, [style, selectedColor]);
 
   // Image gallery scroll tracking with IntersectionObserver
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -275,9 +330,27 @@ export default function StyleDetailPage() {
       </div>
 
       <div className="lg:grid lg:grid-cols-2 lg:gap-8 lg:px-6">
-        {/* Image Gallery */}
+        {/* Image Gallery — color variant image takes priority when available */}
         <div className="relative lg:sticky lg:top-20 lg:self-start">
-          {validImages.length > 0 ? (
+          {colorVariantImageUrl ? (
+            /* Single color-variant image with crossfade — clickable for lightbox */
+            <button
+              type="button"
+              onClick={() => setLightboxIndex(0)}
+              className="relative w-full aspect-[3/4] cursor-zoom-in"
+              aria-label="Open full-screen image"
+            >
+              <Image
+                key={colorVariantImageUrl}
+                src={colorVariantImageUrl}
+                alt={`${style.name} - ${selectedColor}`}
+                fill
+                sizes="(max-width: 768px) 100vw, 50vw"
+                className="object-cover animate-in fade-in duration-300"
+                priority
+              />
+            </button>
+          ) : validImages.length > 0 ? (
             <>
               <div
                 ref={galleryRef}
@@ -289,14 +362,21 @@ export default function StyleDetailPage() {
                     ref={(el) => setImageRef(el, i)}
                     className="relative w-full flex-shrink-0 snap-center aspect-[3/4]"
                   >
-                    <Image
-                      src={img.url!}
-                      alt={`${style.name} - image ${i + 1}`}
-                      fill
-                      sizes="(max-width: 768px) 100vw, 50vw"
-                      className="object-cover"
-                      priority={i === 0}
-                    />
+                    <button
+                      type="button"
+                      onClick={() => setLightboxIndex(i)}
+                      className="relative w-full h-full cursor-zoom-in"
+                      aria-label={`Open image ${i + 1} in full screen`}
+                    >
+                      <Image
+                        src={img.url!}
+                        alt={`${style.name} - image ${i + 1}`}
+                        fill
+                        sizes="(max-width: 768px) 100vw, 50vw"
+                        className="object-cover"
+                        priority={i === 0}
+                      />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -312,6 +392,39 @@ export default function StyleDetailPage() {
                       )}
                       aria-hidden="true"
                     />
+                  ))}
+                </div>
+              )}
+              {/* Thumbnail strip below the gallery */}
+              {validImages.length > 1 && (
+                <div className="flex gap-2 p-3 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+                  {validImages.map((img, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setActiveImageIndex(i);
+                        // Scroll the gallery to the selected image
+                        const target = imageRefs.current[i];
+                        if (target) {
+                          target.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+                        }
+                      }}
+                      className={cn(
+                        "relative h-16 w-16 flex-shrink-0 rounded-md overflow-hidden border-2 transition-all",
+                        i === activeImageIndex
+                          ? "border-primary ring-1 ring-primary/50"
+                          : "border-transparent opacity-60 hover:opacity-90"
+                      )}
+                      aria-label={`View image ${i + 1}`}
+                    >
+                      <Image
+                        src={img.url!}
+                        alt={`Thumbnail ${i + 1}`}
+                        fill
+                        sizes="64px"
+                        className="object-cover"
+                      />
+                    </button>
                   ))}
                 </div>
               )}
@@ -369,30 +482,53 @@ export default function StyleDetailPage() {
                 )}
               </span>
             )}
+            <div className="mt-1">
+              <PriceDropAlert styleId={styleId} />
+            </div>
           </div>
 
-          {/* Color Swatches */}
+          {/* Color Swatches with Live Image Preview */}
           {uniqueColors.length > 0 && (
             <div>
               <p className="mb-2 text-sm font-medium">
                 Color: <span className="font-normal text-muted-foreground">{selectedColor}</span>
               </p>
-              <div className="flex flex-wrap gap-2">
-                {uniqueColors.map((color) => (
-                  <button
-                    key={color}
-                    onClick={() => setSelectedColor(color)}
-                    className={cn(
-                      "h-8 w-8 rounded-full border-2 transition-all",
-                      selectedColor === color
-                        ? "ring-2 ring-primary ring-offset-2"
-                        : "border-muted-foreground/30"
-                    )}
-                    style={{ backgroundColor: colorToHex(color) }}
-                    aria-label={`Select ${color}`}
-                    aria-pressed={selectedColor === color}
-                  />
-                ))}
+              <div className="flex flex-wrap gap-3">
+                {uniqueColors.map((color) => {
+                  const isSelected = selectedColor === color;
+                  const hex = colorToHex(color);
+                  const isWhitish = hex.toUpperCase() === "#FFFFFF" || hex.toUpperCase() === "#FFFDD0";
+                  return (
+                    <button
+                      key={color}
+                      onClick={() => setSelectedColor(color)}
+                      title={color}
+                      className={cn(
+                        "relative h-9 w-9 rounded-full border-2 transition-all duration-200",
+                        isSelected
+                          ? "scale-110 ring-2 ring-primary ring-offset-2 ring-offset-background border-primary"
+                          : "border-zinc-600 hover:scale-105 hover:border-zinc-400",
+                        isWhitish && !isSelected && "border-zinc-400"
+                      )}
+                      style={{ backgroundColor: hex }}
+                      aria-label={`Select color ${color}`}
+                      aria-pressed={isSelected}
+                    >
+                      {/* Inner check indicator for selected swatch */}
+                      {isSelected && (
+                        <span
+                          className={cn(
+                            "absolute inset-0 flex items-center justify-center text-xs font-bold",
+                            isWhitish ? "text-zinc-800" : "text-white"
+                          )}
+                          aria-hidden="true"
+                        >
+                          &#10003;
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -426,6 +562,15 @@ export default function StyleDetailPage() {
             </div>
           )}
 
+          {/* Stock urgency indicator */}
+          {selectedVariant &&
+            selectedVariant.totalStock > 0 &&
+            selectedVariant.totalStock <= 5 && (
+              <p className="text-xs font-semibold text-[#E8192C]">
+                Only {selectedVariant.totalStock} left in your size!
+              </p>
+            )}
+
           {/* Add to Cart */}
           {selectedVariantId && !isOutOfStock && (
             <button
@@ -433,6 +578,10 @@ export default function StyleDetailPage() {
                 setAddingToCart(true);
                 try {
                   await addToCart({ variantId: selectedVariantId });
+                  // Save the selected size as the preferred size for this category
+                  if (selectedVariant && style) {
+                    savePreferredSize(style.categoryName, selectedVariant.size);
+                  }
                   toast.success("Added to bag!");
                 } catch {
                   toast.error("Please sign in to add items to your bag");
@@ -449,15 +598,36 @@ export default function StyleDetailPage() {
           )}
 
           {/* Notify Me — out of stock */}
-          {isOutOfStock && (
-            <button
-              onClick={() =>
-                toast.info("Notifications coming soon! Check back later.")
-              }
-              className="w-full min-h-[44px] rounded-md border border-primary text-primary text-sm font-medium hover:bg-primary/5"
-            >
-              Notify Me When Available
-            </button>
+          {isOutOfStock && selectedVariantId && (
+            isInWishlist ? (
+              <button
+                disabled
+                className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-400 text-sm font-medium cursor-default"
+              >
+                <BellRing className="h-4 w-4" />
+                Watching for Restock
+              </button>
+            ) : (
+              <button
+                onClick={async () => {
+                  if (!selectedVariantId) return;
+                  setRestockSubmitting(true);
+                  try {
+                    await toggleWishlist({ variantId: selectedVariantId });
+                    toast.success("We\u2019ll notify you when this is back in stock!");
+                  } catch {
+                    toast.error("Please sign in to get restock notifications");
+                  } finally {
+                    setRestockSubmitting(false);
+                  }
+                }}
+                disabled={restockSubmitting}
+                className="flex w-full min-h-[48px] items-center justify-center gap-2 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-100 text-sm font-bold uppercase tracking-wider hover:bg-zinc-800 disabled:opacity-50"
+              >
+                <BellRing className="h-4 w-4" />
+                {restockSubmitting ? "Saving..." : "Notify Me When Back in Stock"}
+              </button>
+            )
           )}
 
           {/* Branch Stock Display */}
@@ -472,6 +642,499 @@ export default function StyleDetailPage() {
           />
         </div>
       </div>
+
+      {/* Complete the Look — cross-sell recommendations */}
+      {recommendations === undefined && (
+        <section className="mt-10 px-4 lg:px-6">
+          <div className="mb-4">
+            <div className="h-5 w-40 rounded bg-zinc-800 animate-pulse" />
+            <div className="mt-1.5 h-4 w-28 rounded bg-zinc-800/60 animate-pulse" />
+          </div>
+          <div className="flex gap-3 overflow-hidden">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex-shrink-0 w-[160px] sm:w-[180px] rounded-lg border border-border bg-card">
+                <div className="aspect-[3/4] w-full bg-zinc-800 animate-pulse" />
+                <div className="p-2.5 space-y-2">
+                  <div className="h-3 w-16 rounded bg-zinc-800 animate-pulse" />
+                  <div className="h-4 w-full rounded bg-zinc-800 animate-pulse" />
+                  <div className="h-4 w-20 rounded bg-zinc-800 animate-pulse" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {recommendations && recommendations.items.length > 0 && (
+        <section className="mt-10 px-4 lg:px-6">
+          <div className="mb-4">
+            <h2 className="text-lg font-bold">Complete the Look</h2>
+            <p className="text-sm text-muted-foreground">
+              More from {recommendations.brandName}
+            </p>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-4 [&::-webkit-scrollbar]:hidden">
+            {recommendations.items.map((item) => (
+              <Link
+                key={String(item.styleId)}
+                href={`/browse/style/${item.styleId}`}
+                className="group flex-shrink-0 w-[160px] sm:w-[180px] overflow-hidden rounded-lg border border-border bg-card transition-all hover:border-[var(--customer-accent-glow)] hover:shadow-[0_0_20px_rgba(232,25,44,0.1)]"
+              >
+                <div className="relative aspect-[3/4] w-full bg-secondary">
+                  {item.primaryImageUrl ? (
+                    <Image
+                      src={item.primaryImageUrl}
+                      alt={item.name}
+                      fill
+                      sizes="180px"
+                      className="object-cover transition-transform group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
+                      No image
+                    </div>
+                  )}
+                </div>
+                <div className="p-2.5 space-y-1">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    {item.categoryName}
+                  </p>
+                  <h3 className="text-sm font-medium leading-tight line-clamp-2 text-foreground">
+                    {item.name}
+                  </h3>
+                  <p className="font-mono text-sm font-bold text-primary">
+                    {formatPrice(item.basePriceCentavos)}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ─── Frequently Bought Together ──────────────────────────────────── */}
+      {frequentlyBought === undefined && (
+        <section className="mt-10 px-4 lg:px-6">
+          <div className="mb-4">
+            <div className="h-5 w-48 rounded bg-zinc-800 animate-pulse" />
+            <div className="mt-1.5 h-4 w-36 rounded bg-zinc-800/60 animate-pulse" />
+          </div>
+          <div className="flex items-center gap-2 overflow-hidden">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="contents">
+                {i > 0 && <span className="flex-shrink-0 text-2xl font-bold text-zinc-800">+</span>}
+                <div className="flex-shrink-0 w-[120px] sm:w-[140px] rounded-lg border border-border bg-card">
+                  <div className="aspect-[3/4] w-full bg-zinc-800 animate-pulse" />
+                  <div className="p-2 space-y-1.5">
+                    <div className="h-3 w-full rounded bg-zinc-800 animate-pulse" />
+                    <div className="h-3 w-16 rounded bg-zinc-800 animate-pulse" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {frequentlyBought && frequentlyBought.length > 0 && (
+        <section className="mt-10 px-4 lg:px-6">
+          <div className="mb-4">
+            <h2 className="text-lg font-bold">Customers Also Bought</h2>
+            <p className="text-sm text-muted-foreground">
+              Frequently purchased together
+            </p>
+          </div>
+
+          {/* Bundle row: current product + suggestions with "+" separators */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-4 [&::-webkit-scrollbar]:hidden">
+            {/* Current product */}
+            <div className="flex-shrink-0 w-[120px] sm:w-[140px] overflow-hidden rounded-lg border-2 border-primary bg-card">
+              <div className="relative aspect-[3/4] w-full bg-secondary">
+                {style.images[0]?.url ? (
+                  <Image
+                    src={style.images[0].url}
+                    alt={style.name}
+                    fill
+                    sizes="140px"
+                    className="object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
+                    No image
+                  </div>
+                )}
+              </div>
+              <div className="p-2 space-y-0.5">
+                <h3 className="text-xs font-medium leading-tight line-clamp-2 text-foreground">
+                  {style.name}
+                </h3>
+                <p className="font-mono text-xs font-bold text-primary">
+                  {formatPrice(style.basePriceCentavos)}
+                </p>
+              </div>
+            </div>
+
+            {frequentlyBought.map((item) => (
+              <div key={String(item.styleId)} className="contents">
+                {/* Plus separator */}
+                <span className="flex-shrink-0 text-2xl font-bold text-muted-foreground">+</span>
+
+                {/* Suggested product */}
+                <Link
+                  href={`/browse/style/${item.styleId}`}
+                  className="group flex-shrink-0 w-[120px] sm:w-[140px] overflow-hidden rounded-lg border border-border bg-card transition-all hover:border-[var(--customer-accent-glow)] hover:shadow-[0_0_20px_rgba(232,25,44,0.1)]"
+                >
+                  <div className="relative aspect-[3/4] w-full bg-secondary">
+                    {item.primaryImageUrl ? (
+                      <Image
+                        src={item.primaryImageUrl}
+                        alt={item.name}
+                        fill
+                        sizes="140px"
+                        className="object-cover transition-transform group-hover:scale-105"
+                      />
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
+                        No image
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2 space-y-0.5">
+                    <h3 className="text-xs font-medium leading-tight line-clamp-2 text-foreground">
+                      {item.name}
+                    </h3>
+                    <p className="font-mono text-xs font-bold text-primary">
+                      {formatPrice(item.basePriceCentavos)}
+                    </p>
+                  </div>
+                </Link>
+              </div>
+            ))}
+          </div>
+
+          {/* Bundle total */}
+          <div className="mt-2 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+            <div>
+              <p className="text-sm text-muted-foreground">Bundle total</p>
+              <p className="text-lg font-bold text-foreground">
+                {formatPrice(
+                  style.basePriceCentavos +
+                    frequentlyBought.reduce((sum, i) => sum + i.basePriceCentavos, 0)
+                )}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {frequentlyBought.map((item) => (
+                <Link
+                  key={String(item.styleId)}
+                  href={`/browse/style/${item.styleId}`}
+                  className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700 transition-colors"
+                >
+                  View
+                </Link>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ─── Reviews Section ──────────────────────────────────────────────── */}
+      {reviewsData && (
+        <div className="mt-12 px-4 lg:px-6 pb-8">
+          <h2 className="text-xl font-bold mb-6">Customer Reviews</h2>
+
+          <div className="lg:grid lg:grid-cols-[320px_1fr] lg:gap-8">
+            {/* Rating Summary */}
+            <div className="mb-8 lg:mb-0">
+              <div className="flex items-center gap-4 mb-4">
+                <span className="text-5xl font-bold">
+                  {reviewsData.summary.totalCount > 0
+                    ? reviewsData.summary.averageRating.toFixed(1)
+                    : "\u2014"}
+                </span>
+                <div>
+                  <div className="flex items-center gap-0.5">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <Star
+                        key={star}
+                        className={cn(
+                          "h-5 w-5",
+                          star <= Math.round(reviewsData.summary.averageRating)
+                            ? "fill-yellow-400 text-yellow-400"
+                            : "text-zinc-600"
+                        )}
+                      />
+                    ))}
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {reviewsData.summary.totalCount} review{reviewsData.summary.totalCount !== 1 ? "s" : ""}
+                  </p>
+                </div>
+              </div>
+
+              {/* Rating distribution bars */}
+              <div className="space-y-1.5">
+                {[5, 4, 3, 2, 1].map((star) => {
+                  const count = reviewsData.summary.distribution[star] ?? 0;
+                  const pct =
+                    reviewsData.summary.totalCount > 0
+                      ? (count / reviewsData.summary.totalCount) * 100
+                      : 0;
+                  return (
+                    <div key={star} className="flex items-center gap-2 text-sm">
+                      <span className="w-3 text-right text-muted-foreground">{star}</span>
+                      <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
+                      <div className="flex-1 h-2 rounded-full bg-zinc-800 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-yellow-400 transition-all"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="w-8 text-right text-xs text-muted-foreground">{count}</span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Write a Review button */}
+              <button
+                onClick={() => setShowReviewForm((prev) => !prev)}
+                className="mt-6 w-full min-h-[44px] rounded-md border border-zinc-700 bg-zinc-900 text-sm font-medium text-zinc-100 hover:bg-zinc-800 transition-colors"
+              >
+                {showReviewForm ? "Cancel" : "Write a Review"}
+              </button>
+            </div>
+
+            {/* Reviews list + form column */}
+            <div>
+              {/* Review Form */}
+              {showReviewForm && (
+                <div className="mb-8 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 space-y-4">
+                  <h3 className="text-sm font-semibold">Your Review</h3>
+
+                  {/* Star selector */}
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">Rating</p>
+                    <div className="flex items-center gap-1">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setReviewRating(star)}
+                          onMouseEnter={() => setReviewHoverRating(star)}
+                          onMouseLeave={() => setReviewHoverRating(0)}
+                          className="p-0.5"
+                          aria-label={`${star} star${star !== 1 ? "s" : ""}`}
+                        >
+                          <Star
+                            className={cn(
+                              "h-7 w-7 transition-colors",
+                              star <= (reviewHoverRating || reviewRating)
+                                ? "fill-yellow-400 text-yellow-400"
+                                : "text-zinc-600"
+                            )}
+                          />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Title */}
+                  <div>
+                    <label htmlFor="review-title" className="text-sm text-muted-foreground">
+                      Title (optional)
+                    </label>
+                    <input
+                      id="review-title"
+                      type="text"
+                      placeholder="Summarize your experience"
+                      value={reviewTitle}
+                      onChange={(e) => setReviewTitle(e.target.value)}
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+
+                  {/* Body */}
+                  <div>
+                    <label htmlFor="review-body" className="text-sm text-muted-foreground">
+                      Review (optional)
+                    </label>
+                    <textarea
+                      id="review-body"
+                      rows={4}
+                      placeholder="Tell others what you thought of this product..."
+                      value={reviewBody}
+                      onChange={(e) => setReviewBody(e.target.value)}
+                      className="mt-1 w-full rounded-md border border-zinc-700 bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary resize-none"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={reviewRating === 0 || submittingReview}
+                    onClick={async () => {
+                      if (reviewRating === 0) return;
+                      setSubmittingReview(true);
+                      try {
+                        await submitReview({
+                          styleId,
+                          rating: reviewRating,
+                          title: reviewTitle.trim() || undefined,
+                          body: reviewBody.trim() || undefined,
+                        });
+                        toast.success("Review submitted! It will appear after moderation.");
+                        setShowReviewForm(false);
+                        setReviewRating(0);
+                        setReviewTitle("");
+                        setReviewBody("");
+                      } catch (err: unknown) {
+                        const error = err as { data?: string; message?: string };
+                        toast.error(
+                          typeof error.data === "string"
+                            ? error.data
+                            : error.message ?? "Failed to submit review. Please sign in and try again."
+                        );
+                      } finally {
+                        setSubmittingReview(false);
+                      }
+                    }}
+                    className="w-full min-h-[44px] rounded-md bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {submittingReview ? "Submitting..." : "Submit Review"}
+                  </button>
+                </div>
+              )}
+
+              {/* Review Cards */}
+              {reviewsData.reviews.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No reviews yet. Be the first to share your thoughts!
+                </p>
+              ) : (
+                <div className="space-y-6">
+                  {reviewsData.reviews.map((review) => (
+                    <div
+                      key={review._id}
+                      className="border-b border-zinc-800 pb-6 last:border-0"
+                    >
+                      {/* Stars + title */}
+                      <div className="flex items-center gap-2 mb-1">
+                        <div className="flex items-center gap-0.5">
+                          {[1, 2, 3, 4, 5].map((star) => (
+                            <Star
+                              key={star}
+                              className={cn(
+                                "h-4 w-4",
+                                star <= review.rating
+                                  ? "fill-yellow-400 text-yellow-400"
+                                  : "text-zinc-600"
+                              )}
+                            />
+                          ))}
+                        </div>
+                        {review.title && (
+                          <span className="font-semibold text-sm">{review.title}</span>
+                        )}
+                      </div>
+
+                      {/* Customer + date + badge */}
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-2">
+                        <span>{review.customerName}</span>
+                        <span>&middot;</span>
+                        <span>
+                          {new Date(review.createdAt).toLocaleDateString("en-PH", {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </span>
+                        {review.isVerifiedPurchase && (
+                          <>
+                            <span>&middot;</span>
+                            <span className="inline-flex items-center gap-1 rounded bg-green-900/40 px-1.5 py-0.5 text-green-400 font-medium">
+                              Verified Purchase
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Body */}
+                      {review.body && (
+                        <p className="text-sm text-zinc-300 mb-3 whitespace-pre-line">
+                          {review.body}
+                        </p>
+                      )}
+
+                      {/* Photo thumbnails */}
+                      {review.imageUrls.length > 0 && (
+                        <div className="flex gap-2 mb-3 flex-wrap">
+                          {review.imageUrls.map((url, i) => (
+                            <button
+                              key={i}
+                              onClick={() => setEnlargedImageUrl(url)}
+                              className="relative h-16 w-16 rounded-md overflow-hidden border border-zinc-700 hover:border-zinc-500 transition-colors"
+                            >
+                              <Image
+                                src={url}
+                                alt={`Review photo ${i + 1}`}
+                                fill
+                                sizes="64px"
+                                className="object-cover"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Helpful */}
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <ThumbsUp className="h-3.5 w-3.5" />
+                        <span>Helpful ({review.helpfulCount})</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Product image lightbox */}
+      {lightboxIndex !== null && (
+        <ImageLightbox
+          images={
+            colorVariantImageUrl
+              ? [colorVariantImageUrl]
+              : validImages.map((img) => img.url!)
+          }
+          initialIndex={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+        />
+      )}
+
+      {/* Enlarged review image overlay */}
+      {enlargedImageUrl && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={() => setEnlargedImageUrl(null)}
+        >
+          <button
+            onClick={() => setEnlargedImageUrl(null)}
+            className="absolute top-4 right-4 text-white hover:text-zinc-300"
+            aria-label="Close"
+          >
+            <X className="h-6 w-6" />
+          </button>
+          <div className="relative max-h-[80vh] max-w-[90vw]">
+            <Image
+              src={enlargedImageUrl}
+              alt="Review photo enlarged"
+              width={800}
+              height={800}
+              className="object-contain max-h-[80vh] rounded-lg"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Reserve for Pickup — Bottom Sheet */}
       <Sheet

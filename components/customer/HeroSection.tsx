@@ -1,8 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import { useNearestBranch } from "@/lib/hooks/useNearestBranch";
 
 export function HeroSection() {
+  const { nearestBranch, distanceKm, isLoading, error } = useNearestBranch();
+
+  const showBadge = !isLoading && !error && nearestBranch && distanceKm !== null;
+
   return (
     <section className="relative flex min-h-[70vh] flex-col items-center justify-center overflow-hidden px-4 py-20 text-center lg:min-h-[80vh]">
       {/* Subtle gradient background */}
@@ -42,6 +47,31 @@ export function HeroSection() {
         >
           See What&apos;s Dropping
         </Link>
+      </div>
+
+      {/* Nearest branch badge */}
+      <div
+        className={`mt-6 transition-all duration-500 ${
+          showBadge
+            ? "translate-y-0 opacity-100"
+            : "pointer-events-none translate-y-2 opacity-0"
+        }`}
+      >
+        {showBadge && (
+          <Link
+            href="/branches"
+            className="inline-flex items-center gap-1.5 rounded-full border border-foreground/10 bg-foreground/5 px-4 py-2 text-xs text-muted-foreground backdrop-blur-sm transition-colors hover:border-primary/30 hover:text-foreground sm:text-sm"
+          >
+            <span aria-hidden="true" className="text-primary">
+              &#x1F4CD;
+            </span>
+            Your nearest RedBox:{" "}
+            <span className="font-semibold text-foreground">
+              {nearestBranch.name}
+            </span>{" "}
+            &mdash; {distanceKm} km away
+          </Link>
+        )}
       </div>
     </section>
   );

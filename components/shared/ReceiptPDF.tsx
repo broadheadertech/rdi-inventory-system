@@ -20,6 +20,7 @@ export type ReceiptData = {
     discountType: string;
     amountTenderedCentavos?: number;
     changeCentavos?: number;
+    splitPayment?: { method: "cash" | "gcash" | "maya"; amountCentavos: number } | null;
   };
   items: {
     styleName: string;
@@ -305,7 +306,42 @@ export function ReceiptPDF({ data }: { data: ReceiptData }) {
         <View style={styles.hr} />
 
         {/* ── Payment Section ── */}
-        {txn.paymentMethod === "cash" ? (
+        {txn.splitPayment ? (
+          <>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>
+                {txn.paymentMethod === "cash" ? "Cash" : txn.paymentMethod === "gcash" ? "GCash" : "Maya"}:
+              </Text>
+              <Text style={styles.summaryValue}>
+                {formatPrice(txn.totalCentavos - txn.splitPayment.amountCentavos)}
+              </Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>
+                {txn.splitPayment.method === "cash" ? "Cash" : txn.splitPayment.method === "gcash" ? "GCash" : "Maya"}:
+              </Text>
+              <Text style={styles.summaryValue}>
+                {formatPrice(txn.splitPayment.amountCentavos)}
+              </Text>
+            </View>
+            {txn.paymentMethod === "cash" && (
+              <>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Cash Tendered:</Text>
+                  <Text style={styles.summaryValue}>
+                    {formatPrice(txn.amountTenderedCentavos ?? 0)}
+                  </Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Change:</Text>
+                  <Text style={styles.summaryValue}>
+                    {formatPrice(txn.changeCentavos ?? 0)}
+                  </Text>
+                </View>
+              </>
+            )}
+          </>
+        ) : txn.paymentMethod === "cash" ? (
           <>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Cash Tendered:</Text>

@@ -69,12 +69,22 @@ async function _computeDailySummary(
   for (const txn of transactions) {
     transactionCount++;
     totalSalesCentavos += txn.totalCentavos;
+
+    const splitAmt = txn.splitPayment?.amountCentavos ?? 0;
+    const primaryAmt = splitAmt > 0 ? txn.totalCentavos - splitAmt : txn.totalCentavos;
+
     if (txn.paymentMethod === "cash") {
-      cashSalesCentavos += txn.totalCentavos;
+      cashSalesCentavos += primaryAmt;
     } else if (txn.paymentMethod === "gcash") {
-      gcashSalesCentavos += txn.totalCentavos;
+      gcashSalesCentavos += primaryAmt;
     } else if (txn.paymentMethod === "maya") {
-      mayaSalesCentavos += txn.totalCentavos;
+      mayaSalesCentavos += primaryAmt;
+    }
+
+    if (txn.splitPayment) {
+      if (txn.splitPayment.method === "cash") cashSalesCentavos += splitAmt;
+      else if (txn.splitPayment.method === "gcash") gcashSalesCentavos += splitAmt;
+      else if (txn.splitPayment.method === "maya") mayaSalesCentavos += splitAmt;
     }
   }
 

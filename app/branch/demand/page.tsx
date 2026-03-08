@@ -1,36 +1,107 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { CheckCircle } from "lucide-react";
+import { CheckCircle, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const SIZES = ["XS", "S", "M", "L", "XL", "XXL", "26", "28", "30", "32", "34", "36"];
+const PAGE_SIZE = 15;
 
-function relativeTime(ms: number): string {
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return `${Math.floor(diff / 86_400_000)}d ago`;
+function formatDate(ms: number): string {
+  const d = new Date(ms);
+  return d.toLocaleDateString("en-PH", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatTime(ms: number): string {
+  const d = new Date(ms);
+  return d.toLocaleTimeString("en-PH", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function BranchDemandPage() {
+  // ── Form state ──
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string | null>(null);
   const [design, setDesign] = useState("");
   const [notes, setNotes] = useState("");
   const [isPending, setIsPending] = useState(false);
 
+  // ── Filter state ──
+  const [searchText, setSearchText] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [cursorStack, setCursorStack] = useState<number[]>([]);
+  const [currentCursor, setCurrentCursor] = useState<number | undefined>(undefined);
+
   const brands = useQuery(api.demand.entries.listBrandsForSelector);
-  const recentLogs = useQuery(api.demand.entries.listBranchDemandLogs, { limit: 20 });
   const createDemandLog = useMutation(api.demand.entries.createDemandLog);
 
+  // Parse filter values
+  const dateFromMs = dateFrom ? new Date(dateFrom + "T00:00:00").getTime() : undefined;
+  // dateTo should be end-of-day
+  const dateToMs = dateTo ? new Date(dateTo + "T23:59:59.999").getTime() : undefined;
+
+  // Determine brand vs design filter from searchText
+  const brandFilter = brands?.find(
+    (b) => b.name.toLowerCase() === searchText.toLowerCase()
+  )?.name;
+  const designFilter = brandFilter ? undefined : searchText || undefined;
+
+  const searchResults = useQuery(api.demand.entries.searchDemandLogs, {
+    limit: PAGE_SIZE,
+    cursor: currentCursor,
+    brand: brandFilter,
+    designSearch: designFilter,
+    dateFrom: dateFromMs,
+    dateTo: dateToMs,
+  });
+
+  const brandSummary = useQuery(api.demand.entries.getDemandBrandSummary, {
+    dateFrom: dateFromMs,
+    dateTo: dateToMs,
+  });
+
+  // ── Pagination handlers ──
+  const handleNextPage = useCallback(() => {
+    if (searchResults?.hasMore && searchResults.nextCursor !== undefined) {
+      setCursorStack((prev) => [...prev, currentCursor ?? Date.now() + 1]);
+      setCurrentCursor(searchResults.nextCursor);
+    }
+  }, [searchResults, currentCursor]);
+
+  const handlePrevPage = useCallback(() => {
+    setCursorStack((prev) => {
+      const newStack = [...prev];
+      const prevCursor = newStack.pop();
+      setCurrentCursor(
+        prevCursor === undefined || prevCursor > Date.now()
+          ? undefined
+          : prevCursor
+      );
+      return newStack;
+    });
+  }, []);
+
+  const resetPagination = useCallback(() => {
+    setCursorStack([]);
+    setCurrentCursor(undefined);
+  }, []);
+
+  // ── Form submission ──
   async function handleSubmit() {
     if (!selectedBrand || isPending) return;
     setIsPending(true);
@@ -52,6 +123,8 @@ export default function BranchDemandPage() {
       setIsPending(false);
     }
   }
+
+  const pageNumber = cursorStack.length + 1;
 
   return (
     <div className="space-y-6">
@@ -166,46 +239,177 @@ export default function BranchDemandPage() {
         </button>
       </div>
 
-      {/* Recent entries */}
+      {/* ─── Brand Summary ──────────────────────────────────────────────── */}
+      {brandSummary && brandSummary.length > 0 && (
+        <div className="rounded-lg border p-4">
+          <h2 className="mb-3 text-sm font-semibold">Demand by Brand</h2>
+          <div className="flex flex-wrap gap-2">
+            {brandSummary.map(({ brand, count }) => (
+              <button
+                key={brand}
+                onClick={() => {
+                  setSearchText(brand);
+                  resetPagination();
+                }}
+                className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+              >
+                <span className="font-medium">{brand}</span>
+                <span className="rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-xs font-semibold tabular-nums">
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ─── Search & Filters ───────────────────────────────────────────── */}
+      <div className="rounded-lg border p-4 space-y-4">
+        <h2 className="text-sm font-semibold">Search Entries</h2>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          {/* Brand / design search */}
+          <div className="flex-1 space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">
+              Brand or Design
+            </label>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchText}
+                onChange={(e) => {
+                  setSearchText(e.target.value);
+                  resetPagination();
+                }}
+                placeholder="Search brand or design…"
+                className="pl-8"
+              />
+            </div>
+          </div>
+
+          {/* Date from */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">From</label>
+            <Input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                resetPagination();
+              }}
+              className="w-full sm:w-[150px]"
+            />
+          </div>
+
+          {/* Date to */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">To</label>
+            <Input
+              type="date"
+              value={dateTo}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                resetPagination();
+              }}
+              className="w-full sm:w-[150px]"
+            />
+          </div>
+
+          {/* Clear */}
+          {(searchText || dateFrom || dateTo) && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSearchText("");
+                setDateFrom("");
+                setDateTo("");
+                resetPagination();
+              }}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* ─── Results Table ──────────────────────────────────────────────── */}
       <div className="rounded-lg border p-4">
-        <h2 className="mb-4 text-sm font-semibold">Recent Entries</h2>
-        {recentLogs === undefined ? (
+        <h2 className="mb-4 text-sm font-semibold">
+          {searchText || dateFrom || dateTo ? "Search Results" : "Recent Entries"}
+        </h2>
+
+        {searchResults === undefined ? (
           <div className="space-y-2">
             {[...Array(4)].map((_, i) => (
               <div key={i} className="h-10 animate-pulse rounded bg-muted" />
             ))}
           </div>
-        ) : recentLogs.length === 0 ? (
+        ) : searchResults.logs.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
-            No demand entries yet.
+            No demand entries found.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-muted-foreground">
-                  <th className="pb-2 font-medium">Brand</th>
-                  <th className="pb-2 font-medium">Design</th>
-                  <th className="pb-2 font-medium">Size</th>
-                  <th className="pb-2 font-medium">By</th>
-                  <th className="pb-2 text-right font-medium">Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recentLogs.map((log) => (
-                  <tr key={log._id} className="border-b last:border-0">
-                    <td className="py-2 font-medium">{log.brand}</td>
-                    <td className="py-2 text-muted-foreground">{log.design ?? "—"}</td>
-                    <td className="py-2">{log.size ?? "—"}</td>
-                    <td className="py-2 text-muted-foreground">{log.loggedByName}</td>
-                    <td className="py-2 text-right text-muted-foreground tabular-nums">
-                      {relativeTime(log.createdAt)}
-                    </td>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="pb-2 font-medium">Brand</th>
+                    <th className="pb-2 font-medium">Design</th>
+                    <th className="pb-2 font-medium">Size</th>
+                    <th className="pb-2 font-medium hidden sm:table-cell">Notes</th>
+                    <th className="pb-2 font-medium">By</th>
+                    <th className="pb-2 text-right font-medium">Date</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {searchResults.logs.map((log) => (
+                    <tr key={log._id} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{log.brand}</td>
+                      <td className="py-2 text-muted-foreground">{log.design ?? "—"}</td>
+                      <td className="py-2">{log.size ?? "—"}</td>
+                      <td className="py-2 text-muted-foreground hidden sm:table-cell max-w-[200px] truncate">
+                        {log.notes ?? "—"}
+                      </td>
+                      <td className="py-2 text-muted-foreground">{log.loggedByName}</td>
+                      <td className="py-2 text-right text-muted-foreground tabular-nums whitespace-nowrap">
+                        <span>{formatDate(log.createdAt)}</span>
+                        <span className="ml-1 text-xs">{formatTime(log.createdAt)}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Pagination controls */}
+            <div className="mt-4 flex items-center justify-between border-t pt-3">
+              <p className="text-xs text-muted-foreground tabular-nums">
+                Page {pageNumber}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={pageNumber === 1}
+                  onClick={handlePrevPage}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Prev
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!searchResults.hasMore}
+                  onClick={handleNextPage}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>

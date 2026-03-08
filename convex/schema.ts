@@ -177,11 +177,16 @@ export default defineSchema({
     syncedAt: v.optional(v.number()),
     promotionId: v.optional(v.id("promotions")),
     promoDiscountAmountCentavos: v.optional(v.number()),
+    splitPayment: v.optional(v.object({
+      method: v.union(v.literal("cash"), v.literal("gcash"), v.literal("maya")),
+      amountCentavos: v.number(),
+    })),
     createdAt: v.number(),
   })
     .index("by_branch", ["branchId"])
     .index("by_branch_date", ["branchId", "createdAt"])
-    .index("by_cashier", ["cashierId"]),
+    .index("by_cashier", ["cashierId"])
+    .index("by_receiptNumber", ["receiptNumber"]),
 
   transactionItems: defineTable({
     transactionId: v.id("transactions"),
@@ -189,7 +194,9 @@ export default defineSchema({
     quantity: v.number(),
     unitPriceCentavos: v.number(),
     lineTotalCentavos: v.number(),
-  }).index("by_transaction", ["transactionId"]),
+  })
+    .index("by_transaction", ["transactionId"])
+    .index("by_variant", ["variantId"]),
 
   transfers: defineTable({
     fromBranchId: v.id("branches"),
@@ -272,7 +279,8 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_branch", ["branchId"])
-    .index("by_date", ["createdAt"]),
+    .index("by_date", ["createdAt"])
+    .index("by_branch_date", ["branchId", "createdAt"]),
 
   demandWeeklySummaries: defineTable({
     weekStart: v.number(),
@@ -541,12 +549,14 @@ export default defineSchema({
       v.union(v.literal("male"), v.literal("female"), v.literal("other"))
     ),
     dateOfBirth: v.optional(v.string()), // ISO date string
+    wishlistShareToken: v.optional(v.string()),
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_clerkId", ["clerkId"])
-    .index("by_email", ["email"]),
+    .index("by_email", ["email"])
+    .index("by_wishlistShareToken", ["wishlistShareToken"]),
 
   // ─── Customer Addresses ────────────────────────────────────────────────────
   customerAddresses: defineTable({
@@ -628,7 +638,18 @@ export default defineSchema({
     promotionId: v.optional(v.id("promotions")),
     voucherCode: v.optional(v.string()),
     promoDiscountCentavos: v.optional(v.number()),
+    // delivery speed
+    deliveryMethod: v.optional(v.union(
+      v.literal("standard"),
+      v.literal("express"),
+      v.literal("sameDay")
+    )),
     // fulfillment
+    fulfillmentType: v.optional(v.union(
+      v.literal("delivery"),
+      v.literal("pickup")
+    )),
+    pickupBranchId: v.optional(v.id("branches")),
     fulfilledFromBranchId: v.optional(v.id("branches")),
     notes: v.optional(v.string()),
     // timestamps
@@ -636,6 +657,10 @@ export default defineSchema({
     updatedAt: v.number(),
     cancelledAt: v.optional(v.number()),
     cancelReason: v.optional(v.string()),
+    // return request fields
+    returnReason: v.optional(v.string()),
+    returnNotes: v.optional(v.string()),
+    returnRequestedAt: v.optional(v.number()),
   })
     .index("by_customer", ["customerId"])
     .index("by_status", ["status"])
@@ -691,6 +716,14 @@ export default defineSchema({
     title: v.optional(v.string()),
     body: v.optional(v.string()),
     imageStorageIds: v.optional(v.array(v.id("_storage"))),
+    // size feedback
+    sizeFeedback: v.optional(
+      v.union(
+        v.literal("runs_small"),
+        v.literal("true_to_size"),
+        v.literal("runs_large")
+      )
+    ),
     // moderation
     isVerifiedPurchase: v.boolean(),
     isApproved: v.boolean(),
@@ -701,7 +734,8 @@ export default defineSchema({
   })
     .index("by_style", ["styleId"])
     .index("by_customer", ["customerId"])
-    .index("by_style_approved", ["styleId", "isApproved"]),
+    .index("by_style_approved", ["styleId", "isApproved"])
+    .index("by_order", ["orderId"]),
 
   // ─── Voucher Codes ─────────────────────────────────────────────────────────
   vouchers: defineTable({

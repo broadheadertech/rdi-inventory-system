@@ -1,6 +1,7 @@
 import { query, mutation, MutationCtx } from "../_generated/server";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
+import { Id } from "../_generated/dataModel";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,104 @@ async function requireCustomer(ctx: MutationCtx) {
 }
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
+
+export const getBuyAgainProducts = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .unique();
+    if (!customer) return [];
+
+    // Get delivered orders, sorted newest first
+    const orders = await ctx.db
+      .query("orders")
+      .withIndex("by_customer", (q) => q.eq("customerId", customer._id))
+      .collect();
+    const deliveredOrders = orders
+      .filter((o) => o.status === "delivered")
+      .sort((a, b) => b.createdAt - a.createdAt);
+    if (deliveredOrders.length === 0) return [];
+
+    // Collect unique styleIds from order items (preserving recency order)
+    const seenStyleIds = new Set<string>();
+    const orderedStyleIds: Id<"styles">[] = [];
+
+    for (const order of deliveredOrders) {
+      const items = await ctx.db
+        .query("orderItems")
+        .withIndex("by_order", (q) => q.eq("orderId", order._id))
+        .collect();
+      for (const item of items) {
+        const variant = await ctx.db.get(item.variantId);
+        if (!variant) continue;
+        const key = String(variant.styleId);
+        if (!seenStyleIds.has(key)) {
+          seenStyleIds.add(key);
+          orderedStyleIds.push(variant.styleId);
+        }
+      }
+      // Early exit once we have enough candidates
+      if (orderedStyleIds.length >= 16) break;
+    }
+
+    // Filter to active styles from active categories/brands, and enrich
+    const allBrands = await ctx.db.query("brands").collect();
+    const activeBrandIds = new Set(
+      allBrands.filter((b) => b.isActive).map((b) => String(b._id))
+    );
+    const brandMap = new Map(allBrands.map((b) => [String(b._id), b]));
+
+    const allCategories = await ctx.db.query("categories").collect();
+    const activeCategoryIds = new Set(
+      allCategories
+        .filter((c) => c.isActive && activeBrandIds.has(String(c.brandId)))
+        .map((c) => String(c._id))
+    );
+    const categoryMap = new Map(allCategories.map((c) => [String(c._id), c]));
+
+    const results: Array<{
+      styleId: Id<"styles">;
+      name: string;
+      brandName: string;
+      primaryImageUrl: string | null;
+      basePriceCentavos: number;
+    }> = [];
+
+    for (const styleId of orderedStyleIds) {
+      if (results.length >= 8) break;
+      const style = await ctx.db.get(styleId);
+      if (!style || !style.isActive) continue;
+      if (!activeCategoryIds.has(String(style.categoryId))) continue;
+
+      const category = categoryMap.get(String(style.categoryId));
+      const brand = category ? brandMap.get(String(category.brandId)) : null;
+
+      const images = await ctx.db
+        .query("productImages")
+        .withIndex("by_style", (q) => q.eq("styleId", style._id))
+        .collect();
+      const primary = images.find((img) => img.isPrimary);
+      const primaryImageUrl = primary
+        ? await ctx.storage.getUrl(primary.storageId)
+        : null;
+
+      results.push({
+        styleId: style._id,
+        name: style.name,
+        brandName: brand?.name ?? "",
+        primaryImageUrl,
+        basePriceCentavos: style.basePriceCentavos,
+      });
+    }
+
+    return results;
+  },
+});
 
 export const getMyOrders = query({
   args: {
@@ -152,7 +251,7 @@ export const getOrderDetail = query({
 
 export const createOrder = mutation({
   args: {
-    addressId: v.id("customerAddresses"),
+    addressId: v.optional(v.id("customerAddresses")),
     paymentMethod: v.union(
       v.literal("cod"),
       v.literal("gcash"),
@@ -162,14 +261,52 @@ export const createOrder = mutation({
     ),
     voucherCode: v.optional(v.string()),
     notes: v.optional(v.string()),
+    shippingFeeCentavos: v.optional(v.number()),
+    deliveryMethod: v.optional(
+      v.union(v.literal("standard"), v.literal("express"), v.literal("sameDay"))
+    ),
+    fulfillmentType: v.optional(
+      v.union(v.literal("delivery"), v.literal("pickup"))
+    ),
+    pickupBranchId: v.optional(v.id("branches")),
   },
   handler: async (ctx, args) => {
     const customer = await requireCustomer(ctx);
 
-    // Get address
-    const address = await ctx.db.get(args.addressId);
-    if (!address || address.customerId !== customer._id) {
-      throw new ConvexError("Address not found");
+    const isPickup = args.fulfillmentType === "pickup";
+
+    // Validate pickup branch
+    if (isPickup) {
+      if (!args.pickupBranchId) {
+        throw new ConvexError("Please select a pickup branch");
+      }
+      const branch = await ctx.db.get(args.pickupBranchId);
+      if (!branch || !branch.isActive || branch.type === "warehouse") {
+        throw new ConvexError("Selected pickup branch is not available");
+      }
+    }
+
+    // Get address (required for delivery, optional for pickup)
+    let address: {
+      recipientName: string;
+      phone: string;
+      addressLine1: string;
+      addressLine2?: string;
+      city: string;
+      province: string;
+      postalCode: string;
+      country: string;
+      customerId: Id<"customers">;
+    } | null = null;
+    if (!isPickup) {
+      if (!args.addressId) {
+        throw new ConvexError("Please select a delivery address");
+      }
+      const addrDoc = await ctx.db.get(args.addressId);
+      if (!addrDoc || addrDoc.customerId !== customer._id) {
+        throw new ConvexError("Address not found");
+      }
+      address = addrDoc;
     }
 
     // Get cart
@@ -211,8 +348,13 @@ export const createOrder = mutation({
       });
     }
 
-    // Calculate shipping (free over P999, else P99)
-    const shippingFeeCentavos = subtotalCentavos >= 99900 ? 0 : 9900;
+    // Calculate shipping — use frontend-provided fee if given, else default
+    const shippingFeeCentavos =
+      args.shippingFeeCentavos !== undefined
+        ? args.shippingFeeCentavos
+        : subtotalCentavos >= 99900
+          ? 0
+          : 9900;
 
     // VAT calculation (already included in price, 12%)
     const vatAmountCentavos = Math.round(subtotalCentavos - subtotalCentavos / 1.12);
@@ -230,18 +372,26 @@ export const createOrder = mutation({
       shippingFeeCentavos,
       discountAmountCentavos: 0,
       totalCentavos,
-      shippingAddressId: args.addressId,
-      shippingAddress: {
-        recipientName: address.recipientName,
-        phone: address.phone,
-        addressLine1: address.addressLine1,
-        addressLine2: address.addressLine2,
-        city: address.city,
-        province: address.province,
-        postalCode: address.postalCode,
-        country: address.country,
-      },
+      // Address fields — only set for delivery orders
+      ...(address
+        ? {
+            shippingAddressId: args.addressId,
+            shippingAddress: {
+              recipientName: address.recipientName,
+              phone: address.phone,
+              addressLine1: address.addressLine1,
+              addressLine2: address.addressLine2,
+              city: address.city,
+              province: address.province,
+              postalCode: address.postalCode,
+              country: address.country,
+            },
+          }
+        : {}),
       paymentMethod: args.paymentMethod,
+      deliveryMethod: isPickup ? undefined : args.deliveryMethod,
+      fulfillmentType: args.fulfillmentType ?? "delivery",
+      pickupBranchId: isPickup ? args.pickupBranchId : undefined,
       notes: args.notes,
       createdAt: now,
       updatedAt: now,

@@ -53,6 +53,10 @@ export const createTransaction = mutation({
     ),
     amountTenderedCentavos: v.optional(v.number()),
     promotionId: v.optional(v.id("promotions")),
+    splitPayment: v.optional(v.object({
+      method: v.union(v.literal("cash"), v.literal("gcash"), v.literal("maya")),
+      amountCentavos: v.number(),
+    })),
   },
   handler: async (ctx, args) => {
     // 1. Auth gate
@@ -86,6 +90,23 @@ export const createTransaction = mutation({
         throw new ConvexError({
           code: "INVALID_PAYMENT",
           message: "Cash payment requires amount tendered",
+        });
+      }
+    }
+
+    // 4b. Validate split payment
+    if (args.splitPayment) {
+      if (args.splitPayment.amountCentavos <= 0) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "Split payment amount must be positive",
+        });
+      }
+      // Split secondary method must differ from primary
+      if (args.splitPayment.method === args.paymentMethod) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "Split payment method must differ from primary method",
         });
       }
     }
@@ -263,14 +284,29 @@ export const createTransaction = mutation({
     const finalTotalCentavos = taxBreakdown.totalCentavos - promoDiscountCentavos;
 
     // 7. Validate cash sufficiency
-    if (
-      args.paymentMethod === "cash" &&
-      args.amountTenderedCentavos! < finalTotalCentavos
-    ) {
-      throw new ConvexError({
-        code: "INVALID_PAYMENT",
-        message: "Amount tendered is less than total",
-      });
+    if (args.paymentMethod === "cash") {
+      // For split payments, the cash portion only needs to cover its share
+      const cashPortion = args.splitPayment
+        ? finalTotalCentavos - args.splitPayment.amountCentavos
+        : finalTotalCentavos;
+      if (args.amountTenderedCentavos! < cashPortion) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "Amount tendered is less than total",
+        });
+      }
+    }
+
+    // 7b. Validate split amounts sum to total
+    if (args.splitPayment) {
+      const splitSecondary = args.splitPayment.amountCentavos;
+      const splitPrimary = finalTotalCentavos - splitSecondary;
+      if (splitPrimary <= 0) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "Primary payment amount must be positive",
+        });
+      }
     }
 
     // 8. Generate receipt number (sequential per branch per day)
@@ -288,9 +324,12 @@ export const createTransaction = mutation({
     const receiptNumber = `${datePart}-${seq}`;
 
     // 9. Insert transaction record
+    const cashPortion = args.splitPayment
+      ? finalTotalCentavos - args.splitPayment.amountCentavos
+      : finalTotalCentavos;
     const changeCentavos =
       args.paymentMethod === "cash"
-        ? args.amountTenderedCentavos! - finalTotalCentavos
+        ? args.amountTenderedCentavos! - cashPortion
         : undefined;
 
     const transactionId = await ctx.db.insert("transactions", {
@@ -306,6 +345,7 @@ export const createTransaction = mutation({
       promotionId: appliedPromotionId,
       promoDiscountAmountCentavos:
         promoDiscountCentavos > 0 ? promoDiscountCentavos : undefined,
+      splitPayment: args.splitPayment,
       amountTenderedCentavos:
         args.paymentMethod === "cash"
           ? args.amountTenderedCentavos
