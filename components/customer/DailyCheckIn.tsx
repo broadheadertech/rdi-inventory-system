@@ -23,6 +23,9 @@ export function DailyCheckIn() {
   if (!status) return null;
 
   const hasCheckedIn = status.hasCheckedInToday || justClaimed !== null;
+
+  // Hide the card once checked in
+  if (hasCheckedIn) return null;
   const currentStreak = justClaimed ? justClaimed.streakDay : status.currentStreak;
 
   async function handleCheckIn() {
