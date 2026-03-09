@@ -879,6 +879,29 @@ export default defineSchema({
     .index("by_placement", ["placement"])
     .index("by_active_placement", ["isActive", "placement"]),
 
+  // ─── Announcements (Marquee Ticker) ────────────────────────────────────────
+  announcements: defineTable({
+    message: v.string(),
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    startDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
+    createdAt: v.number(),
+  }).index("by_active", ["isActive"]),
+
+  // ─── Hot Deals ────────────────────────────────────────────────────────────
+  hotDeals: defineTable({
+    styleId: v.id("styles"),
+    label: v.string(),             // e.g. "50% OFF", "HOT", "FLASH DEAL"
+    sortOrder: v.number(),
+    isActive: v.boolean(),
+    startDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_active", ["isActive"])
+    .index("by_style", ["styleId"]),
+
   // ─── Check-Ins (Daily Rewards) ──────────────────────────────────────────────
   checkIns: defineTable({
     customerId: v.id("customers"),
@@ -911,7 +934,7 @@ export default defineSchema({
 
   // ─── Saved Items (Wishlist) ───────────────────────────────────────────────
   savedItems: defineTable({
-    customerId: v.id("users"),
+    customerId: v.id("customers"),
     styleId: v.id("styles"),
     variantId: v.optional(v.id("variants")),
     savedAt: v.number(),

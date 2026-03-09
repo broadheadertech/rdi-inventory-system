@@ -396,7 +396,19 @@ export const dailyCheckIn = mutation({
       .query("loyaltyAccounts")
       .withIndex("by_customer", (q) => q.eq("customerId", customer._id))
       .unique();
-    if (!account) throw new Error("No loyalty account");
+    let accountId = account?._id;
+    if (!account) {
+      const nowMs = Date.now();
+      accountId = await ctx.db.insert("loyaltyAccounts", {
+        customerId: customer._id,
+        tier: "bronze",
+        pointsBalance: 0,
+        lifetimePoints: 0,
+        lifetimeSpendCentavos: 0,
+        createdAt: nowMs,
+        updatedAt: nowMs,
+      });
+    }
 
     // Check if already checked in today
     const todayPHT = getPhilippineDate(Date.now());
@@ -435,15 +447,17 @@ export const dailyCheckIn = mutation({
     });
 
     // Award loyalty points
-    const newBalance = account.pointsBalance + pointsAwarded;
-    await ctx.db.patch(account._id, {
+    const prevBalance = account?.pointsBalance ?? 0;
+    const prevLifetime = account?.lifetimePoints ?? 0;
+    const newBalance = prevBalance + pointsAwarded;
+    await ctx.db.patch(accountId!, {
       pointsBalance: newBalance,
-      lifetimePoints: account.lifetimePoints + pointsAwarded,
+      lifetimePoints: prevLifetime + pointsAwarded,
       updatedAt: now,
     });
 
     await ctx.db.insert("loyaltyTransactions", {
-      loyaltyAccountId: account._id,
+      loyaltyAccountId: accountId!,
       type: "bonus",
       points: pointsAwarded,
       description: `Daily check-in (Day ${streakDay} streak)`,

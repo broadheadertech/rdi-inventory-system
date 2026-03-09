@@ -40,7 +40,7 @@ function isPaydayWindow(): boolean {
 const PAYDAY_MESSAGE = "PAYDAY SALE \u2014 Extra deals this week!";
 
 /**
- * Build live ticker messages from homepage data.
+ * Build live ticker messages from homepage data (used as fallback when no DB announcements).
  */
 function buildTickerMessages(
   homepage: {
@@ -115,6 +115,7 @@ export function AnnouncementBar() {
   const [isPayday, setIsPayday] = useState(false);
 
   const homepage = useQuery(api.storefront.homepage.getHomepageData);
+  const dbAnnouncements = useQuery(api.admin.announcements.getActiveAnnouncements);
 
   useEffect(() => {
     if (localStorage.getItem("rb-announcement-dismissed") === "1") {
@@ -126,10 +127,13 @@ export function AnnouncementBar() {
     setIsPayday(isPaydayWindow());
   }, []);
 
-  const tickerMessages = useMemo(
-    () => buildTickerMessages(homepage ?? undefined),
-    [homepage]
-  );
+  const tickerMessages = useMemo(() => {
+    // If there are DB announcements, use them; otherwise fall back to auto-generated
+    if (dbAnnouncements && dbAnnouncements.length > 0) {
+      return dbAnnouncements.map((a) => a.message);
+    }
+    return buildTickerMessages(homepage ?? undefined);
+  }, [dbAnnouncements, homepage]);
 
   // Build the ticker string: duplicate for seamless loop
   const tickerText = tickerMessages.join(SEPARATOR);

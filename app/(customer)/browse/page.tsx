@@ -443,6 +443,7 @@ function matchesGender(genders: string[], selected: GenderKey): boolean {
 // ─── Main Page ───────────────────────────────────────────────────────────────
 export default function BrowsePage() {
   const data = useQuery(api.storefront.homepage.getHomepageData);
+  const hotDeals = useQuery(api.admin.hotDeals.getActiveHotDeals);
   const [selectedGender, setSelectedGender] = useState<GenderKey>("all");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [showQuiz, setShowQuiz] = useState(false);
@@ -647,6 +648,68 @@ export default function BrowsePage() {
       {promotions.length > 0 && (
         <div className="mx-auto max-w-7xl px-4 pt-6">
           <HotDealsCarousel promotions={promotions} />
+        </div>
+      )}
+
+      {/* ── 4b. Hot Deals Products ── */}
+      {hotDeals && hotDeals.length > 0 && (
+        <div className="mx-auto max-w-7xl px-4 pt-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="h-5 w-5 text-red-500" />
+              <h2 className="font-display text-lg font-bold uppercase tracking-tight">
+                Hot Deals
+              </h2>
+            </div>
+          </div>
+          <HScrollRow className="mt-4">
+            {hotDeals.map((deal) => (
+              <Link
+                key={String(deal._id)}
+                href={`/browse/style/${deal.styleId}`}
+                className="group relative flex-shrink-0 w-[160px] sm:w-[200px]"
+              >
+                <div className="relative aspect-[3/4] overflow-hidden rounded-lg bg-muted">
+                  {deal.imageUrl ? (
+                    <Image
+                      src={deal.imageUrl}
+                      alt={deal.styleName}
+                      fill
+                      sizes="200px"
+                      className="object-cover transition-transform duration-300 group-hover:scale-105"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-muted-foreground">
+                      <ShoppingBag className="h-8 w-8" />
+                    </div>
+                  )}
+                  {/* Deal badge */}
+                  <div className="absolute top-2 left-2 rounded bg-red-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white shadow">
+                    {deal.label}
+                  </div>
+                  {/* Brand logo */}
+                  {deal.brandLogoUrl && (
+                    <div className="absolute bottom-2 right-2 h-6 w-6 rounded-full bg-white/90 p-0.5 shadow">
+                      <Image
+                        src={deal.brandLogoUrl}
+                        alt=""
+                        width={20}
+                        height={20}
+                        className="rounded-full object-contain"
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="mt-2">
+                  <p className="truncate text-sm font-semibold">{deal.styleName}</p>
+                  <p className="text-xs text-muted-foreground">{deal.brandName}</p>
+                  <p className="mt-0.5 text-sm font-bold text-primary">
+                    {formatPrice(deal.minPriceCentavos)}
+                  </p>
+                </div>
+              </Link>
+            ))}
+          </HScrollRow>
         </div>
       )}
 

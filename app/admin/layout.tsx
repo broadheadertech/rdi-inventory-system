@@ -26,6 +26,8 @@ import {
   Ruler,
   MapPin,
   Calendar,
+  Megaphone,
+  Flame,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -58,6 +60,8 @@ const managementNavItems: NavItem[] = [
   { href: "/admin/invoices", label: "Invoices", icon: FileText, roles: ["admin"] },
   { href: "/admin/promotions", label: "Promotions", icon: Tag, roles: ["admin"] },
   { href: "/admin/banners", label: "Banners", icon: ImageIcon, roles: ["admin"] },
+  { href: "/admin/announcements", label: "Announcements", icon: Megaphone, roles: ["admin"] },
+  { href: "/admin/hot-deals", label: "Hot Deals", icon: Flame, roles: ["admin"] },
   { href: "/admin/drops", label: "Exclusive Drops", icon: Sparkles, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
   { href: "/admin/size-curves", label: "Size Curves", icon: Ruler, roles: ["admin"] },

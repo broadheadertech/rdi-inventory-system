@@ -10,16 +10,16 @@ export const toggleSaveItem = mutation({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new Error("Not authenticated");
 
-    const user = await ctx.db
-      .query("users")
-      .filter((q) => q.eq(q.field("clerkId"), identity.subject))
-      .first();
-    if (!user) throw new Error("User not found");
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .unique();
+    if (!customer) throw new Error("Customer not found");
 
     const existing = await ctx.db
       .query("savedItems")
       .withIndex("by_customer_style", (q) =>
-        q.eq("customerId", user._id).eq("styleId", args.styleId)
+        q.eq("customerId", customer._id).eq("styleId", args.styleId)
       )
       .first();
 
@@ -29,7 +29,7 @@ export const toggleSaveItem = mutation({
     }
 
     await ctx.db.insert("savedItems", {
-      customerId: user._id,
+      customerId: customer._id,
       styleId: args.styleId,
       variantId: args.variantId,
       savedAt: Date.now(),
@@ -45,16 +45,16 @@ export const isItemSaved = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return false;
 
-    const user = await ctx.db
-      .query("users")
-      .filter((q) => q.eq(q.field("clerkId"), identity.subject))
-      .first();
-    if (!user) return false;
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .unique();
+    if (!customer) return false;
 
     const existing = await ctx.db
       .query("savedItems")
       .withIndex("by_customer_style", (q) =>
-        q.eq("customerId", user._id).eq("styleId", args.styleId)
+        q.eq("customerId", customer._id).eq("styleId", args.styleId)
       )
       .first();
 
@@ -71,16 +71,16 @@ export const getMySavedItems = query({
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return { items: [], hasMore: false };
 
-    const user = await ctx.db
-      .query("users")
-      .filter((q) => q.eq(q.field("clerkId"), identity.subject))
-      .first();
-    if (!user) return { items: [], hasMore: false };
+    const customer = await ctx.db
+      .query("customers")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .unique();
+    if (!customer) return { items: [], hasMore: false };
 
     const limit = args.limit ?? 20;
     const allSaved = await ctx.db
       .query("savedItems")
-      .withIndex("by_customer", (q) => q.eq("customerId", user._id))
+      .withIndex("by_customer", (q) => q.eq("customerId", customer._id))
       .order("desc")
       .collect();
 

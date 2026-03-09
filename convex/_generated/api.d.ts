@@ -16,8 +16,10 @@ import type * as _helpers_promoCalculations from "../_helpers/promoCalculations.
 import type * as _helpers_taxCalculations from "../_helpers/taxCalculations.js";
 import type * as _helpers_transferStock from "../_helpers/transferStock.js";
 import type * as _helpers_withBranchScope from "../_helpers/withBranchScope.js";
+import type * as admin_announcements from "../admin/announcements.js";
 import type * as admin_banners from "../admin/banners.js";
 import type * as admin_colors from "../admin/colors.js";
+import type * as admin_hotDeals from "../admin/hotDeals.js";
 import type * as admin_promotions from "../admin/promotions.js";
 import type * as admin_settings from "../admin/settings.js";
 import type * as admin_sizes from "../admin/sizes.js";
@@ -132,8 +134,10 @@ declare const fullApi: ApiFromModules<{
   "_helpers/taxCalculations": typeof _helpers_taxCalculations;
   "_helpers/transferStock": typeof _helpers_transferStock;
   "_helpers/withBranchScope": typeof _helpers_withBranchScope;
+  "admin/announcements": typeof admin_announcements;
   "admin/banners": typeof admin_banners;
   "admin/colors": typeof admin_colors;
+  "admin/hotDeals": typeof admin_hotDeals;
   "admin/promotions": typeof admin_promotions;
   "admin/settings": typeof admin_settings;
   "admin/sizes": typeof admin_sizes;
