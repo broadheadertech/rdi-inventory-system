@@ -1856,8 +1856,22 @@ export const seedTransactionsAndPromos = action({
       priority: number;
     };
 
-    // ── Simple promos (existing) ──────────────────────────────────────────
+    // ── Default percentage-off promos (10% – 80%) ─────────────────────────
+    const defaultPercentagePromos: PromoArg[] = [10, 20, 30, 40, 50, 60, 70, 80].map(
+      (pct, i) => ({
+        name: `${pct}% Off`,
+        description: `${pct}% discount on any item`,
+        promoType: "percentage" as const,
+        percentageValue: pct,
+        brandIds: [],
+        categoryIds: [],
+        priority: 100 + i, // high priority so they appear first
+      })
+    );
+
+    // ── Scoped promos ─────────────────────────────────────────────────────
     const promoArgs: PromoArg[] = [
+      ...defaultPercentagePromos,
       {
         name: "Summer Tee Sale",
         description: "15% off all Aeropostale T-Shirts (max P200 discount)",

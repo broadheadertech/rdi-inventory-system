@@ -22,6 +22,7 @@ import {
   X,
   Split,
   Zap,
+  MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -527,6 +528,8 @@ function PromoSelector({
   setPromoId: (promoId: string | null) => void;
   promoPreview: PromoResult | null;
 }) {
+  const [showAllPromos, setShowAllPromos] = useState(false);
+
   // Only show when discount type is "none" (promos don't stack with Senior/PWD)
   if (discountType !== "none") return null;
   if (activePromos.length === 0) return null;
@@ -534,6 +537,9 @@ function PromoSelector({
   const selectedPromo = selectedPromoId
     ? activePromos.find((p) => String(p._id) === selectedPromoId)
     : null;
+
+  const quickPromos = activePromos.slice(0, 3);
+  const otherPromos = activePromos.slice(3);
 
   return (
     <div className="mt-3">
@@ -568,7 +574,7 @@ function PromoSelector({
         </div>
       ) : (
         <div className="flex flex-wrap gap-1.5">
-          {activePromos.map((promo) => (
+          {quickPromos.map((promo) => (
             <button
               key={String(promo._id)}
               onClick={() => setPromoId(String(promo._id))}
@@ -578,6 +584,73 @@ function PromoSelector({
               {promo.name}
             </button>
           ))}
+          {otherPromos.length > 0 && (
+            <button
+              onClick={() => setShowAllPromos(true)}
+              className="flex items-center gap-1 rounded-md border border-dashed px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-orange-400 hover:bg-orange-50 hover:text-foreground"
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+              Others ({otherPromos.length})
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* All Promotions Modal */}
+      {showAllPromos && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setShowAllPromos(false)}
+        >
+          <div
+            className="w-full max-w-md max-h-[80vh] rounded-xl border bg-card shadow-xl flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b px-5 py-4">
+              <div>
+                <h2 className="text-base font-bold">All Promotions</h2>
+                <p className="text-xs text-muted-foreground">
+                  {activePromos.length} available promotion{activePromos.length !== 1 ? "s" : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAllPromos(false)}
+                className="rounded-full p-1.5 hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Promo list */}
+            <div className="flex-1 overflow-y-auto divide-y divide-border">
+              {activePromos.map((promo) => (
+                <button
+                  key={String(promo._id)}
+                  onClick={() => {
+                    setPromoId(String(promo._id));
+                    setShowAllPromos(false);
+                  }}
+                  className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-orange-50"
+                >
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-100">
+                    <Tag className="h-4 w-4 text-orange-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{promo.name}</p>
+                    {promo.description && (
+                      <p className="text-xs text-muted-foreground truncate">
+                        {promo.description}
+                      </p>
+                    )}
+                  </div>
+                  <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-orange-700">
+                    {promo.promoType === "percentage" ? "%" : promo.promoType === "fixedAmount" ? "₱" : promo.promoType === "buyXGetY" ? "B+G" : "Tier"}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
