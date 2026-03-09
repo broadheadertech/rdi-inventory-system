@@ -23,6 +23,7 @@ import {
   DollarSign,
   FileBarChart,
   X,
+  Zap,
 } from "lucide-react";
 import {
   saveCart,
@@ -153,6 +154,20 @@ function PosPageContent() {
   const { addItem, items, discountType, restoreCart } = usePOSCart();
   const connectionStatus = useConnectionStatus();
   const currentUser = useQuery(api.auth.users.getCurrentUser);
+
+  // Rush mode (localStorage-backed)
+  const [isRushMode, setIsRushMode] = useState(false);
+  useEffect(() => {
+    const stored = localStorage.getItem("rb-pos-rush-mode");
+    if (stored === "true") setIsRushMode(true);
+  }, []);
+  const toggleRushMode = useCallback(() => {
+    setIsRushMode((prev) => {
+      const next = !prev;
+      localStorage.setItem("rb-pos-rush-mode", next ? "true" : "false");
+      return next;
+    });
+  }, []);
 
   // Mode state
   const [inputMode, setInputMode] = useState<InputMode>("barcode");
@@ -464,7 +479,13 @@ function PosPageContent() {
 
   return (
     <ShiftGate>
-      <main className="flex h-screen">
+      {isRushMode && (
+        <div className="bg-amber-500 text-black text-center py-1 text-xs font-bold uppercase tracking-widest">
+          <Zap className="inline h-3 w-3 mr-1" />
+          Rush Mode Active — Quick Checkout Enabled
+        </div>
+      )}
+      <main className={cn("flex", isRushMode ? "h-[calc(100vh-28px)] ring-2 ring-amber-500/60 ring-inset animate-pulse-subtle" : "h-screen")}>
         {/* Left panel — scan area or browse grid */}
         <div className="flex-1 overflow-hidden lg:flex-[65] lg:border-r">
           <div className="flex h-full flex-col">
@@ -490,7 +511,22 @@ function PosPageContent() {
                   ))}
                 </div>
 
-                {/* Cash balance + actions */}
+                {/* Rush mode + Cash balance + actions */}
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={toggleRushMode}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
+                      isRushMode
+                        ? "border-amber-500 bg-amber-500 text-white"
+                        : "border-muted bg-background text-muted-foreground hover:border-amber-500/50 hover:text-foreground"
+                    )}
+                  >
+                    <Zap className="h-3.5 w-3.5" />
+                    Rush
+                  </button>
+                </div>
+
                 <div className="flex items-center gap-2">
                   {shift && (
                     <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-1.5 text-xs">
@@ -695,13 +731,13 @@ function PosPageContent() {
 
         {/* Cart panel — right side (desktop) */}
         <div className="hidden lg:flex lg:flex-[35]">
-          <POSCartPanel variant="desktop" />
+          <POSCartPanel variant="desktop" isRushMode={isRushMode} />
         </div>
       </main>
 
       {/* Bottom sheet cart for mobile */}
       <div className="lg:hidden">
-        <POSCartPanel variant="mobile" />
+        <POSCartPanel variant="mobile" isRushMode={isRushMode} />
       </div>
 
       {/* Scan confirmation overlay */}

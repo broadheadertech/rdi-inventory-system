@@ -79,6 +79,9 @@ export default defineSchema({
     description: v.optional(v.string()),
     basePriceCentavos: v.number(),
     isActive: v.boolean(),
+    isExclusive: v.optional(v.boolean()),
+    exclusiveBranchIds: v.optional(v.array(v.id("branches"))),
+    dropDate: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_category", ["categoryId"]),
@@ -124,6 +127,7 @@ export default defineSchema({
     variantId: v.id("variants"),
     quantity: v.number(),
     reservedQuantity: v.optional(v.number()),
+    quarantinedQuantity: v.optional(v.number()),
     lowStockThreshold: v.optional(v.number()),
     updatedAt: v.number(),
   })
@@ -333,6 +337,8 @@ export default defineSchema({
   reservations: defineTable({
     customerName: v.string(),
     customerPhone: v.string(),
+    customerId: v.optional(v.id("customers")),
+    reservationType: v.optional(v.union(v.literal("standard"), v.literal("try_on"))),
     variantId: v.id("variants"),
     branchId: v.id("branches"),
     quantity: v.number(),
@@ -351,7 +357,8 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_branch_status", ["branchId", "status"])
     .index("by_confirmation", ["confirmationCode"])
-    .index("by_expiresAt", ["expiresAt"]),
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_customer", ["customerId"]),
 
   restockSuggestions: defineTable({
     branchId: v.id("branches"),
@@ -633,6 +640,8 @@ export default defineSchema({
       v.literal("bankTransfer")
     ),
     paymentReference: v.optional(v.string()),
+    onlineAmountCentavos: v.optional(v.number()),
+    codAmountCentavos: v.optional(v.number()),
     paidAt: v.optional(v.number()),
     // promo
     promotionId: v.optional(v.id("promotions")),
@@ -869,4 +878,89 @@ export default defineSchema({
   })
     .index("by_placement", ["placement"])
     .index("by_active_placement", ["isActive", "placement"]),
+
+  // ─── Check-Ins (Daily Rewards) ──────────────────────────────────────────────
+  checkIns: defineTable({
+    customerId: v.id("customers"),
+    checkedInAt: v.number(),
+    streakDay: v.number(),
+    pointsAwarded: v.number(),
+  })
+    .index("by_customer", ["customerId"]),
+
+  // ─── Digital Receipts ──────────────────────────────────────────────────────
+  digitalReceipts: defineTable({
+    transactionId: v.id("transactions"),
+    type: v.union(v.literal("email"), v.literal("sms")),
+    destination: v.string(),
+    sentAt: v.number(),
+  })
+    .index("by_transaction", ["transactionId"]),
+
+  // ─── Restock Alerts ───────────────────────────────────────────────────────
+  restockAlerts: defineTable({
+    customerId: v.id("users"),
+    variantId: v.id("variants"),
+    styleId: v.id("styles"),
+    status: v.union(v.literal("active"), v.literal("notified"), v.literal("cancelled")),
+    createdAt: v.number(),
+    notifiedAt: v.optional(v.number()),
+  })
+    .index("by_customer", ["customerId", "status"])
+    .index("by_variant", ["variantId", "status"]),
+
+  // ─── Saved Items (Wishlist) ───────────────────────────────────────────────
+  savedItems: defineTable({
+    customerId: v.id("users"),
+    styleId: v.id("styles"),
+    variantId: v.optional(v.id("variants")),
+    savedAt: v.number(),
+  })
+    .index("by_customer", ["customerId"])
+    .index("by_customer_style", ["customerId", "styleId"]),
+
+  // ─── Exchange Requests ──────────────────────────────────────────────────
+  exchangeRequests: defineTable({
+    orderId: v.id("orders"),
+    customerId: v.id("users"),
+    originalVariantId: v.id("variants"),
+    requestedVariantId: v.id("variants"),
+    reason: v.string(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("rejected"),
+      v.literal("completed")
+    ),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_customer", ["customerId"])
+    .index("by_order", ["orderId"]),
+
+  // ─── Cycle Counts ───────────────────────────────────────────────────────
+  // ─── Product Votes (Demand Voting) ─────────────────────────────────────────
+  productVotes: defineTable({
+    styleId: v.id("styles"),
+    customerId: v.id("customers"),
+    votedAt: v.number(),
+  })
+    .index("by_style", ["styleId"])
+    .index("by_customer", ["customerId"])
+    .index("by_customer_style", ["customerId", "styleId"]),
+
+  cycleCounts: defineTable({
+    branchId: v.id("branches"),
+    initiatedBy: v.id("users"),
+    status: v.union(v.literal("in_progress"), v.literal("completed"), v.literal("cancelled")),
+    items: v.array(v.object({
+      variantId: v.id("variants"),
+      expectedQuantity: v.number(),
+      countedQuantity: v.optional(v.number()),
+    })),
+    notes: v.optional(v.string()),
+    completedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  }).index("by_branch", ["branchId", "status"]),
 });

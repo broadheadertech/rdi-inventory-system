@@ -45,6 +45,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "autoprefixer": "^10",
+    "docx": "^9.6.0",
     "eslint": "^9",
     "eslint-config-next": "^15",
     "npm-run-all2": "^5",

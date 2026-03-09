@@ -3,22 +3,49 @@ import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
 
 // ─── "Complete the Look" Cross-Sell Recommendations ─────────────────────────
-// Returns complementary products from the SAME brand but DIFFERENT categories.
+// Suggests complementary items that are currently in stock to create a complete
+// outfit. Uses smart category matching (e.g. Tops → Pants, Shoes, Accessories)
+// with fallback to other popular items from the same brand.
 // Public — no auth required.
+
+// Category-name patterns → complementary category keywords (case-insensitive)
+const COMPLEMENTARY_MAP: Record<string, string[]> = {
+  tops: ["pants", "bottoms", "shoes", "accessories", "belts"],
+  shirts: ["pants", "bottoms", "shoes", "accessories", "belts"],
+  pants: ["tops", "shirts", "shoes", "belts"],
+  bottoms: ["tops", "shirts", "shoes", "belts"],
+  shoes: ["socks", "pants", "bottoms"],
+  socks: ["shoes"],
+};
+
+/** Check whether a category name matches any of the given keywords. */
+function categoryMatchesAny(catName: string, keywords: string[]): boolean {
+  const lower = catName.toLowerCase();
+  return keywords.some((kw) => lower.includes(kw));
+}
+
+/** Derive complementary keywords from a category name. */
+function getComplementaryKeywords(catName: string): string[] {
+  const lower = catName.toLowerCase();
+  for (const [key, complements] of Object.entries(COMPLEMENTARY_MAP)) {
+    if (lower.includes(key)) return complements;
+  }
+  return []; // no smart match — will fall back to generic
+}
 
 export const getCompleteTheLook = query({
   args: { styleId: v.id("styles") },
   handler: async (ctx, args) => {
     // 1. Load the source style
     const style = await ctx.db.get(args.styleId);
-    if (!style || !style.isActive) return null;
+    if (!style || !style.isActive) return [];
 
     // 2. Resolve category → brand
     const category = await ctx.db.get(style.categoryId);
-    if (!category || !category.isActive) return null;
+    if (!category || !category.isActive) return [];
 
     const brand = await ctx.db.get(category.brandId);
-    if (!brand || !brand.isActive) return null;
+    if (!brand || !brand.isActive) return [];
 
     // 3. Find all active categories for this brand (excluding the current one)
     const brandCategories = await ctx.db
@@ -30,16 +57,27 @@ export const getCompleteTheLook = query({
       (c) => c.isActive && String(c._id) !== String(category._id)
     );
 
-    if (otherCategories.length === 0) return null;
+    if (otherCategories.length === 0) return [];
 
-    // 4. Gather active styles from those categories
+    // 4. Determine complementary keywords and prioritise matching categories
+    const keywords = getComplementaryKeywords(category.name);
+
+    // Split into "smart" matches and "generic" fallback
+    const smartCategories = keywords.length > 0
+      ? otherCategories.filter((c) => categoryMatchesAny(c.name, keywords))
+      : [];
+    const fallbackCategories = smartCategories.length > 0
+      ? smartCategories
+      : otherCategories; // generic: any other category from same brand
+
+    // 5. Gather active styles from the chosen categories (cap per category)
     const candidateStyles = (
       await Promise.all(
-        otherCategories.map(async (cat) => {
+        fallbackCategories.map(async (cat) => {
           const styles = await ctx.db
             .query("styles")
             .withIndex("by_category", (q) => q.eq("categoryId", cat._id))
-            .collect();
+            .take(20);
           return styles
             .filter((s) => s.isActive)
             .map((s) => ({ ...s, categoryName: cat.name }));
@@ -47,14 +85,41 @@ export const getCompleteTheLook = query({
       )
     ).flat();
 
-    if (candidateStyles.length === 0) return null;
+    if (candidateStyles.length === 0) return [];
 
-    // 5. Sort by most recently created, take up to 6
-    const top = candidateStyles
+    // 6. Filter to styles that have at least one in-stock variant (quantity > 0)
+    const inStockStyles = (
+      await Promise.all(
+        candidateStyles.map(async (s) => {
+          const variants = await ctx.db
+            .query("variants")
+            .withIndex("by_style", (q) => q.eq("styleId", s._id))
+            .take(30);
+          const activeVariants = variants.filter((v) => v.isActive);
+          if (activeVariants.length === 0) return null;
+
+          // Check inventory for at least one variant with quantity > 0
+          for (const variant of activeVariants) {
+            const inventoryRows = await ctx.db
+              .query("inventory")
+              .withIndex("by_variant", (q) => q.eq("variantId", variant._id))
+              .take(10);
+            const totalQty = inventoryRows.reduce((sum, inv) => sum + inv.quantity, 0);
+            if (totalQty > 0) return s; // at least one variant in stock
+          }
+          return null;
+        })
+      )
+    ).filter((s): s is NonNullable<typeof s> => s !== null);
+
+    if (inStockStyles.length === 0) return [];
+
+    // 7. Sort by most recently created, take up to 4
+    const top = inStockStyles
       .sort((a, b) => b.createdAt - a.createdAt)
-      .slice(0, 6);
+      .slice(0, 4);
 
-    // 6. Enrich with primary image
+    // 8. Enrich with primary image + brand name
     const enriched = await Promise.all(
       top.map(async (s) => {
         const images = await ctx.db
@@ -62,25 +127,22 @@ export const getCompleteTheLook = query({
           .withIndex("by_style", (q) => q.eq("styleId", s._id))
           .collect();
         const primary = images.find((img) => img.isPrimary);
-        const primaryImageUrl = primary
+        const imageUrl = primary
           ? await ctx.storage.getUrl(primary.storageId)
           : null;
 
         return {
           styleId: s._id,
-          name: s.name,
+          styleName: s.name,
           brandName: brand.name,
           categoryName: s.categoryName,
-          primaryImageUrl,
-          basePriceCentavos: s.basePriceCentavos,
+          priceCentavos: s.basePriceCentavos,
+          imageUrl,
         };
       })
     );
 
-    return {
-      brandName: brand.name,
-      items: enriched,
-    };
+    return enriched;
   },
 });
 
@@ -156,7 +218,7 @@ export const getFrequentlyBoughtTogether = query({
       .slice(0, 3)
       .map(([id]) => id as unknown as Id<"styles">);
 
-    // 6. Enrich each style with details
+    // 6. Enrich each style with details + default variant for bundle add-to-cart
     const results = await Promise.all(
       topStyleIds.map(async (sid) => {
         const s = await ctx.db.get(sid);
@@ -175,12 +237,20 @@ export const getFrequentlyBoughtTogether = query({
           ? await ctx.storage.getUrl(primary.storageId)
           : null;
 
+        // Find a default variant (first active one) for bundle add-to-cart
+        const styleVariants = await ctx.db
+          .query("variants")
+          .withIndex("by_style", (q) => q.eq("styleId", sid))
+          .collect();
+        const defaultVariant = styleVariants.find((v) => v.isActive) ?? null;
+
         return {
           styleId: s._id,
           name: s.name,
           brandName: brand?.name ?? "Unknown",
           primaryImageUrl,
           basePriceCentavos: s.basePriceCentavos,
+          defaultVariantId: defaultVariant?._id ?? null,
         };
       })
     );

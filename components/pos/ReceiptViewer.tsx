@@ -7,6 +7,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { Loader2, X, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatCurrency, formatDateTime } from "@/lib/formatters";
+import { SendReceiptForm } from "@/components/pos/SendReceiptForm";
 import dynamic from "next/dynamic";
 
 // Single dynamic import that loads both BlobProvider and ReceiptPDF together,
@@ -295,6 +296,12 @@ function ReceiptViewerInner({
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Digital receipt sending */}
+      <div className="border-t p-4">
+        <p className="mb-2 text-sm font-medium">Send Digital Receipt</p>
+        <SendReceiptForm transactionId={transactionId} />
       </div>
 
       {/* Bottom actions */}

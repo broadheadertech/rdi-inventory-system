@@ -73,11 +73,16 @@ const config: Config = {
           from: { opacity: "1" },
           to: { opacity: "0" },
         },
+        "pulse-subtle": {
+          "0%, 100%": { "box-shadow": "inset 0 0 0 2px rgba(245,158,11,0.5)" },
+          "50%": { "box-shadow": "inset 0 0 0 2px rgba(245,158,11,0.2)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         "fade-out": "fade-out 2s ease-out forwards",
+        "pulse-subtle": "pulse-subtle 2s ease-in-out infinite",
       },
     },
   },

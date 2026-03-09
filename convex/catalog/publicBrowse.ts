@@ -94,6 +94,7 @@ export const getStylesByCategoryPublic = query({
         );
         const branchSet = new Set<string>();
         const sizeSet = new Set<string>();
+        let expressAvailable = false;
         for (const vr of activeVariants) {
           if (vr.size) sizeSet.add(vr.size);
           const inv = await ctx.db
@@ -101,8 +102,12 @@ export const getStylesByCategoryPublic = query({
             .withIndex("by_variant", (q) => q.eq("variantId", vr._id))
             .collect();
           for (const row of inv) {
-            if (row.quantity > 0 && !warehouseIds.has(row.branchId as string)) {
-              branchSet.add(row.branchId as string);
+            if (row.quantity > 0) {
+              if (warehouseIds.has(row.branchId as string)) {
+                expressAvailable = true;
+              } else {
+                branchSet.add(row.branchId as string);
+              }
             }
           }
         }
@@ -124,6 +129,7 @@ export const getStylesByCategoryPublic = query({
           variantCount: activeVariants.length,
           branchCount: branchSet.size,
           sizes: Array.from(sizeSet),
+          expressAvailable,
         };
       })
     );

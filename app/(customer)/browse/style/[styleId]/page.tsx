@@ -7,13 +7,19 @@ import Image from "next/image";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { ArrowLeft, ShoppingBag, Heart, BellRing, Star, ThumbsUp, X } from "lucide-react";
+import { ArrowLeft, ShoppingBag, Heart, BellRing, Star, ThumbsUp, X, Sparkles } from "lucide-react";
 import { PriceDropAlert } from "@/components/storefront/PriceDropAlert";
 import { ImageLightbox } from "@/components/customer/ImageLightbox";
+import { FilipinoFitGuide } from "@/components/customer/FilipinoFitGuide";
+import { StyleGallery } from "@/components/customer/StyleGallery";
+import { ShareButton } from "@/components/customer/ShareButton";
 import { toast } from "sonner";
 import { cn, formatPrice } from "@/lib/utils";
 import { useSizePreferences } from "@/lib/hooks/useSizePreferences";
 import { BranchStockDisplay } from "@/components/shared/BranchStockDisplay";
+import { FulfillmentOptions } from "@/components/customer/FulfillmentOptions";
+import { TryOnButton } from "@/components/customer/TryOnButton";
+import { saveRecentlyViewed } from "@/components/customer/ContinueShopping";
 import {
   Sheet,
   SheetContent,
@@ -107,6 +113,7 @@ export default function StyleDetailPage() {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [enlargedImageUrl, setEnlargedImageUrl] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [addingBundle, setAddingBundle] = useState(false);
 
   // Track product view
   useEffect(() => {
@@ -115,6 +122,18 @@ export default function StyleDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [styleId]);
+
+  // Save to localStorage for "Continue Shopping"
+  useEffect(() => {
+    if (!style) return;
+    saveRecentlyViewed({
+      styleId: styleId as string,
+      name: style.name,
+      brandName: style.brandName ?? "",
+      imageUrl: style.images?.[0]?.url ?? null,
+      priceCentavos: style.basePriceCentavos,
+    });
+  }, [style, styleId]);
 
   // Extract unique colors (memoized to avoid recreating on every render)
   const uniqueColors = useMemo(
@@ -453,7 +472,14 @@ export default function StyleDetailPage() {
             <p className="text-sm text-muted-foreground">
               {style.brandName} &middot; {style.categoryName}
             </p>
-            <h1 className="mt-1 text-2xl font-bold">{style.name}</h1>
+            <div className="mt-1 flex items-start justify-between gap-2">
+              <h1 className="text-2xl font-bold">{style.name}</h1>
+              <ShareButton
+                title={style.name}
+                text={`Check out ${style.name} on RedBox Apparel!`}
+                className="flex-shrink-0 mt-1"
+              />
+            </div>
             {style.description && (
               <p className="mt-2 text-sm text-muted-foreground">
                 {style.description}
@@ -536,7 +562,10 @@ export default function StyleDetailPage() {
           {/* Size Grid */}
           {sizesForColor.length > 0 && (
             <div>
-              <p className="mb-2 text-sm font-medium">Size</p>
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-sm font-medium">Size</p>
+                <FilipinoFitGuide category={style.categoryName} />
+              </div>
               <div className="grid grid-cols-4 gap-2 sm:grid-cols-6">
                 {sizesForColor.map((v) => (
                   <button
@@ -597,6 +626,17 @@ export default function StyleDetailPage() {
             </button>
           )}
 
+          {/* Try On at Store */}
+          {selectedVariantId && !isOutOfStock && (
+            <TryOnButton
+              styleId={styleId}
+              selectedVariantId={selectedVariantId}
+              selectedSize={selectedVariant?.size}
+              selectedColor={selectedVariant?.color}
+              priceCentavos={selectedVariant?.priceCentavos}
+            />
+          )}
+
           {/* Notify Me — out of stock */}
           {isOutOfStock && selectedVariantId && (
             isInWishlist ? (
@@ -629,6 +669,9 @@ export default function StyleDetailPage() {
               </button>
             )
           )}
+
+          {/* Fulfillment Options */}
+          <FulfillmentOptions variantId={selectedVariantId} />
 
           {/* Branch Stock Display */}
           <BranchStockDisplay
@@ -664,26 +707,24 @@ export default function StyleDetailPage() {
           </div>
         </section>
       )}
-      {recommendations && recommendations.items.length > 0 && (
+      {recommendations && recommendations.length > 0 && (
         <section className="mt-10 px-4 lg:px-6">
-          <div className="mb-4">
+          <div className="mb-4 flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" />
             <h2 className="text-lg font-bold">Complete the Look</h2>
-            <p className="text-sm text-muted-foreground">
-              More from {recommendations.brandName}
-            </p>
           </div>
           <div className="flex gap-3 overflow-x-auto pb-4 [&::-webkit-scrollbar]:hidden">
-            {recommendations.items.map((item) => (
+            {recommendations.map((item) => (
               <Link
                 key={String(item.styleId)}
                 href={`/browse/style/${item.styleId}`}
                 className="group flex-shrink-0 w-[160px] sm:w-[180px] overflow-hidden rounded-lg border border-border bg-card transition-all hover:border-[var(--customer-accent-glow)] hover:shadow-[0_0_20px_rgba(232,25,44,0.1)]"
               >
                 <div className="relative aspect-[3/4] w-full bg-secondary">
-                  {item.primaryImageUrl ? (
+                  {item.imageUrl ? (
                     <Image
-                      src={item.primaryImageUrl}
-                      alt={item.name}
+                      src={item.imageUrl}
+                      alt={item.styleName}
                       fill
                       sizes="180px"
                       className="object-cover transition-transform group-hover:scale-105"
@@ -696,13 +737,13 @@ export default function StyleDetailPage() {
                 </div>
                 <div className="p-2.5 space-y-1">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                    {item.categoryName}
+                    {item.brandName}
                   </p>
                   <h3 className="text-sm font-medium leading-tight line-clamp-2 text-foreground">
-                    {item.name}
+                    {item.styleName}
                   </h3>
                   <p className="font-mono text-sm font-bold text-primary">
-                    {formatPrice(item.basePriceCentavos)}
+                    {formatPrice(item.priceCentavos)}
                   </p>
                 </div>
               </Link>
@@ -734,107 +775,165 @@ export default function StyleDetailPage() {
           </div>
         </section>
       )}
-      {frequentlyBought && frequentlyBought.length > 0 && (
-        <section className="mt-10 px-4 lg:px-6">
-          <div className="mb-4">
-            <h2 className="text-lg font-bold">Customers Also Bought</h2>
-            <p className="text-sm text-muted-foreground">
-              Frequently purchased together
-            </p>
-          </div>
+      {frequentlyBought && frequentlyBought.length > 0 && (() => {
+        const bundleTotal =
+          style.basePriceCentavos +
+          frequentlyBought.reduce((sum, i) => sum + i.basePriceCentavos, 0);
+        const bundleDiscount = Math.round(bundleTotal * 0.1);
+        const bundleDiscountedTotal = bundleTotal - bundleDiscount;
+        // Check if all recommended items have a default variant for bundle add
+        const canAddBundle =
+          !!selectedVariantId &&
+          frequentlyBought.every((item) => item.defaultVariantId !== null);
 
-          {/* Bundle row: current product + suggestions with "+" separators */}
-          <div className="flex items-center gap-2 overflow-x-auto pb-4 [&::-webkit-scrollbar]:hidden">
-            {/* Current product */}
-            <div className="flex-shrink-0 w-[120px] sm:w-[140px] overflow-hidden rounded-lg border-2 border-primary bg-card">
-              <div className="relative aspect-[3/4] w-full bg-secondary">
-                {style.images[0]?.url ? (
-                  <Image
-                    src={style.images[0].url}
-                    alt={style.name}
-                    fill
-                    sizes="140px"
-                    className="object-cover"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
-                    No image
-                  </div>
-                )}
-              </div>
-              <div className="p-2 space-y-0.5">
-                <h3 className="text-xs font-medium leading-tight line-clamp-2 text-foreground">
-                  {style.name}
-                </h3>
-                <p className="font-mono text-xs font-bold text-primary">
-                  {formatPrice(style.basePriceCentavos)}
-                </p>
-              </div>
+        return (
+          <section className="mt-10 px-4 lg:px-6">
+            <div className="mb-4">
+              <h2 className="text-lg font-bold">Customers Also Bought</h2>
+              <p className="text-sm text-muted-foreground">
+                Frequently purchased together &mdash; <span className="text-[#E8192C] font-semibold">save 10% as a bundle</span>
+              </p>
             </div>
 
-            {frequentlyBought.map((item) => (
-              <div key={String(item.styleId)} className="contents">
-                {/* Plus separator */}
-                <span className="flex-shrink-0 text-2xl font-bold text-muted-foreground">+</span>
+            {/* Bundle row: current product + suggestions with "+" separators */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-4 [&::-webkit-scrollbar]:hidden">
+              {/* Current product */}
+              <div className="flex-shrink-0 w-[120px] sm:w-[140px] overflow-hidden rounded-lg border-2 border-primary bg-card">
+                <div className="relative aspect-[3/4] w-full bg-secondary">
+                  {style.images[0]?.url ? (
+                    <Image
+                      src={style.images[0].url}
+                      alt={style.name}
+                      fill
+                      sizes="140px"
+                      className="object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
+                      No image
+                    </div>
+                  )}
+                </div>
+                <div className="p-2 space-y-0.5">
+                  <h3 className="text-xs font-medium leading-tight line-clamp-2 text-foreground">
+                    {style.name}
+                  </h3>
+                  <p className="font-mono text-xs font-bold text-primary">
+                    {formatPrice(style.basePriceCentavos)}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">This item</p>
+                </div>
+              </div>
 
-                {/* Suggested product */}
-                <Link
-                  href={`/browse/style/${item.styleId}`}
-                  className="group flex-shrink-0 w-[120px] sm:w-[140px] overflow-hidden rounded-lg border border-border bg-card transition-all hover:border-[var(--customer-accent-glow)] hover:shadow-[0_0_20px_rgba(232,25,44,0.1)]"
-                >
-                  <div className="relative aspect-[3/4] w-full bg-secondary">
-                    {item.primaryImageUrl ? (
-                      <Image
-                        src={item.primaryImageUrl}
-                        alt={item.name}
-                        fill
-                        sizes="140px"
-                        className="object-cover transition-transform group-hover:scale-105"
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
-                        No image
+              {frequentlyBought.map((item) => (
+                <div key={String(item.styleId)} className="contents">
+                  {/* Plus separator */}
+                  <span className="flex-shrink-0 text-2xl font-bold text-muted-foreground">+</span>
+
+                  {/* Suggested product */}
+                  <div className="flex-shrink-0 w-[120px] sm:w-[140px] overflow-hidden rounded-lg border border-border bg-card">
+                    <Link
+                      href={`/browse/style/${item.styleId}`}
+                      className="group block"
+                    >
+                      <div className="relative aspect-[3/4] w-full bg-secondary">
+                        {item.primaryImageUrl ? (
+                          <Image
+                            src={item.primaryImageUrl}
+                            alt={item.name}
+                            fill
+                            sizes="140px"
+                            className="object-cover transition-transform group-hover:scale-105"
+                          />
+                        ) : (
+                          <div className="flex h-full items-center justify-center text-muted-foreground text-xs">
+                            No image
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-2 space-y-0.5">
+                        <h3 className="text-xs font-medium leading-tight line-clamp-2 text-foreground group-hover:text-primary transition-colors">
+                          {item.name}
+                        </h3>
+                        <p className="font-mono text-xs font-bold text-primary">
+                          {formatPrice(item.basePriceCentavos)}
+                        </p>
+                      </div>
+                    </Link>
+                    {/* Individual Add to Cart */}
+                    {item.defaultVariantId && (
+                      <div className="px-2 pb-2">
+                        <button
+                          onClick={async () => {
+                            try {
+                              await addToCart({ variantId: item.defaultVariantId! });
+                              toast.success(`${item.name} added to bag!`);
+                            } catch {
+                              toast.error("Please sign in to add items to your bag");
+                            }
+                          }}
+                          className="w-full rounded-md border border-zinc-700 bg-zinc-800 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-200 hover:bg-zinc-700 transition-colors"
+                        >
+                          Add to Bag
+                        </button>
                       </div>
                     )}
                   </div>
-                  <div className="p-2 space-y-0.5">
-                    <h3 className="text-xs font-medium leading-tight line-clamp-2 text-foreground">
-                      {item.name}
-                    </h3>
-                    <p className="font-mono text-xs font-bold text-primary">
-                      {formatPrice(item.basePriceCentavos)}
-                    </p>
-                  </div>
-                </Link>
-              </div>
-            ))}
-          </div>
-
-          {/* Bundle total */}
-          <div className="mt-2 flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-            <div>
-              <p className="text-sm text-muted-foreground">Bundle total</p>
-              <p className="text-lg font-bold text-foreground">
-                {formatPrice(
-                  style.basePriceCentavos +
-                    frequentlyBought.reduce((sum, i) => sum + i.basePriceCentavos, 0)
-                )}
-              </p>
-            </div>
-            <div className="flex gap-2">
-              {frequentlyBought.map((item) => (
-                <Link
-                  key={String(item.styleId)}
-                  href={`/browse/style/${item.styleId}`}
-                  className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs font-medium text-zinc-200 hover:bg-zinc-700 transition-colors"
-                >
-                  View
-                </Link>
+                </div>
               ))}
             </div>
-          </div>
-        </section>
-      )}
+
+            {/* Bundle pricing + Add Bundle button */}
+            <div className="mt-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Bundle total ({frequentlyBought.length + 1} items)</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-sm line-through text-muted-foreground">
+                      {formatPrice(bundleTotal)}
+                    </span>
+                    <span className="text-lg font-bold text-foreground">
+                      {formatPrice(bundleDiscountedTotal)}
+                    </span>
+                  </div>
+                </div>
+                <span className="rounded bg-[#E8192C]/10 border border-[#E8192C]/30 px-2.5 py-1 text-xs font-bold text-[#E8192C]">
+                  SAVE {formatPrice(bundleDiscount)}
+                </span>
+              </div>
+
+              {canAddBundle && (
+                <button
+                  onClick={async () => {
+                    if (!selectedVariantId) return;
+                    setAddingBundle(true);
+                    try {
+                      // Add current product
+                      await addToCart({ variantId: selectedVariantId });
+                      // Add each recommended item
+                      for (const item of frequentlyBought) {
+                        if (item.defaultVariantId) {
+                          await addToCart({ variantId: item.defaultVariantId });
+                        }
+                      }
+                      toast.success(`Bundle added! You saved ${formatPrice(bundleDiscount)}`);
+                    } catch {
+                      toast.error("Please sign in to add items to your bag");
+                    } finally {
+                      setAddingBundle(false);
+                    }
+                  }}
+                  disabled={addingBundle}
+                  className="flex w-full min-h-[44px] items-center justify-center gap-2 rounded-md bg-[#E8192C] text-sm font-bold uppercase tracking-wider text-white hover:bg-[#E8192C]/90 disabled:opacity-50 transition-colors"
+                >
+                  <ShoppingBag className="h-4 w-4" />
+                  {addingBundle ? "Adding Bundle..." : "Add Bundle to Bag"}
+                </button>
+              )}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* ─── Reviews Section ──────────────────────────────────────────────── */}
       {reviewsData && (
@@ -1097,6 +1196,11 @@ export default function StyleDetailPage() {
           </div>
         </div>
       )}
+
+      {/* ─── Style Gallery Section ───────────────────────────────────────── */}
+      <div className="mt-12 px-4 pb-8">
+        <StyleGallery styleId={styleId} />
+      </div>
 
       {/* Product image lightbox */}
       {lightboxIndex !== null && (

@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ChevronUp,
   Loader2,
+  Zap,
 } from "lucide-react";
 import { CustomerProductCard } from "@/components/customer/CustomerProductCard";
 import { QuickViewSheet } from "@/components/customer/QuickViewSheet";
@@ -79,6 +80,9 @@ export default function BrandPage() {
   const [selectedColors, setSelectedColors] = useState<Set<string>>(new Set());
   const [selectedSizes, setSelectedSizes] = useState<Set<string>>(new Set());
 
+  // Express filter
+  const [expressOnly, setExpressOnly] = useState(false);
+
   // QuickView state
   const [quickViewStyleId, setQuickViewStyleId] = useState<Id<"styles"> | null>(null);
 
@@ -135,6 +139,11 @@ export default function BrandPage() {
       styles = styles.filter((s) => s.sizes.some((sz) => selectedSizes.has(sz)));
     }
 
+    // Express delivery filter
+    if (expressOnly) {
+      styles = styles.filter((s) => (s as Record<string, unknown>).expressAvailable);
+    }
+
     // Sort
     const sorted = [...styles];
     switch (sortKey) {
@@ -153,12 +162,12 @@ export default function BrandPage() {
     }
 
     return sorted;
-  }, [data, genderTab, sortKey, selectedCategories, selectedColors, selectedSizes]);
+  }, [data, genderTab, sortKey, selectedCategories, selectedColors, selectedSizes, expressOnly]);
 
   // Reset visible count when filters/sort change
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
-  }, [genderTab, sortKey, selectedCategories, selectedColors, selectedSizes]);
+  }, [genderTab, sortKey, selectedCategories, selectedColors, selectedSizes, expressOnly]);
 
   // Visible slice for infinite scroll
   const visibleStyles = useMemo(
@@ -335,6 +344,19 @@ export default function BrandPage() {
                   {activeFilterCount}
                 </span>
               )}
+            </button>
+            <div className="h-5 w-px bg-border" />
+            <button
+              onClick={() => setExpressOnly(!expressOnly)}
+              className={cn(
+                "flex flex-1 items-center justify-center gap-1 py-2.5 text-xs font-medium transition-colors",
+                expressOnly
+                  ? "text-amber-500"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <Zap className="h-3.5 w-3.5" />
+              Express
             </button>
             <div className="h-5 w-px bg-border" />
             <div className="flex flex-1 items-center justify-center py-2.5 text-xs text-muted-foreground">

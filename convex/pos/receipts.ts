@@ -1,5 +1,5 @@
 import { v, ConvexError } from "convex/values";
-import { query } from "../_generated/server";
+import { query, mutation } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { POS_ROLES } from "../_helpers/permissions";
 
@@ -112,5 +112,89 @@ export const getReceiptData = query({
         businessAddressSetting?.value ?? branch?.address ?? "",
       cashierName: cashier?.name ?? "Unknown",
     };
+  },
+});
+
+// ─── Send Digital Receipt ─────────────────────────────────────────────────
+
+export const sendDigitalReceipt = mutation({
+  args: {
+    transactionId: v.id("transactions"),
+    type: v.union(v.literal("email"), v.literal("sms")),
+    destination: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    const transaction = await ctx.db.get(args.transactionId);
+    if (!transaction) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transaction not found" });
+    }
+
+    if (!scope.canAccessAllBranches && transaction.branchId !== scope.branchId) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    // Duplicate check — prevent sending to the same destination+type twice
+    const existing = await ctx.db
+      .query("digitalReceipts")
+      .withIndex("by_transaction", (q) =>
+        q.eq("transactionId", args.transactionId)
+      )
+      .collect();
+
+    const isDuplicate = existing.some(
+      (r) => r.type === args.type && r.destination === args.destination
+    );
+    if (isDuplicate) {
+      throw new ConvexError({
+        code: "DUPLICATE",
+        message: `Receipt already sent via ${args.type} to ${args.destination}`,
+      });
+    }
+
+    await ctx.db.insert("digitalReceipts", {
+      transactionId: args.transactionId,
+      type: args.type,
+      destination: args.destination,
+      sentAt: Date.now(),
+    });
+
+    return { success: true };
+  },
+});
+
+// ─── Get Receipt History ──────────────────────────────────────────────────
+
+export const getReceiptHistory = query({
+  args: {
+    transactionId: v.id("transactions"),
+  },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    const transaction = await ctx.db.get(args.transactionId);
+    if (!transaction) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transaction not found" });
+    }
+
+    if (!scope.canAccessAllBranches && transaction.branchId !== scope.branchId) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    const receipts = await ctx.db
+      .query("digitalReceipts")
+      .withIndex("by_transaction", (q) =>
+        q.eq("transactionId", args.transactionId)
+      )
+      .collect();
+
+    return receipts;
   },
 });

@@ -21,6 +21,7 @@ import {
   Tag,
   X,
   Split,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -44,7 +45,7 @@ type TransactionResult = {
   paymentMethod: PaymentMethod;
 };
 
-export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
+export function POSCartPanel({ variant, isRushMode = false }: { variant: "desktop" | "mobile"; isRushMode?: boolean }) {
   const {
     items, heldTransactions, updateQuantity, removeItem, clearCart,
     holdTransaction, resumeTransaction, discardHeldTransaction, discountType, setDiscountType, taxBreakdown,
@@ -98,6 +99,18 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
   if (variant === "desktop") {
     return (
       <div className="relative flex h-full flex-col border-l bg-background">
+        {isRushMode ? (
+          <RushModeCart
+            items={items}
+            totalItems={totalItems}
+            taxBreakdown={taxBreakdown}
+            onCompleteSale={handleCompleteSale}
+            onPaymentComplete={handlePaymentComplete}
+            showPayment={showPayment}
+            onPaymentCancel={handlePaymentCancel}
+            clearCart={clearCart}
+          />
+        ) : (
         <CartContent
           items={items}
           totalItems={totalItems}
@@ -122,6 +135,7 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
           onPaymentComplete={handlePaymentComplete}
           onPaymentCancel={handlePaymentCancel}
         />
+        )}
         {transactionResult && (
           <TransactionSuccess
             result={transactionResult}
@@ -165,12 +179,68 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
               <PaymentPanel
                 items={items}
                 taxBreakdown={taxBreakdown}
-                discountType={discountType}
-                selectedPromoId={selectedPromoId}
-                promoPreview={promoPreview}
+                discountType={isRushMode ? "none" : discountType}
+                selectedPromoId={isRushMode ? null : selectedPromoId}
+                promoPreview={isRushMode ? null : promoPreview}
                 onComplete={handlePaymentComplete}
                 onCancel={handlePaymentCancel}
               />
+            ) : isRushMode ? (
+              <>
+                {items.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center gap-2 py-8 text-center">
+                    <Zap className="h-10 w-10 text-amber-500/20" />
+                    <p className="text-sm text-muted-foreground">Scan items to start</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      {items.map((item) => (
+                        <div
+                          key={item.variantId as string}
+                          className="flex items-center justify-between rounded-lg border p-3"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="text-base font-bold truncate">{item.styleName}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {item.size} · {item.color} × {item.quantity}
+                            </p>
+                          </div>
+                          <p className="text-lg font-bold tabular-nums ml-3">
+                            {formatCurrency(item.unitPriceCentavos * item.quantity)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-4 border-t pt-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xl font-bold">Total</span>
+                        <span className="text-2xl font-bold text-amber-500 tabular-nums">
+                          {formatCurrency(taxBreakdown.totalCentavos)}
+                        </span>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          className="h-14 flex-1"
+                          disabled={items.length === 0}
+                          onClick={handleClearCart}
+                        >
+                          Clear
+                        </Button>
+                        <Button
+                          className="h-14 flex-[2] text-lg bg-amber-500 hover:bg-amber-600 text-black font-bold"
+                          disabled={items.length === 0}
+                          onClick={handleCompleteSale}
+                        >
+                          <Zap className="mr-2 h-5 w-5" />
+                          Quick Checkout
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
             ) : (
               <>
                 {/* Held transactions */}
@@ -226,10 +296,17 @@ export function POSCartPanel({ variant }: { variant: "desktop" | "mobile" }) {
       {/* Toggle bar */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex h-14 w-full items-center justify-between border-t bg-background px-4"
+        className={cn(
+          "flex h-14 w-full items-center justify-between border-t px-4",
+          isRushMode ? "bg-amber-500/10" : "bg-background"
+        )}
       >
         <div className="flex items-center gap-2">
-          <ShoppingCart className="h-5 w-5" />
+          {isRushMode ? (
+            <Zap className="h-5 w-5 text-amber-500" />
+          ) : (
+            <ShoppingCart className="h-5 w-5" />
+          )}
           <span className="font-medium">
             {totalItems} item{totalItems !== 1 ? "s" : ""}
           </span>
@@ -1241,6 +1318,114 @@ function PaymentPanel({
   );
 }
 
+// ─── Rush Mode Cart ─────────────────────────────────────────────────────────
+
+function RushModeCart({
+  items,
+  totalItems,
+  taxBreakdown,
+  onCompleteSale,
+  onPaymentComplete,
+  showPayment,
+  onPaymentCancel,
+  clearCart,
+}: {
+  items: CartItem[];
+  totalItems: number;
+  taxBreakdown: TaxBreakdown;
+  onCompleteSale: () => void;
+  onPaymentComplete: (result: TransactionResult) => void;
+  showPayment: boolean;
+  onPaymentCancel: () => void;
+  clearCart: () => void;
+}) {
+  if (showPayment) {
+    return (
+      <PaymentPanel
+        items={items}
+        taxBreakdown={taxBreakdown}
+        discountType="none"
+        selectedPromoId={null}
+        promoPreview={null}
+        onComplete={onPaymentComplete}
+        onCancel={onPaymentCancel}
+      />
+    );
+  }
+
+  return (
+    <>
+      {/* Rush header */}
+      <div className="flex items-center gap-2 border-b bg-amber-500/5 p-4">
+        <Zap className="h-5 w-5 text-amber-500" />
+        <h2 className="text-lg font-bold">Quick Cart</h2>
+        {totalItems > 0 && (
+          <span className="rounded-full bg-amber-500 px-2.5 py-0.5 text-xs font-bold text-black">
+            {totalItems}
+          </span>
+        )}
+      </div>
+
+      {/* Simplified items list */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {items.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-center">
+            <Zap className="h-12 w-12 text-amber-500/20" />
+            <p className="text-sm text-muted-foreground">Scan items to start</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {items.map((item, i) => (
+              <div
+                key={item.variantId as string}
+                className="flex items-center justify-between rounded-lg border p-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-base font-bold truncate">{item.styleName}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {item.size} · {item.color} × {item.quantity}
+                  </p>
+                </div>
+                <p className="text-lg font-bold tabular-nums ml-3">
+                  {formatCurrency(item.unitPriceCentavos * item.quantity)}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Rush mode total + quick checkout */}
+      <div className="border-t p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-2xl font-bold">Total</span>
+          <span className="text-3xl font-bold text-amber-500 tabular-nums">
+            {formatCurrency(taxBreakdown.totalCentavos)}
+          </span>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="h-14 flex-1"
+            disabled={items.length === 0}
+            onClick={clearCart}
+          >
+            Clear
+          </Button>
+          <Button
+            className="h-14 flex-[2] text-lg bg-amber-500 hover:bg-amber-600 text-black font-bold"
+            disabled={items.length === 0}
+            onClick={onCompleteSale}
+          >
+            <Zap className="mr-2 h-5 w-5" />
+            Quick Checkout
+          </Button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ─── Transaction Success Overlay ────────────────────────────────────────────
 
 function TransactionSuccess({
@@ -1252,10 +1437,39 @@ function TransactionSuccess({
   onDismiss: () => void;
   onViewReceipt: () => void;
 }) {
+  const sendDigitalReceipt = useMutation(api.pos.receipts.sendDigitalReceipt);
+  const [digitalMode, setDigitalMode] = useState<"email" | "sms" | null>(null);
+  const [destination, setDestination] = useState("");
+  const [sending, setSending] = useState(false);
+
   useEffect(() => {
-    const timer = setTimeout(onDismiss, 5000);
+    if (digitalMode) return; // Don't auto-dismiss while entering digital receipt info
+    const timer = setTimeout(onDismiss, 8000);
     return () => clearTimeout(timer);
-  }, [onDismiss]);
+  }, [onDismiss, digitalMode]);
+
+  async function handleSendDigital() {
+    if (!digitalMode || !destination.trim()) return;
+    setSending(true);
+    try {
+      await sendDigitalReceipt({
+        transactionId: result.transactionId,
+        type: digitalMode,
+        destination: destination.trim(),
+      });
+      toast.success(
+        digitalMode === "email"
+          ? `Receipt sent to ${destination}`
+          : `Receipt sent to ${destination}`
+      );
+      setDigitalMode(null);
+      setDestination("");
+    } catch {
+      toast.error("Failed to send receipt");
+    } finally {
+      setSending(false);
+    }
+  }
 
   return (
     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/95">
@@ -1274,22 +1488,80 @@ function TransactionSuccess({
       <p className="mt-2 text-lg font-semibold">
         {formatCurrency(result.totalCentavos)}
       </p>
-      <div className="mt-4 flex gap-2">
-        <Button
-          variant="outline"
-          className="min-h-14 gap-2"
-          onClick={onViewReceipt}
-        >
-          View Receipt
-        </Button>
-        <Button
-          variant="ghost"
-          className="min-h-14"
-          onClick={onDismiss}
-        >
-          Dismiss
-        </Button>
-      </div>
+
+      {/* Digital receipt entry */}
+      {digitalMode && (
+        <div className="mt-4 w-72 rounded-lg border border-border bg-card p-4 space-y-3">
+          <p className="text-sm font-medium text-center">
+            {digitalMode === "email" ? "Email Receipt" : "SMS Receipt"}
+          </p>
+          <input
+            type={digitalMode === "email" ? "email" : "tel"}
+            placeholder={digitalMode === "email" ? "customer@email.com" : "09XX-XXX-XXXX"}
+            value={destination}
+            onChange={(e) => setDestination(e.target.value)}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            autoFocus
+          />
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              className="flex-1"
+              onClick={handleSendDigital}
+              disabled={sending || !destination.trim()}
+            >
+              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => { setDigitalMode(null); setDestination(""); }}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {!digitalMode && (
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              className="min-h-14 gap-2"
+              onClick={onViewReceipt}
+            >
+              View Receipt
+            </Button>
+            <Button
+              variant="ghost"
+              className="min-h-14"
+              onClick={onDismiss}
+            >
+              Dismiss
+            </Button>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => setDigitalMode("email")}
+            >
+              Email Receipt
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={() => setDigitalMode("sms")}
+            >
+              SMS Receipt
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

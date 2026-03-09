@@ -6,22 +6,10 @@ import { useParams } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
-import { ArrowLeft, Package, Truck, CheckCircle2, XCircle, Clock, RotateCcw } from "lucide-react";
-import { formatPrice, cn } from "@/lib/utils";
+import { ArrowLeft, RotateCcw } from "lucide-react";
+import { formatPrice } from "@/lib/utils";
 import { toast } from "sonner";
-
-const STATUS_STEPS = [
-  { key: "pending", label: "Pending", icon: Clock },
-  { key: "paid", label: "Paid", icon: CheckCircle2 },
-  { key: "processing", label: "Processing", icon: Package },
-  { key: "shipped", label: "Shipped", icon: Truck },
-  { key: "delivered", label: "Delivered", icon: CheckCircle2 },
-];
-
-function getStatusIndex(status: string) {
-  if (status === "cancelled" || status === "returned" || status === "refunded") return -1;
-  return STATUS_STEPS.findIndex((s) => s.key === status);
-}
+import { OrderTimeline } from "@/components/customer/OrderTimeline";
 
 export default function OrderDetailPage() {
   const { orderId } = useParams();
@@ -54,8 +42,6 @@ export default function OrderDetailPage() {
     );
   }
 
-  const currentStep = getStatusIndex(order.status);
-  const isCancelled = ["cancelled", "returned", "refunded"].includes(order.status);
   const canCancel = ["pending", "paid", "processing"].includes(order.status);
 
   return (
@@ -75,50 +61,20 @@ export default function OrderDetailPage() {
         </span>
       </div>
 
-      {/* Status timeline */}
-      {!isCancelled && (
-        <div className="mt-6 flex items-center justify-between">
-          {STATUS_STEPS.map((step, i) => (
-            <div key={step.key} className="flex flex-1 items-center">
-              <div className="flex flex-col items-center">
-                <div
-                  className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-full",
-                    i <= currentStep
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  )}
-                >
-                  <step.icon className="h-4 w-4" />
-                </div>
-                <span className="mt-1 text-[10px] text-muted-foreground">{step.label}</span>
-              </div>
-              {i < STATUS_STEPS.length - 1 && (
-                <div
-                  className={cn(
-                    "h-0.5 flex-1 mx-1",
-                    i < currentStep ? "bg-primary" : "bg-muted"
-                  )}
-                />
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {isCancelled && (
-        <div className="mt-6 flex items-center gap-2 rounded-lg bg-destructive/10 p-3">
-          <XCircle className="h-5 w-5 text-destructive" />
-          <div>
-            <p className="text-sm font-medium text-destructive">
-              Order {order.status}
-            </p>
-            {order.cancelReason && (
-              <p className="text-xs text-muted-foreground">{order.cancelReason}</p>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Order tracking timeline */}
+      <div className="mt-6">
+        <OrderTimeline
+          status={order.status}
+          fulfillmentType={order.fulfillmentType ?? undefined}
+          createdAt={order.createdAt}
+          paidAt={order.paidAt ?? undefined}
+          cancelledAt={order.cancelledAt ?? undefined}
+          cancelReason={order.cancelReason ?? undefined}
+          returnRequestedAt={order.returnRequestedAt ?? undefined}
+          returnReason={order.returnReason ?? undefined}
+          shipment={order.shipment ?? undefined}
+        />
+      </div>
 
       {/* Shipment tracking */}
       {order.shipment && (

@@ -9,6 +9,7 @@ import { CheckCircle2, Clock, XCircle, MapPin, Copy, Check } from "lucide-react"
 import { cn, formatPrice } from "@/lib/utils";
 import { ReservationCountdown } from "@/components/customer/ReservationCountdown";
 import BranchRating from "@/components/customer/BranchRating";
+import { ShareButton } from "@/components/customer/ShareButton";
 import { toast } from "sonner";
 
 // ─── Status Badge ───────────────────────────────────────────────────────────
@@ -179,21 +180,11 @@ export default function ReservationConfirmationPage() {
         </div>
 
         {/* Pickup Deadline / Countdown */}
-        {reservation.status === "pending" && (
-          <div>
-            <p className="text-xs text-muted-foreground">Pickup Deadline</p>
-            <p className="font-medium">
-              {new Date(reservation.expiresAt).toLocaleString("en-PH", {
-                dateStyle: "medium",
-                timeStyle: "short",
-              })}
-            </p>
-            <ReservationCountdown
-              expiresAt={reservation.expiresAt}
-              className="mt-1"
-            />
-          </div>
-        )}
+        <ReservationCountdown
+          expiresAt={reservation.expiresAt}
+          status={reservation.status}
+          confirmationCode={reservation.confirmationCode}
+        />
 
         {/* Reserved for */}
         <div>
@@ -211,13 +202,17 @@ export default function ReservationConfirmationPage() {
       )}
 
       {/* Actions */}
-      <div className="mt-6 space-y-3 text-center">
+      <div className="mt-6 flex items-center justify-center gap-3">
         <Link
           href="/browse"
           className="inline-flex min-h-[44px] items-center justify-center rounded-md border px-6 py-2 text-sm font-medium hover:bg-accent"
         >
           Continue Browsing
         </Link>
+        <ShareButton
+          title={`Redbox Reserve: ${reservation.styleName}`}
+          text={`I just reserved ${reservation.styleName} (${reservation.color}, Size ${reservation.size}) at ${reservation.branchName}!`}
+        />
       </div>
     </div>
   );

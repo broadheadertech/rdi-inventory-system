@@ -13,8 +13,11 @@ import {
   TrendingUp,
   Truck,
   Bot,
+  RefreshCw,
   ArrowRightLeft,
   PackageCheck,
+  ShieldAlert,
+  Ghost,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -35,11 +38,16 @@ const operationsNavItems: NavItem[] = [
   { href: "/warehouse/demand", label: "Demand", icon: TrendingUp },
   { href: "/warehouse/logistics", label: "Logistics", icon: Truck },
   { href: "/warehouse/restock-ai", label: "Restock AI", icon: Bot },
+  { href: "/warehouse/auto-replenish", label: "Auto-Replenish", icon: RefreshCw },
+  { href: "/warehouse/surge-alerts", label: "Surge Alerts", icon: TrendingUp },
 ];
 
 const floorNavItems: NavItem[] = [
   { href: "/warehouse/transfers", label: "Transfers", icon: ArrowRightLeft },
   { href: "/warehouse/receiving", label: "Receiving", icon: PackageCheck },
+  { href: "/warehouse/quarantine", label: "Quarantine", icon: ShieldAlert },
+  { href: "/warehouse/cycle-count", label: "Cycle Count", icon: ClipboardCheck },
+  { href: "/warehouse/ghost-stock", label: "Ghost Stock", icon: Ghost },
 ];
 
 function NavSection({

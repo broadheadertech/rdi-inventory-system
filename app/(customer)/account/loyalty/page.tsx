@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import Link from "next/link";
 import {
@@ -16,9 +16,14 @@ import {
   Award,
   Minus,
   Plus,
+  Check,
+  Cake,
+  PartyPopper,
+  CalendarHeart,
 } from "lucide-react";
 import { formatPrice } from "@/lib/utils";
 import { useState } from "react";
+import ShoppingStreak from "@/components/customer/ShoppingStreak";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -58,30 +63,30 @@ const TIER_COLORS: Record<string, { bg: string; text: string; border: string; ba
 
 const TIER_BENEFITS: Record<string, string[]> = {
   bronze: [
-    "Earn 1 point per P10 spent",
-    "Birthday bonus points",
+    "1x points multiplier",
+    "Birthday bonus: 500 points",
     "Access to member-only sales",
   ],
   silver: [
-    "Earn 1.5 points per P10 spent",
-    "Birthday bonus points (2x)",
-    "Free shipping on orders over P1,500",
+    "1.5x points multiplier",
+    "Birthday bonus: 500 points",
+    "Free shipping on orders over \u20B11,500",
     "Early access to new collections",
   ],
   gold: [
-    "Earn 2 points per P10 spent",
-    "Birthday bonus points (3x)",
+    "2x points multiplier",
+    "Birthday bonus: 500 points",
     "Free shipping on all orders",
+    "Early access to drops",
     "Priority customer support",
-    "Exclusive Gold member events",
   ],
   platinum: [
-    "Earn 3 points per P10 spent",
-    "Birthday bonus points (5x)",
-    "Free express shipping on all orders",
+    "3x points multiplier",
+    "Birthday double bonus: 1,000 points",
+    "Free shipping on all orders",
+    "Early access to drops",
     "Dedicated account manager",
     "VIP access to all events",
-    "Exclusive Platinum-only products",
   ],
 };
 
@@ -144,11 +149,26 @@ function TxIcon({ type }: { type: string }) {
 
 export default function LoyaltyPage() {
   const account = useQuery(api.storefront.loyalty.getMyLoyaltyAccount);
+  const birthdayBonus = useQuery(api.storefront.loyalty.checkBirthdayBonus);
+  const claimBirthdayBonus = useMutation(api.storefront.loyalty.claimBirthdayBonus);
+  const [claiming, setClaiming] = useState(false);
   const [cursor, setCursor] = useState<number | undefined>(undefined);
   const history = useQuery(api.storefront.loyalty.getMyLoyaltyHistory, {
     limit: 20,
     cursor,
   });
+
+  async function handleClaimBirthday() {
+    if (claiming) return;
+    setClaiming(true);
+    try {
+      await claimBirthdayBonus();
+    } catch {
+      // Error handled by Convex
+    } finally {
+      setClaiming(false);
+    }
+  }
 
   // Loading state
   if (account === undefined) {
@@ -309,6 +329,89 @@ export default function LoyaltyPage() {
         </div>
       </div>
 
+      {/* ─── Shopping Streak ────────────────────────────────────────────── */}
+      <div className="mt-6">
+        <ShoppingStreak />
+      </div>
+
+      {/* ─── Birthday Bonus ────────────────────────────────────────────── */}
+      {birthdayBonus && (
+        <div className="mt-6">
+          {birthdayBonus.birthdayBonusAvailable ? (
+            <div className="rounded-xl border border-[#E8192C]/30 bg-gradient-to-br from-[#E8192C]/10 to-pink-500/5 p-6 text-center">
+              <PartyPopper className="mx-auto h-10 w-10 text-[#E8192C]" />
+              <h3 className="mt-3 font-display text-lg font-bold">
+                Happy Birthday!
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Claim your {formatNumber(birthdayBonus.bonusPoints)} birthday bonus points!
+              </p>
+              <button
+                onClick={handleClaimBirthday}
+                disabled={claiming}
+                className="mt-4 inline-flex h-11 items-center gap-2 rounded-md bg-[#E8192C] px-6 text-sm font-semibold text-white transition-colors hover:bg-[#E8192C]/90 disabled:opacity-50"
+              >
+                {claiming ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Cake className="h-4 w-4" />
+                )}
+                Claim Your {formatNumber(birthdayBonus.bonusPoints)} Birthday Points!
+              </button>
+            </div>
+          ) : birthdayBonus.alreadyClaimed ? (
+            <div className="rounded-xl border border-border bg-card p-5 text-center">
+              <Cake className="mx-auto h-8 w-8 text-muted-foreground" />
+              <p className="mt-2 text-sm font-medium">
+                Birthday bonus claimed! {"\uD83C\uDF82"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                See you next year for more birthday points!
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-border bg-card p-5">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                  <CalendarHeart className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">Birthday Bonus</p>
+                  <p className="text-xs text-muted-foreground">
+                    Your next birthday bonus of{" "}
+                    {formatNumber(birthdayBonus.bonusPoints)} points unlocks on{" "}
+                    {new Date(birthdayBonus.nextBirthday).toLocaleDateString("en-PH", {
+                      month: "long",
+                      day: "numeric",
+                    })}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── Your Tier Perks ─────────────────────────────────────────────── */}
+      <div className="mt-8">
+        <h2 className="font-display text-lg font-bold uppercase tracking-tight">
+          Your Tier Perks
+        </h2>
+        <div className="mt-4 space-y-2">
+          {benefits.map((benefit, i) => (
+            <div
+              key={i}
+              className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
+            >
+              <div className={`flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full ${tierColors.badge}`}>
+                <Check className="h-3.5 w-3.5 text-white" />
+              </div>
+              <p className="text-sm">{benefit}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* ─── Transaction History ───────────────────────────────────────── */}
       <div className="mt-8">
         <h2 className="font-display text-lg font-bold uppercase tracking-tight">
@@ -368,23 +471,8 @@ export default function LoyaltyPage() {
         )}
       </div>
 
-      {/* ─── Tier Benefits ─────────────────────────────────────────────── */}
-      <div className="mt-8 pb-8">
-        <h2 className="font-display text-lg font-bold uppercase tracking-tight">
-          Your {account.tier} Benefits
-        </h2>
-        <div className="mt-4 space-y-2">
-          {benefits.map((benefit, i) => (
-            <div
-              key={i}
-              className="flex items-start gap-3 rounded-lg border border-border bg-card p-3"
-            >
-              <Gift className={`mt-0.5 h-4 w-4 flex-shrink-0 ${tierColors.text}`} />
-              <p className="text-sm">{benefit}</p>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* bottom spacing */}
+      <div className="pb-8" />
     </div>
   );
 }

@@ -19,6 +19,13 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { FlashSaleCountdown } from "@/components/customer/FlashSaleCountdown";
+import { StyleQuiz } from "@/components/customer/StyleQuiz";
+import { PersonalizedDashboard } from "@/components/customer/PersonalizedDashboard";
+import { PaydayBanner } from "@/components/customer/PaydayBanner";
+import { StyleDuel } from "@/components/customer/StyleDuel";
+import { DailyCheckIn } from "@/components/customer/DailyCheckIn";
+import { QuickViewSheet } from "@/components/customer/QuickViewSheet";
+import { Id } from "@/convex/_generated/dataModel";
 
 // ─── Horizontal Scroll Helper ────────────────────────────────────────────────
 function HScrollRow({
@@ -438,6 +445,15 @@ export default function BrowsePage() {
   const data = useQuery(api.storefront.homepage.getHomepageData);
   const [selectedGender, setSelectedGender] = useState<GenderKey>("all");
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [showQuiz, setShowQuiz] = useState(false);
+  const [quizDone, setQuizDone] = useState(false);
+  const [quickViewStyleId, setQuickViewStyleId] = useState<Id<"styles"> | null>(null);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && localStorage.getItem("rb-style-quiz")) {
+      setQuizDone(true);
+    }
+  }, []);
   if (data === undefined) {
     return <HomepageSkeleton />;
   }
@@ -594,8 +610,38 @@ export default function BrowsePage() {
         </div>
       )}
 
+      {/* ── 3b. Payday Sale Banner ── */}
+      <PaydayBanner />
+
+      {/* ── Daily Check-In ── */}
+      <DailyCheckIn />
+
+      {/* ── Personalized Dashboard ── */}
+      <PersonalizedDashboard />
+
+      {/* ── Style Quiz Banner ── */}
+      {!quizDone && (
+        <div className="mx-auto max-w-7xl px-4 pt-5">
+          <button
+            onClick={() => setShowQuiz(true)}
+            className="flex w-full items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 p-4 text-left transition-colors hover:bg-primary/10"
+          >
+            <span className="text-2xl">✨</span>
+            <div className="flex-1">
+              <p className="text-sm font-bold">Not sure what to get?</p>
+              <p className="text-xs text-muted-foreground">Take our 30-second Style Quiz for personalized picks</p>
+            </div>
+            <ArrowRight className="h-4 w-4 text-primary" />
+          </button>
+        </div>
+      )}
+      <StyleQuiz open={showQuiz} onClose={() => { setShowQuiz(false); setQuizDone(true); }} />
+
       {/* ── 3b. Trending Now ── */}
-      <TrendingNowSection />
+      <TrendingNowSection onQuickView={setQuickViewStyleId} />
+
+      {/* ── 3c. Style Duel of the Week ── */}
+      <StyleDuel />
 
       {/* ── 4. Hot Deals Mini Carousel ── */}
       {promotions.length > 0 && (
@@ -708,6 +754,17 @@ export default function BrowsePage() {
                   <div className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-muted-foreground backdrop-blur-sm">
                     <Heart className="h-3.5 w-3.5" />
                   </div>
+                  {/* Quick View button */}
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setQuickViewStyleId(product._id as Id<"styles">);
+                    }}
+                    className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-900 opacity-0 shadow-md backdrop-blur-sm transition-all group-hover:opacity-100"
+                  >
+                    Quick View
+                  </button>
                 </div>
                 <div className="p-2.5">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -806,6 +863,17 @@ export default function BrowsePage() {
                   <div className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-white/80 text-muted-foreground backdrop-blur-sm">
                     <Heart className="h-3.5 w-3.5" />
                   </div>
+                  {/* Quick View button */}
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setQuickViewStyleId(product._id as Id<"styles">);
+                    }}
+                    className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-900 opacity-0 shadow-md backdrop-blur-sm transition-all group-hover:opacity-100"
+                  >
+                    Quick View
+                  </button>
                 </div>
                 <div className="p-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -849,12 +917,18 @@ export default function BrowsePage() {
           </Link>
         </div>
       </div>
+
+      {/* ═══ Quick View Bottom Sheet ═══ */}
+      <QuickViewSheet
+        styleId={quickViewStyleId}
+        onClose={() => setQuickViewStyleId(null)}
+      />
     </div>
   );
 }
 
 // ─── Trending Now Section ─────────────────────────────────────────────────────
-function TrendingNowSection() {
+function TrendingNowSection({ onQuickView }: { onQuickView: (id: Id<"styles">) => void }) {
   const trending = useQuery(api.storefront.homepage.getTrendingProducts, {
     limit: 12,
   });
@@ -914,6 +988,17 @@ function TrendingNowSection() {
                 <TrendingUp className="h-3 w-3" />
                 {product.soldCount} sold this month
               </div>
+              {/* Quick View button */}
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onQuickView(product.styleId as Id<"styles">);
+                }}
+                className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-medium text-gray-900 opacity-0 shadow-md backdrop-blur-sm transition-all group-hover:opacity-100"
+              >
+                Quick View
+              </button>
             </div>
             <div className="p-2.5">
               <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">

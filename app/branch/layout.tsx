@@ -16,6 +16,9 @@ import {
   Bell,
   CalendarCheck,
   FileText,
+  ShieldAlert,
+  Trophy,
+  Sunrise,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -25,6 +28,7 @@ import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 const ALLOWED_ROLES = ["admin", "manager", "viewer"];
 
 const navItems = [
+  { href: "/branch/command-center", label: "Command Center", icon: Sunrise },
   { href: "/branch/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/branch/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/branch/stock", label: "Stock", icon: Package },
@@ -33,6 +37,8 @@ const navItems = [
   { href: "/branch/reservations", label: "Reservations", icon: CalendarCheck },
   { href: "/branch/demand", label: "Demand", icon: TrendingUp },
   { href: "/branch/alerts", label: "Alerts", icon: Bell },
+  { href: "/branch/quarantine", label: "Quarantine", icon: ShieldAlert },
+  { href: "/branch/champions", label: "Champions", icon: Trophy },
 ];
 
 export default function BranchLayout({

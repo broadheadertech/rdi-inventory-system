@@ -23,6 +23,7 @@ import { useRouter } from "next/navigation";
 import { formatPrice } from "@/lib/utils";
 import { useSizePreferences } from "@/lib/hooks/useSizePreferences";
 import SizeFeedbackSection from "@/components/customer/SizeFeedback";
+import { RedBoxWrapped } from "@/components/customer/RedBoxWrapped";
 
 function MySizesSection() {
   const { allPreferences, removePreferredSize } = useSizePreferences();
@@ -261,6 +262,11 @@ export default function AccountPage() {
             <ChevronRight className="h-4 w-4 text-muted-foreground" />
           </Link>
         ))}
+      </div>
+
+      {/* RedBox Wrapped */}
+      <div className="mt-8">
+        <RedBoxWrapped />
       </div>
 
       {/* My Sizes */}

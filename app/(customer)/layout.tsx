@@ -9,7 +9,10 @@ import { api } from "@/convex/_generated/api";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { AnnouncementBar } from "@/components/customer/AnnouncementBar";
 import { SearchAutocomplete } from "@/components/customer/SearchAutocomplete";
+import { DailyCheckIn } from "@/components/customer/DailyCheckIn";
+import { LiveChatWidget } from "@/components/customer/LiveChatWidget";
 import { cn } from "@/lib/utils";
+import { GuestBanner } from "@/components/customer/GuestBanner";
 
 const syne = Syne({
   subsets: ["latin"],
@@ -55,6 +58,9 @@ export default function CustomerLayout({
           dmSans.variable
         )}
       >
+        {/* Guest sign-in banner */}
+        <GuestBanner />
+
         {/* Announcement Bar */}
         <AnnouncementBar />
 
@@ -176,6 +182,11 @@ export default function CustomerLayout({
           </div>
         </header>
 
+        {/* Daily check-in banner */}
+        <div className="py-2">
+          <DailyCheckIn />
+        </div>
+
         {/* Main content — padded bottom for mobile nav */}
         <main className="flex-1 pb-16 lg:pb-0">{children}</main>
 
@@ -204,6 +215,9 @@ export default function CustomerLayout({
             ))}
           </div>
         </nav>
+
+        {/* Live chat support widget */}
+        <LiveChatWidget />
       </div>
     </ErrorBoundary>
   );

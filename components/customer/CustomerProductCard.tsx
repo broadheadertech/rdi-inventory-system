@@ -2,9 +2,11 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { Eye, Layers } from "lucide-react";
+import { Eye, Layers, Zap } from "lucide-react";
 import { Id } from "@/convex/_generated/dataModel";
 import { formatPrice } from "@/lib/utils";
+import { SaveButton } from "./SaveButton";
+import { VoteButton } from "./VoteButton";
 
 const MAX_VISIBLE_SIZES = 5;
 
@@ -21,6 +23,8 @@ interface CustomerProductCardProps {
   availableSizes?: string[];
   createdAt?: number;
   soldCount?: number;
+  expressAvailable?: boolean;
+  isExclusive?: boolean;
   onQuickView?: (styleId: Id<"styles">) => void;
 }
 
@@ -46,6 +50,8 @@ export function CustomerProductCard({
   availableSizes,
   createdAt,
   soldCount,
+  expressAvailable,
+  isExclusive,
   onQuickView,
 }: CustomerProductCardProps) {
   const isNew =
@@ -64,9 +70,14 @@ export function CustomerProductCard({
     >
       {/* Image container — 3:4 portrait aspect ratio */}
       <div className="relative aspect-[3/4] w-full bg-secondary">
-        {/* NEW / HOT badges */}
-        {(isNew || isHot) && (
+        {/* Badges */}
+        {(isNew || isHot || expressAvailable || isExclusive) && (
           <div className="absolute left-2 top-2 z-10 flex flex-col gap-1">
+            {isExclusive && (
+              <span className="rounded bg-purple-600 px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
+                EXCLUSIVE
+              </span>
+            )}
             {isNew && (
               <span className="rounded bg-[#E8192C] px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
                 NEW
@@ -77,8 +88,18 @@ export function CustomerProductCard({
                 HOT
               </span>
             )}
+            {expressAvailable && (
+              <span className="flex items-center gap-0.5 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold uppercase leading-none tracking-wide text-white">
+                <Zap className="h-2.5 w-2.5 fill-current" />
+                EXPRESS
+              </span>
+            )}
           </div>
         )}
+        {/* Save / Wishlist button */}
+        <div className="absolute right-2 top-2 z-10">
+          <SaveButton styleId={styleId} />
+        </div>
         {/* Quick View button */}
         {onQuickView && (
           <button
@@ -158,7 +179,7 @@ export function CustomerProductCard({
             )}
           </div>
         )}
-        {/* Inline branch availability */}
+        {/* Inline branch availability + vote */}
         <div className="mt-auto flex items-center gap-1.5 text-xs text-muted-foreground">
           <StockDot branchCount={branchCount} />
           {branchCount > 0 ? (
@@ -169,6 +190,9 @@ export function CustomerProductCard({
           ) : (
             <span>Out of stock</span>
           )}
+          <span className="ml-auto">
+            <VoteButton styleId={styleId} />
+          </span>
         </div>
       </div>
     </Link>
