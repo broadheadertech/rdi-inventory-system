@@ -94,7 +94,7 @@ function ShiftGate({
   const shift = useQuery(api.pos.shifts.getActiveShift);
   const prevHandover = useQuery(api.cashier.auth.getPrevShiftHandover);
   const openShift = useMutation(api.pos.shifts.openShift);
-  const verifyCashierLogin = useAction(api.cashier.auth.verifyCashierLogin);
+  const verifyCashierLogin = useAction(api.cashier.authActions.verifyCashierLogin);
 
   const [step, setStep] = useState<ShiftGateStep>("login");
   const [verifiedAccount, setVerifiedAccount] = useState<VerifiedAccount | null>(null);

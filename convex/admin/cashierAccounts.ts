@@ -1,24 +1,7 @@
 import { v, ConvexError } from "convex/values";
-import { query, mutation, action, internalMutation } from "../_generated/server";
-import { internal as _internal } from "../_generated/api";
+import { query, mutation, internalMutation } from "../_generated/server";
 import { requireRole } from "../_helpers/permissions";
 import { ADMIN_ROLES } from "../_helpers/permissions";
-import { createHash, randomBytes } from "crypto";
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const internal = _internal as any;
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
-function hashPassword(password: string, salt: string): string {
-  return createHash("sha256")
-    .update(salt + password)
-    .digest("hex");
-}
-
-function generateSalt(): string {
-  return randomBytes(16).toString("hex");
-}
 
 // ─── listByBranch ─────────────────────────────────────────────────────────────
 
@@ -53,40 +36,6 @@ export const listByBranch = query({
   },
 });
 
-// ─── createCashierAccount (action — needs Node.js crypto) ─────────────────────
-
-export const createCashierAccount = action({
-  args: {
-    branchId: v.id("branches"),
-    firstName: v.string(),
-    lastName: v.string(),
-    username: v.string(),
-    password: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new ConvexError({ code: "UNAUTHORIZED" });
-
-    if (!args.firstName.trim()) throw new ConvexError("First name is required");
-    if (!args.lastName.trim()) throw new ConvexError("Last name is required");
-    if (!args.username.trim()) throw new ConvexError("Username is required");
-    if (args.password.length < 6)
-      throw new ConvexError("Password must be at least 6 characters");
-
-    const salt = generateSalt();
-    const passwordHash = hashPassword(args.password, salt);
-
-    return await ctx.runMutation(internal.admin.cashierAccounts._insertCashierAccount, {
-      branchId: args.branchId,
-      firstName: args.firstName.trim(),
-      lastName: args.lastName.trim(),
-      username: args.username.trim().toLowerCase(),
-      passwordHash,
-      passwordSalt: salt,
-      clerkSubject: identity.subject,
-    });
-  },
-});
 
 export const _insertCashierAccount = internalMutation({
   args: {
@@ -168,31 +117,6 @@ export const updateCashierAccount = mutation({
   },
 });
 
-// ─── resetPassword (action — needs Node.js crypto) ───────────────────────────
-
-export const resetPassword = action({
-  args: {
-    accountId: v.id("cashierAccounts"),
-    newPassword: v.string(),
-  },
-  handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new ConvexError({ code: "UNAUTHORIZED" });
-
-    if (args.newPassword.length < 6)
-      throw new ConvexError("Password must be at least 6 characters");
-
-    const salt = generateSalt();
-    const passwordHash = hashPassword(args.newPassword, salt);
-
-    await ctx.runMutation(internal.admin.cashierAccounts._updatePassword, {
-      accountId: args.accountId,
-      passwordHash,
-      passwordSalt: salt,
-      clerkSubject: identity.subject,
-    });
-  },
-});
 
 export const _updatePassword = internalMutation({
   args: {

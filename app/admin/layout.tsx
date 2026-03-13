@@ -55,25 +55,34 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/seed", label: "Seed Data", icon: Database, roles: ["admin"] },
 ];
 
-const managementNavItems: NavItem[] = [
+const overviewNavItems: NavItem[] = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin"] },
   { href: "/admin/reports", label: "Reports", icon: BarChart3, roles: ["admin"] },
   { href: "/admin/analytics", label: "Analytics", icon: LineChart, roles: ["admin"] },
+];
+
+const operationsNavItems: NavItem[] = [
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
   { href: "/admin/invoices", label: "Invoices", icon: FileText, roles: ["admin"] },
+  { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
+];
+
+const marketingNavItems: NavItem[] = [
   { href: "/admin/promotions", label: "Promotions", icon: Tag, roles: ["admin"] },
   { href: "/admin/banners", label: "Banners", icon: ImageIcon, roles: ["admin"] },
   { href: "/admin/announcements", label: "Announcements", icon: Megaphone, roles: ["admin"] },
   { href: "/admin/hot-deals", label: "Hot Deals", icon: Flame, roles: ["admin"] },
   { href: "/admin/drops", label: "Exclusive Drops", icon: Sparkles, roles: ["admin"] },
+];
+
+const insightsNavItems: NavItem[] = [
   { href: "/admin/sell-through", label: "Sell-Through", icon: BarChart3, roles: ["admin"] },
   { href: "/admin/inventory-aging", label: "Inventory Aging", icon: Clock, roles: ["admin"] },
   { href: "/admin/fulfillment-speed", label: "Fulfillment Speed", icon: Timer, roles: ["admin"] },
-  { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
+  { href: "/admin/cross-sell-analytics", label: "Cross-Sell", icon: Sparkles, roles: ["admin"] },
+  { href: "/admin/trading-calendar", label: "Trading Calendar", icon: CalendarDays, roles: ["admin"] },
   { href: "/admin/size-curves", label: "Size Curves", icon: Ruler, roles: ["admin"] },
   { href: "/admin/expansion", label: "Expansion Intel", icon: MapPin, roles: ["admin"] },
-  { href: "/admin/trading-calendar", label: "Trading Calendar", icon: CalendarDays, roles: ["admin"] },
-  { href: "/admin/cross-sell-analytics", label: "Cross-Sell", icon: Sparkles, roles: ["admin"] },
 ];
 
 function NavSection({
@@ -191,10 +200,31 @@ export default function AdminLayout({
             />
             <Separator className="my-2" />
             <NavSection
-              items={managementNavItems}
+              items={overviewNavItems}
               pathname={pathname}
               userRole={currentUser.role}
-              label="Management"
+              label="Overview"
+            />
+            <Separator className="my-2" />
+            <NavSection
+              items={operationsNavItems}
+              pathname={pathname}
+              userRole={currentUser.role}
+              label="Operations"
+            />
+            <Separator className="my-2" />
+            <NavSection
+              items={marketingNavItems}
+              pathname={pathname}
+              userRole={currentUser.role}
+              label="Marketing"
+            />
+            <Separator className="my-2" />
+            <NavSection
+              items={insightsNavItems}
+              pathname={pathname}
+              userRole={currentUser.role}
+              label="Insights"
             />
           </nav>
         </aside>

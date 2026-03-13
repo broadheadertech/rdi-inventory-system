@@ -114,9 +114,9 @@ function CashiersTab({ branchId }: { branchId: Id<"branches"> }) {
     includeInactive: true,
   });
 
-  const createAccount = useAction(api.admin.cashierAccounts.createCashierAccount);
+  const createAccount = useAction(api.admin.cashierAccountsActions.createCashierAccount);
   const updateAccount = useMutation(api.admin.cashierAccounts.updateCashierAccount);
-  const resetPassword = useAction(api.admin.cashierAccounts.resetPassword);
+  const resetPassword = useAction(api.admin.cashierAccountsActions.resetPassword);
   const deactivate = useMutation(api.admin.cashierAccounts.deactivateCashierAccount);
   const reactivate = useMutation(api.admin.cashierAccounts.reactivateCashierAccount);
 
