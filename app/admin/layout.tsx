@@ -30,9 +30,11 @@ import {
   Clock,
   Timer,
   CalendarDays,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
+import { useState } from "react";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
@@ -99,14 +101,26 @@ function NavSection({
   const visible = items.filter((item) => item.roles.includes(userRole));
   if (visible.length === 0) return null;
 
+  const hasActive = visible.some((item) => pathname.startsWith(item.href));
+  const [open, setOpen] = useState(hasActive);
+
   return (
     <div>
       {label && (
-        <p className="px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+        >
           {label}
-        </p>
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform duration-200",
+              open ? "rotate-0" : "-rotate-90"
+            )}
+          />
+        </button>
       )}
-      {visible.map((item) => {
+      {open && visible.map((item) => {
         const isActive = pathname.startsWith(item.href);
         return (
           <Link
