@@ -3,85 +3,8 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import type { Id } from "@/convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  Cell,
-  PieChart,
-  Pie,
-  LineChart,
-  Line,
-  CartesianGrid,
-  Legend,
-} from "recharts";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatCentavos(centavos: number): string {
-  return `₱${(centavos / 100).toLocaleString("en-PH", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-// ─── TrendArrow ───────────────────────────────────────────────────────────────
-
-function TrendArrow({
-  current,
-  previous,
-  higherIsBetter = true,
-}: {
-  current: number;
-  previous: number;
-  higherIsBetter?: boolean;
-}) {
-  if (previous === 0 || current === previous) return null;
-  const isUp = current > previous;
-  const isGood = higherIsBetter ? isUp : !isUp;
-  return (
-    <span className={isGood ? "text-green-600 text-sm" : "text-red-600 text-sm"}>
-      {isUp ? " ↑" : " ↓"}
-    </span>
-  );
-}
-
-// ─── MetricCard ───────────────────────────────────────────────────────────────
-
-function MetricCard({
-  title,
-  value,
-  trendCurrent,
-  trendPrevious,
-  higherIsBetter,
-}: {
-  title: string;
-  value: string;
-  trendCurrent?: number;
-  trendPrevious?: number;
-  higherIsBetter?: boolean;
-}) {
-  return (
-    <div className="rounded-lg border bg-card p-4 space-y-1">
-      <p className="text-sm text-muted-foreground">{title}</p>
-      <div className="flex items-baseline gap-1">
-        <p className="text-2xl font-bold">{value}</p>
-        {trendCurrent !== undefined && trendPrevious !== undefined && (
-          <TrendArrow
-            current={trendCurrent}
-            previous={trendPrevious}
-            higherIsBetter={higherIsBetter}
-          />
-        )}
-      </div>
-    </div>
-  );
-}
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
@@ -89,36 +12,66 @@ function Skeleton({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded-lg bg-muted ${className ?? ""}`} />;
 }
 
-// ─── Confidence Badge ─────────────────────────────────────────────────────────
+// ─── Pagination ───────────────────────────────────────────────────────────────
 
-function ConfidenceBadge({ confidence }: { confidence: string }) {
-  const colors: Record<string, string> = {
-    high: "bg-red-50 text-red-700 border-red-200",
-    medium: "bg-amber-50 text-amber-700 border-amber-200",
-    low: "bg-gray-50 text-gray-600 border-gray-200",
+function usePagination<T>(items: T[], pageSize = 10) {
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  const safePage = Math.min(page, totalPages - 1);
+  const paged = items.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  return {
+    paged,
+    page: safePage,
+    setPage,
+    totalPages,
+    total: items.length,
+    pageSize,
   };
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${colors[confidence] ?? colors.low}`}
-    >
-      {confidence.toUpperCase()}
-    </span>
-  );
 }
 
-// ─── Payment method colors ────────────────────────────────────────────────────
-
-const PAYMENT_COLORS: Record<string, string> = {
-  cash: "hsl(var(--primary))",
-  gcash: "#3b82f6",
-  maya: "#10b981",
-};
-
-const PAYMENT_LABELS: Record<string, string> = {
-  cash: "Cash",
-  gcash: "GCash",
-  maya: "Maya",
-};
+function PaginationBar({
+  page,
+  totalPages,
+  total,
+  pageSize,
+  setPage,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize: number;
+  setPage: (p: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  const from = page * pageSize + 1;
+  const to = Math.min((page + 1) * pageSize, total);
+  return (
+    <div className="flex items-center justify-between px-3 py-2 border-t bg-muted/20 text-xs text-muted-foreground">
+      <span>
+        {from}–{to} of {total}
+      </span>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => setPage(page - 1)}
+          disabled={page === 0}
+          className="p-1 rounded hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          <ChevronLeft className="h-3.5 w-3.5" />
+        </button>
+        <span className="px-1.5">
+          {page + 1} / {totalPages}
+        </span>
+        <button
+          onClick={() => setPage(page + 1)}
+          disabled={page >= totalPages - 1}
+          className="p-1 rounded hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+        >
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ─── Date Preset helpers ──────────────────────────────────────────────────────
 
@@ -137,88 +90,391 @@ function getPresetMs(preset: DatePreset): { startMs: number; endMs: number; labe
   const nowPht = nowMs + PHT;
   const todayMidnightPht = nowPht - (nowPht % (24 * 60 * 60 * 1000));
   const todayStartMs = todayMidnightPht - PHT;
-
-  if (preset === "today") {
-    return { startMs: todayStartMs, endMs: nowMs, label: "Today" };
-  }
+  if (preset === "today") return { startMs: todayStartMs, endMs: nowMs, label: "Today" };
   if (preset === "weekly") {
-    // Monday of this week
-    const dayOfWeek = new Date(nowPht).getUTCDay();
-    const daysSinceMon = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    const dow = new Date(nowPht).getUTCDay();
+    const daysSinceMon = dow === 0 ? 6 : dow - 1;
     return { startMs: todayStartMs - daysSinceMon * 24 * 60 * 60 * 1000, endMs: nowMs, label: "This Week" };
   }
   if (preset === "monthly") {
     const d = new Date(nowPht);
-    const monthStartPht = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
-    return { startMs: monthStartPht - PHT, endMs: nowMs, label: "This Month" };
+    return { startMs: Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) - PHT, endMs: nowMs, label: "This Month" };
   }
-  // yearly
   const d = new Date(nowPht);
-  const yearStartPht = Date.UTC(d.getUTCFullYear(), 0, 1);
-  return { startMs: yearStartPht - PHT, endMs: nowMs, label: "This Year" };
+  return { startMs: Date.UTC(d.getUTCFullYear(), 0, 1) - PHT, endMs: nowMs, label: "This Year" };
 }
 
-// ─── Velocity Day Presets ─────────────────────────────────────────────────────
+const VELOCITY_DAYS = [7, 14, 30, 60, 90] as const;
 
-const VELOCITY_DAYS = [1, 7, 14, 30, 60, 90] as const;
-
-const MI_COLORS = {
-  FAST_MOVING: { badge: "bg-green-100 text-green-800 border-green-200", text: "text-green-600", label: "Fast" },
-  MEDIUM_MOVING: { badge: "bg-amber-100 text-amber-800 border-amber-200", text: "text-amber-600", label: "Medium" },
-  SLOW_MOVING: { badge: "bg-red-100 text-red-800 border-red-200", text: "text-red-600", label: "Slow" },
-  NO_MOVEMENT: { badge: "bg-gray-100 text-gray-800 border-gray-200", text: "text-gray-500", label: "Dead Stock" },
+const MI_STYLES = {
+  FAST_MOVING:   { badge: "bg-green-100 text-green-800 border-green-200",  label: "Fast"   },
+  MEDIUM_MOVING: { badge: "bg-amber-100 text-amber-800 border-amber-200",  label: "Medium" },
+  SLOW_MOVING:   { badge: "bg-red-100 text-red-800 border-red-200",        label: "Slow"   },
+  NO_MOVEMENT:   { badge: "bg-gray-100 text-gray-700 border-gray-200",     label: "Dead"   },
 } as const;
 
-// ─── Tab Types ────────────────────────────────────────────────────────────────
+type MiKey = keyof typeof MI_STYLES;
 
-type AnalyticsTab = "descriptive" | "comparisons" | "diagnostic" | "predictive";
-
-const ANALYTICS_TABS: { value: AnalyticsTab; label: string; description: string }[] = [
-  { value: "descriptive", label: "Descriptive", description: "What happened" },
-  { value: "comparisons", label: "Comparisons", description: "Brand vs Category vs Product" },
-  { value: "diagnostic", label: "Diagnostic", description: "Why it happened" },
-  { value: "predictive", label: "Predictive", description: "What will happen" },
-];
-
-const CHART_COLORS = [
-  "hsl(var(--primary))",
-  "#3b82f6",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#8b5cf6",
-  "#ec4899",
-  "#14b8a6",
-  "#f97316",
-  "#6366f1",
-];
-
-const VERDICT_COLORS = {
+const VERDICT_STYLES = {
   restock: "bg-green-100 text-green-800 border-green-200",
   lay_low: "bg-red-100 text-red-800 border-red-200",
-  hold: "bg-gray-100 text-gray-800 border-gray-200",
+  hold:    "bg-gray-100 text-gray-800 border-gray-200",
+};
+const VERDICT_LABELS = { restock: "Restock", lay_low: "Lay Low", hold: "Hold" };
+
+type AnalyticsTab = "velocity" | "demand" | "transfers";
+
+const ANALYTICS_TABS: { value: AnalyticsTab; label: string; description: string }[] = [
+  { value: "velocity",  label: "Stock Velocity",   description: "Product movement rates"    },
+  { value: "demand",    label: "Demand & Restock",  description: "Gaps and restock signals"  },
+  { value: "transfers", label: "Transfers",         description: "Incoming efficiency"       },
+];
+
+// ─── VelocityTable ────────────────────────────────────────────────────────────
+
+type VelocityItem = {
+  variantId: string;
+  styleName: string;
+  size: string;
+  color: string;
+  currentStock: number;
+  totalSold: number;
+  ads: number;
+  dsi: number;
+  mi: number;
+  classification: string;
 };
 
-const VERDICT_LABELS = {
-  restock: "Restock",
-  lay_low: "Lay Low",
-  hold: "Hold",
+function VelocityTable({ velocity }: { velocity: { fastMoving: VelocityItem[]; mediumMoving: VelocityItem[]; slowMoving: VelocityItem[]; noMovement: VelocityItem[] } | null }) {
+  const [filter, setFilter] = useState<MiKey | "all">("all");
+
+  const flatItems = useMemo(() => {
+    if (!velocity) return [];
+    const tiers: { key: string; items: VelocityItem[] }[] = [
+      { key: "FAST_MOVING",   items: velocity.fastMoving   ?? [] },
+      { key: "MEDIUM_MOVING", items: velocity.mediumMoving ?? [] },
+      { key: "SLOW_MOVING",   items: velocity.slowMoving   ?? [] },
+      { key: "NO_MOVEMENT",   items: velocity.noMovement   ?? [] },
+    ];
+    const all = tiers.flatMap(({ key, items }) =>
+      items.map((item) => ({ ...item, _tier: key as MiKey }))
+    );
+    return filter === "all" ? all : all.filter((i) => i._tier === filter);
+  }, [velocity, filter]);
+
+  const { paged, page, setPage, totalPages, total, pageSize } = usePagination(flatItems, 10);
+
+  const filterCounts = useMemo(() => {
+    if (!velocity) return {};
+    return {
+      FAST_MOVING:   velocity.fastMoving?.length   ?? 0,
+      MEDIUM_MOVING: velocity.mediumMoving?.length ?? 0,
+      SLOW_MOVING:   velocity.slowMoving?.length   ?? 0,
+      NO_MOVEMENT:   velocity.noMovement?.length   ?? 0,
+    };
+  }, [velocity]);
+
+  const totalCount = Object.values(filterCounts).reduce((s, n) => s + n, 0);
+
+  return (
+    <div className="space-y-3">
+      {/* Filter pills */}
+      <div className="flex flex-wrap gap-1.5">
+        <button
+          onClick={() => { setFilter("all"); setPage(0); }}
+          className={cn(
+            "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+            filter === "all"
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-muted text-muted-foreground hover:border-primary/50"
+          )}
+        >
+          All ({totalCount})
+        </button>
+        {(Object.keys(MI_STYLES) as MiKey[]).map((key) => {
+          const s = MI_STYLES[key];
+          const count = filterCounts[key] ?? 0;
+          return (
+            <button
+              key={key}
+              onClick={() => { setFilter(key); setPage(0); }}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                filter === key
+                  ? `border border-transparent ${s.badge}`
+                  : "border-muted text-muted-foreground hover:border-primary/50"
+              )}
+            >
+              {s.label} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {total === 0 ? (
+        <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+          No items in this category
+        </div>
+      ) : (
+        <div className="rounded-lg border overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-muted/50 border-b">
+                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
+                <th className="px-3 py-2 font-medium text-muted-foreground">Type</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sold</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">ADS</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">DSI</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">MI</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paged.map((item) => {
+                const s = MI_STYLES[item._tier];
+                return (
+                  <tr key={item.variantId} className="border-b last:border-0">
+                    <td className="px-3 py-2">
+                      <p className="font-medium">{item.styleName}</p>
+                      <p className="text-muted-foreground">{item.size} / {item.color}</p>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={`inline-flex px-1.5 py-0.5 rounded-full text-xs font-medium border ${s.badge}`}>
+                        {s.label}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right">{item.currentStock}</td>
+                    <td className="px-3 py-2 text-right">{item.totalSold}</td>
+                    <td className="px-3 py-2 text-right">{item.ads}/d</td>
+                    <td className="px-3 py-2 text-right">{item.dsi >= 999 ? "∞" : `${item.dsi}d`}</td>
+                    <td className="px-3 py-2 text-right">{item.mi}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <PaginationBar page={page} totalPages={totalPages} total={total} pageSize={pageSize} setPage={setPage} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── RestockLayLowTable ────────────────────────────────────────────────────────
+
+type RestockItem = {
+  name: string;
+  brandName: string;
+  size: string;
+  color: string;
+  currentStock: number;
+  unitsSold: number;
+  daysOfStock: number;
+  sellThrough: number;
+  verdict: string;
 };
 
-type ComparisonView = "brand" | "category" | "product";
-type ComparisonMetric = "units" | "revenue";
+function RestockLayLowTable({ items, summary }: { items: RestockItem[]; summary: { restockCount: number; layLowCount: number; holdCount: number } }) {
+  const [filter, setFilter] = useState<"all" | "restock" | "lay_low" | "hold">("all");
+
+  const filtered = useMemo(
+    () => filter === "all" ? items : items.filter((i) => i.verdict === filter),
+    [items, filter]
+  );
+
+  const { paged, page, setPage, totalPages, total, pageSize } = usePagination(filtered, 10);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {([
+          { key: "all" as const,      label: `All (${items.length})` },
+          { key: "restock" as const,  label: `Restock (${summary.restockCount})` },
+          { key: "lay_low" as const,  label: `Lay Low (${summary.layLowCount})` },
+          { key: "hold" as const,     label: `Hold (${summary.holdCount})` },
+        ]).map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => { setFilter(key); setPage(0); }}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              filter === key
+                ? key === "all"
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : key === "restock"
+                    ? "bg-green-100 text-green-800 border-green-200"
+                    : key === "lay_low"
+                      ? "bg-red-100 text-red-800 border-red-200"
+                      : "bg-gray-100 text-gray-800 border-gray-200"
+                : "border-muted text-muted-foreground hover:border-primary/50"
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {total === 0 ? (
+        <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+          No items match this filter
+        </div>
+      ) : (
+        <div className="rounded-lg border overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-muted/50 border-b">
+                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sold</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Days Left</th>
+                <th className="text-right px-3 py-2 font-medium text-muted-foreground">ST%</th>
+                <th className="px-3 py-2 font-medium text-muted-foreground">Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              {paged.map((item, i) => (
+                <tr key={i} className="border-b last:border-0">
+                  <td className="px-3 py-2">
+                    <p className="font-medium">{item.name}</p>
+                    <p className="text-muted-foreground">{item.brandName} · {item.size}/{item.color}</p>
+                  </td>
+                  <td className="px-3 py-2 text-right">{item.currentStock}</td>
+                  <td className="px-3 py-2 text-right">{item.unitsSold}</td>
+                  <td className="px-3 py-2 text-right">{item.daysOfStock >= 999 ? "∞" : `${item.daysOfStock}d`}</td>
+                  <td className="px-3 py-2 text-right">{item.sellThrough}%</td>
+                  <td className="px-3 py-2">
+                    <span className={cn(
+                      "inline-flex px-1.5 py-0.5 rounded text-xs font-medium border",
+                      VERDICT_STYLES[item.verdict as keyof typeof VERDICT_STYLES] ?? VERDICT_STYLES.hold
+                    )}>
+                      {VERDICT_LABELS[item.verdict as keyof typeof VERDICT_LABELS] ?? item.verdict}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <PaginationBar page={page} totalPages={totalPages} total={total} pageSize={pageSize} setPage={setPage} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── DemandGapTable ────────────────────────────────────────────────────────────
+
+type DemandGapItem = {
+  brand: string;
+  design: string;
+  size: string;
+  requestCount: number;
+  inStock: boolean;
+  currentQuantity: number;
+};
+
+function DemandGapTable({ items }: { items: DemandGapItem[] }) {
+  const { paged, page, setPage, totalPages, total, pageSize } = usePagination(items, 10);
+  return (
+    <div className="rounded-lg border overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-muted/50 border-b">
+            <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Brand / Design</th>
+            <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Size</th>
+            <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Requests</th>
+            <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Stock</th>
+            <th className="px-3 py-2 text-xs font-medium text-muted-foreground">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {paged.map((gap, i) => (
+            <tr key={i} className="border-b last:border-0">
+              <td className="px-3 py-2">
+                <p className="font-medium">{gap.brand}</p>
+                {gap.design && <p className="text-xs text-muted-foreground">{gap.design}</p>}
+              </td>
+              <td className="px-3 py-2 text-sm text-muted-foreground">{gap.size || "—"}</td>
+              <td className="px-3 py-2 text-right font-semibold">{gap.requestCount}</td>
+              <td className="px-3 py-2 text-right">{gap.currentQuantity}</td>
+              <td className="px-3 py-2">
+                <span className={cn(
+                  "inline-flex px-2 py-0.5 rounded-full text-xs font-medium",
+                  gap.inStock ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+                )}>
+                  {gap.inStock ? "In Stock" : "Out of Stock"}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <PaginationBar page={page} totalPages={totalPages} total={total} pageSize={pageSize} setPage={setPage} />
+    </div>
+  );
+}
+
+// ─── RestockSuggestionsTable ──────────────────────────────────────────────────
+
+type RestockSuggestion = {
+  id: string;
+  styleName: string;
+  size: string;
+  color: string;
+  currentStock: number;
+  suggestedQuantity: number;
+  daysUntilStockout: number;
+  rationale: string;
+};
+
+function RestockSuggestionsTable({ items }: { items: RestockSuggestion[] }) {
+  const { paged, page, setPage, totalPages, total, pageSize } = usePagination(items, 10);
+  return (
+    <div className="rounded-lg border overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-muted/50 border-b">
+            <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Product</th>
+            <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Stock</th>
+            <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Days Left</th>
+            <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Suggest Qty</th>
+            <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Rationale</th>
+          </tr>
+        </thead>
+        <tbody>
+          {paged.map((s) => (
+            <tr key={s.id} className="border-b last:border-0">
+              <td className="px-3 py-2">
+                <p className="font-medium">{s.styleName}</p>
+                <p className="text-xs text-muted-foreground">{s.size} / {s.color}</p>
+              </td>
+              <td className="px-3 py-2 text-right">{s.currentStock}</td>
+              <td className="px-3 py-2 text-right">
+                <span className={cn(
+                  "text-xs font-medium",
+                  s.daysUntilStockout <= 7 ? "text-red-600" : s.daysUntilStockout <= 14 ? "text-amber-600" : ""
+                )}>
+                  {s.daysUntilStockout}d
+                </span>
+              </td>
+              <td className="px-3 py-2 text-right font-semibold">{s.suggestedQuantity}</td>
+              <td className="px-3 py-2 text-xs text-muted-foreground">{s.rationale}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <PaginationBar page={page} totalPages={totalPages} total={total} pageSize={pageSize} setPage={setPage} />
+    </div>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Page
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export default function BranchAnalyticsPage() {
-  const [activeTab, setActiveTab] = useState<AnalyticsTab>("descriptive");
+  const [activeTab, setActiveTab] = useState<AnalyticsTab>("velocity");
   const [datePreset, setDatePreset] = useState<DatePreset>("weekly");
   const [velocityDays, setVelocityDays] = useState<(typeof VELOCITY_DAYS)[number]>(7);
-  const [comparisonView, setComparisonView] = useState<ComparisonView>("brand");
-  const [comparisonMetric, setComparisonMetric] = useState<ComparisonMetric>("units");
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
 
   const { startMs, endMs, label: periodLabel } = useMemo(() => getPresetMs(datePreset), [datePreset]);
 
@@ -233,92 +489,29 @@ export default function BranchAnalyticsPage() {
 
   const branchContext = useQuery(api.dashboards.branchDashboard.getBranchContext);
 
-  // Descriptive
-  const weeklySales = useQuery(
-    api.dashboards.branchAnalytics.getWeeklySalesSummary,
-    activeTab === "descriptive" ? { startMs, endMs } : "skip"
-  );
-  const topProducts = useQuery(
-    api.dashboards.branchAnalytics.getTopSellingProducts,
-    activeTab === "descriptive" ? { startMs, endMs } : "skip"
+  const velocity = useQuery(
+    api.dashboards.branchAnalytics.getProductVelocity,
+    activeTab === "velocity" ? { startMs: velocityPeriod.startMs, endMs: velocityPeriod.endMs } : "skip"
   );
   const inventoryHealth = useQuery(
     api.dashboards.branchAnalytics.getInventoryHealth,
-    activeTab === "descriptive" ? {} : "skip"
+    activeTab === "velocity" ? {} : "skip"
   );
-  const paymentBreakdown = useQuery(
-    api.dashboards.branchAnalytics.getPaymentMethodBreakdown,
-    activeTab === "descriptive" ? { startMs, endMs } : "skip"
-  );
-
-  // Diagnostic
-  const velocity = useQuery(
-    api.dashboards.branchAnalytics.getProductVelocity,
-    activeTab === "diagnostic" ? { startMs: velocityPeriod.startMs, endMs: velocityPeriod.endMs } : "skip"
+  const restockVsLayLow = useQuery(
+    api.dashboards.comparisonAnalytics.getRestockVsLayLow,
+    activeTab === "velocity" ? { startMs, endMs } : "skip"
   );
   const demandGap = useQuery(
     api.dashboards.branchAnalytics.getDemandGapAnalysis,
-    activeTab === "diagnostic" ? { startMs, endMs } : "skip"
-  );
-  const transferEff = useQuery(
-    api.dashboards.branchAnalytics.getTransferEfficiency,
-    activeTab === "diagnostic" ? {} : "skip"
-  );
-
-  // Predictive
-  const salesForecast = useQuery(
-    api.dashboards.branchAnalytics.getSalesForecast,
-    activeTab === "predictive" ? {} : "skip"
+    activeTab === "demand" ? { startMs, endMs } : "skip"
   );
   const restockSuggestions = useQuery(
     api.dashboards.branchAnalytics.getBranchRestockSuggestions,
-    activeTab === "predictive" ? {} : "skip"
+    activeTab === "demand" ? {} : "skip"
   );
-  const projectedRevenue = useQuery(
-    api.dashboards.branchAnalytics.getProjectedWeeklyRevenue,
-    activeTab === "predictive" ? {} : "skip"
-  );
-  const demandForecast = useQuery(
-    api.dashboards.branchAnalytics.getDemandForecast,
-    activeTab === "predictive" ? { startMs, endMs } : "skip"
-  );
-
-  // Comparisons tab
-  const topBrands = useQuery(
-    api.dashboards.comparisonAnalytics.getTopBrandsComparison,
-    activeTab === "comparisons" ? { startMs, endMs } : "skip"
-  );
-  const topCategories = useQuery(
-    api.dashboards.comparisonAnalytics.getTopCategoriesComparison,
-    activeTab === "comparisons" ? { startMs, endMs } : "skip"
-  );
-  const topProductsComparison = useQuery(
-    api.dashboards.comparisonAnalytics.getTopProductsComparison,
-    activeTab === "comparisons" ? { startMs, endMs } : "skip"
-  );
-
-  // Descriptive — category donut
-  const salesByCategory = useQuery(
-    api.dashboards.comparisonAnalytics.getSalesByCategory,
-    activeTab === "descriptive" ? { startMs, endMs } : "skip"
-  );
-  const salesBySubcategory = useQuery(
-    api.dashboards.comparisonAnalytics.getSalesBySubcategory,
-    activeTab === "descriptive" && selectedCategoryId
-      ? { categoryId: selectedCategoryId as Id<"categories">, startMs, endMs }
-      : "skip"
-  );
-
-  // Diagnostic — restock vs lay low
-  const restockVsLayLow = useQuery(
-    api.dashboards.comparisonAnalytics.getRestockVsLayLow,
-    activeTab === "diagnostic" ? { startMs, endMs } : "skip"
-  );
-
-  // Descriptive — daily revenue trend
-  const dailyTrend = useQuery(
-    api.dashboards.branchAnalytics.getDailyRevenueTrend,
-    activeTab === "descriptive" ? { startMs, endMs } : "skip"
+  const transferEff = useQuery(
+    api.dashboards.branchAnalytics.getTransferEfficiency,
+    activeTab === "transfers" ? {} : "skip"
   );
 
   const todayLabel = new Date().toLocaleDateString("en-PH", {
@@ -329,9 +522,6 @@ export default function BranchAnalyticsPage() {
     day: "numeric",
   });
 
-  const isWarehouse = branchContext?.branchType === "warehouse";
-
-  // Loading
   if (branchContext === undefined) {
     return (
       <div className="space-y-8">
@@ -347,11 +537,7 @@ export default function BranchAnalyticsPage() {
   }
 
   if (!branchContext) {
-    return (
-      <div>
-        <p className="text-sm text-muted-foreground">No branch context.</p>
-      </div>
-    );
+    return <p className="text-sm text-muted-foreground">No branch context.</p>;
   }
 
   return (
@@ -360,12 +546,10 @@ export default function BranchAnalyticsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
-            {isWarehouse ? "Warehouse" : "Branch"} Analytics
+            {branchContext.branchType === "warehouse" ? "Warehouse" : "Branch"} Analytics
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{todayLabel}</p>
         </div>
-
-        {/* Date preset pills */}
         <div className="flex gap-1.5 flex-wrap">
           {DATE_PRESETS.map((p) => (
             <button
@@ -384,7 +568,7 @@ export default function BranchAnalyticsPage() {
         </div>
       </div>
 
-      {/* ═══ Top-level Analytics Tabs ═══════════════════════════════════════ */}
+      {/* ═══ Tabs ════════════════════════════════════════════════════════════ */}
       <div className="flex gap-2">
         {ANALYTICS_TABS.map((tab) => (
           <button
@@ -397,1027 +581,156 @@ export default function BranchAnalyticsPage() {
                 : "border-muted bg-background hover:bg-muted/50"
             )}
           >
-            <span
-              className={cn(
-                "text-sm font-semibold",
-                activeTab === tab.value ? "text-primary" : "text-foreground"
-              )}
-            >
+            <span className={cn("text-sm font-semibold", activeTab === tab.value ? "text-primary" : "text-foreground")}>
               {tab.label}
             </span>
-            <span className="text-xs text-muted-foreground">
-              {tab.description}
-            </span>
+            <span className="text-xs text-muted-foreground">{tab.description}</span>
           </button>
         ))}
       </div>
 
-      {/* ═══ DESCRIPTIVE TAB ══════════════════════════════════════════════ */}
-      {activeTab === "descriptive" && (
+      {/* ═══ VELOCITY TAB ════════════════════════════════════════════════════ */}
+      {activeTab === "velocity" && (
         <div className="space-y-6">
-          {/* Weekly Sales Summary */}
-          {weeklySales === undefined ? (
+          {/* Inventory Health summary */}
+          {inventoryHealth === undefined ? (
+            <div className="grid grid-cols-4 gap-4">
+              {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-16" />)}
+            </div>
+          ) : inventoryHealth ? (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <Skeleton key={i} className="h-20" />
+              {[
+                { label: "Total SKUs",    value: inventoryHealth.totalSkus,        color: "text-foreground"  },
+                { label: "In Stock",      value: inventoryHealth.inStockCount,     color: "text-green-600"   },
+                { label: "Low Stock",     value: inventoryHealth.lowStockCount,    color: "text-amber-600"   },
+                { label: "Out of Stock",  value: inventoryHealth.outOfStockCount,  color: "text-red-600"     },
+              ].map((m) => (
+                <div key={m.label} className="rounded-lg border bg-card p-4 text-center">
+                  <p className={`text-2xl font-bold ${m.color}`}>{m.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{m.label}</p>
+                </div>
               ))}
             </div>
-          ) : !weeklySales ? (
-            <p className="text-sm text-muted-foreground">No data available.</p>
-          ) : (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <MetricCard
-                title={isWarehouse ? `Transfer Revenue (${periodLabel})` : `Revenue (${periodLabel})`}
-                value={formatCentavos(weeklySales.thisWeek.revenueCentavos)}
-                trendCurrent={weeklySales.thisWeek.revenueCentavos}
-                trendPrevious={weeklySales.lastWeek.revenueCentavos}
-                higherIsBetter
-              />
-              <MetricCard
-                title={isWarehouse ? `Invoices (${periodLabel})` : `Transactions (${periodLabel})`}
-                value={String(weeklySales.thisWeek.transactionCount)}
-                trendCurrent={weeklySales.thisWeek.transactionCount}
-                trendPrevious={weeklySales.lastWeek.transactionCount}
-                higherIsBetter
-              />
-              {!isWarehouse && (
-                <MetricCard
-                  title={`Items Sold (${periodLabel})`}
-                  value={String(weeklySales.thisWeek.itemsSold)}
-                  trendCurrent={weeklySales.thisWeek.itemsSold}
-                  trendPrevious={weeklySales.lastWeek.itemsSold}
-                  higherIsBetter
-                />
-              )}
-              <MetricCard
-                title={isWarehouse ? "Avg Invoice Value" : "Avg Transaction"}
-                value={formatCentavos(weeklySales.thisWeek.avgTxnValueCentavos)}
-                trendCurrent={weeklySales.thisWeek.avgTxnValueCentavos}
-                trendPrevious={weeklySales.lastWeek.avgTxnValueCentavos}
-                higherIsBetter
-              />
-            </div>
-          )}
+          ) : null}
 
-          {/* Top Selling Products + Inventory Health side by side */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Top Selling Products */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Top Selling Products ({periodLabel})</h3>
-              {topProducts === undefined ? (
-                <Skeleton className="h-48" />
-              ) : !topProducts || topProducts.length === 0 ? (
-                <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                  No sales data this week
-                </div>
-              ) : (
-                <div className="rounded-lg border overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Qty</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {topProducts.map((p, i) => (
-                        <tr key={p.variantId} className="border-b last:border-0">
-                          <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
-                          <td className="px-3 py-2">
-                            <p className="font-medium">{p.styleName}</p>
-                            <p className="text-muted-foreground">{p.size} / {p.color}</p>
-                          </td>
-                          <td className="px-3 py-2 text-right">{p.totalQuantity}</td>
-                          <td className="px-3 py-2 text-right font-medium">{formatCentavos(p.totalRevenueCentavos)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Inventory Health + Payment Methods */}
-            <div className="space-y-6">
-              {/* Inventory Health */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold">Inventory Health</h3>
-                {inventoryHealth === undefined ? (
-                  <div className="grid grid-cols-3 gap-3">
-                    {Array.from({ length: 3 }).map((_, i) => (
-                      <Skeleton key={i} className="h-16" />
-                    ))}
-                  </div>
-                ) : !inventoryHealth ? (
-                  <p className="text-sm text-muted-foreground">No data.</p>
-                ) : (
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="rounded-lg border bg-card p-3 text-center">
-                      <p className="text-xl font-bold text-green-600">{inventoryHealth.inStockCount}</p>
-                      <p className="text-xs text-muted-foreground">In Stock</p>
-                    </div>
-                    <div className="rounded-lg border bg-card p-3 text-center">
-                      <p className="text-xl font-bold text-amber-600">{inventoryHealth.lowStockCount}</p>
-                      <p className="text-xs text-muted-foreground">Low Stock</p>
-                    </div>
-                    <div className="rounded-lg border bg-card p-3 text-center">
-                      <p className="text-xl font-bold text-red-600">{inventoryHealth.outOfStockCount}</p>
-                      <p className="text-xs text-muted-foreground">Out of Stock</p>
-                    </div>
-                  </div>
+          {/* Velocity period selector */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">Window:</span>
+            {VELOCITY_DAYS.map((d) => (
+              <button
+                key={d}
+                onClick={() => setVelocityDays(d)}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                  velocityDays === d
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-muted text-muted-foreground hover:border-primary/50"
                 )}
-              </div>
-
-              {/* Payment Methods (retail only) */}
-              {!isWarehouse && (
-                <div className="space-y-3">
-                  <h3 className="text-sm font-semibold">Payment Methods ({periodLabel})</h3>
-                  {paymentBreakdown === undefined ? (
-                    <Skeleton className="h-32" />
-                  ) : !paymentBreakdown ? (
-                    <p className="text-sm text-muted-foreground">No data.</p>
-                  ) : (
-                    <div className="rounded-lg border bg-card p-4">
-                      <ResponsiveContainer width="100%" height={120}>
-                        <BarChart
-                          data={paymentBreakdown.map((p) => ({
-                            name: PAYMENT_LABELS[p.method] ?? p.method,
-                            revenue: p.revenueCentavos,
-                            percentage: p.percentage,
-                            method: p.method,
-                          }))}
-                          layout="vertical"
-                          margin={{ top: 0, right: 4, left: 50, bottom: 0 }}
-                        >
-                          <XAxis type="number" hide />
-                          <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={50} />
-                          <Tooltip
-                            formatter={(value: number | undefined) => [
-                              value !== undefined ? formatCentavos(value) : "—",
-                              "Revenue",
-                            ]}
-                          />
-                          <Bar dataKey="revenue" radius={[0, 4, 4, 0]}>
-                            {paymentBreakdown.map((p) => (
-                              <Cell
-                                key={p.method}
-                                fill={PAYMENT_COLORS[p.method] ?? "hsl(var(--muted))"}
-                              />
-                            ))}
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
-                      <div className="flex gap-4 mt-2 justify-center">
-                        {paymentBreakdown.map((p) => (
-                          <span key={p.method} className="text-xs text-muted-foreground">
-                            {PAYMENT_LABELS[p.method] ?? p.method}: {p.percentage}%
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
+              >
+                {d}d
+              </button>
+            ))}
           </div>
 
-          {/* Daily Revenue Trend */}
-          <div className="space-y-3">
-            <div>
-              <h3 className="text-sm font-semibold">Revenue Trend ({periodLabel})</h3>
-              <p className="text-xs text-muted-foreground">
-                {isWarehouse ? "Transfer value" : "Sales revenue"} — current period vs prior period of the same length
-              </p>
-            </div>
-            {dailyTrend === undefined ? (
-              <Skeleton className="h-56" />
-            ) : !dailyTrend || dailyTrend.trend.length === 0 ? (
-              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                No trend data for this period
-              </div>
-            ) : (
-              <div className="rounded-lg border bg-card p-4">
-                <ResponsiveContainer width="100%" height={220}>
-                  <LineChart data={dailyTrend.trend} margin={{ top: 5, right: 16, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                    <YAxis
-                      tick={{ fontSize: 10 }}
-                      tickFormatter={(v) => `₱${(v / 100).toLocaleString("en-PH", { notation: "compact", maximumFractionDigits: 1 })}`}
-                      width={56}
-                    />
-                    <Tooltip
-                      formatter={(value: number | undefined, name: string | undefined) => [
-                        value !== undefined ? formatCentavos(value) : "—",
-                        name === "currentCentavos" ? "This Period" : "Prior Period",
-                      ]}
-                    />
-                    <Legend
-                      formatter={(value) => value === "currentCentavos" ? "This Period" : "Prior Period"}
-                      wrapperStyle={{ fontSize: 11 }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="currentCentavos"
-                      stroke="hsl(var(--primary))"
-                      strokeWidth={2}
-                      dot={false}
-                      activeDot={{ r: 4 }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="priorCentavos"
-                      stroke="hsl(var(--muted-foreground))"
-                      strokeWidth={1.5}
-                      strokeDasharray="4 2"
-                      dot={false}
-                      activeDot={{ r: 3 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-
-          {/* Sales by Category Donut */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Sales by Category ({periodLabel})</h3>
-            {salesByCategory === undefined ? (
-              <Skeleton className="h-64" />
-            ) : !salesByCategory || salesByCategory.length === 0 ? (
-              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                No category data for this period
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="rounded-lg border bg-card p-4">
-                  <ResponsiveContainer width="100%" height={280}>
-                    <PieChart>
-                      <Pie
-                        data={salesByCategory.map((c) => ({
-                          name: c.name,
-                          value: c.revenueCentavos,
-                          units: c.unitsSold,
-                        }))}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={110}
-                        dataKey="value"
-                        nameKey="name"
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        onClick={(entry: any) => {
-                          const cat = salesByCategory.find((c) => c.name === entry.name);
-                          if (cat) setSelectedCategoryId(selectedCategoryId === cat.categoryId ? null : cat.categoryId);
-                        }}
-                        style={{ cursor: "pointer" }}
-                      >
-                        {salesByCategory.map((_, i) => (
-                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        formatter={(value: any) => [formatCentavos(value), "Revenue"]}
-                      />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="flex flex-wrap gap-3 justify-center mt-2">
-                    {salesByCategory.map((c, i) => (
-                      <button
-                        key={c.categoryId}
-                        onClick={() => setSelectedCategoryId(selectedCategoryId === c.categoryId ? null : c.categoryId)}
-                        className={cn(
-                          "flex items-center gap-1.5 text-xs px-2 py-1 rounded-md transition-colors",
-                          selectedCategoryId === c.categoryId ? "bg-muted font-medium" : "hover:bg-muted/50"
-                        )}
-                      >
-                        <span
-                          className="w-2.5 h-2.5 rounded-full shrink-0"
-                          style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
-                        />
-                        {c.name} ({c.percentage}%)
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  {selectedCategoryId ? (
-                    <>
-                      <h4 className="text-sm font-semibold">
-                        {salesByCategory.find((c) => c.categoryId === selectedCategoryId)?.name} — Styles
-                      </h4>
-                      {salesBySubcategory === undefined ? (
-                        <Skeleton className="h-48" />
-                      ) : !salesBySubcategory || salesBySubcategory.length === 0 ? (
-                        <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                          No style data for this category
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border overflow-hidden">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="bg-muted/50 border-b">
-                                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Style</th>
-                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
-                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
-                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">%</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {salesBySubcategory.map((s, i) => (
-                                <tr key={i} className="border-b last:border-0">
-                                  <td className="px-3 py-2 font-medium">{s.name}</td>
-                                  <td className="px-3 py-2 text-right">{s.unitsSold}</td>
-                                  <td className="px-3 py-2 text-right">{formatCentavos(s.revenueCentavos)}</td>
-                                  <td className="px-3 py-2 text-right text-muted-foreground">{s.percentage}%</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="rounded-lg border overflow-hidden">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="bg-muted/50 border-b">
-                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Category</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">%</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {salesByCategory.map((c) => (
-                            <tr
-                              key={c.categoryId}
-                              className="border-b last:border-0 cursor-pointer hover:bg-muted/30"
-                              onClick={() => setSelectedCategoryId(c.categoryId)}
-                            >
-                              <td className="px-3 py-2 font-medium">{c.name}</td>
-                              <td className="px-3 py-2 text-right">{c.unitsSold}</td>
-                              <td className="px-3 py-2 text-right">{formatCentavos(c.revenueCentavos)}</td>
-                              <td className="px-3 py-2 text-right text-muted-foreground">{c.percentage}%</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ═══ COMPARISONS TAB ═══════════════════════════════════════════════ */}
-      {activeTab === "comparisons" && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex gap-1 rounded-lg border p-1">
-              {([
-                { value: "brand" as const, label: "By Brand" },
-                { value: "category" as const, label: "By Category" },
-                { value: "product" as const, label: "By Product" },
-              ]).map((v) => (
-                <button
-                  key={v.value}
-                  onClick={() => setComparisonView(v.value)}
-                  className={cn(
-                    "px-3 py-1.5 text-xs rounded-md font-medium transition-colors",
-                    comparisonView === v.value
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted"
-                  )}
-                >
-                  {v.label}
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-1 rounded-lg border p-1">
-              {([
-                { value: "units" as const, label: "Units Sold" },
-                { value: "revenue" as const, label: "Revenue" },
-              ]).map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => setComparisonMetric(m.value)}
-                  className={cn(
-                    "px-3 py-1.5 text-xs rounded-md font-medium transition-colors",
-                    comparisonMetric === m.value
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted"
-                  )}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {(() => {
-            const data =
-              comparisonView === "brand"
-                ? topBrands
-                : comparisonView === "category"
-                  ? topCategories
-                  : topProductsComparison;
-
-            if (data === undefined) return <Skeleton className="h-80" />;
-            if (!data || data.length === 0)
-              return (
-                <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-                  No data for this period
-                </div>
-              );
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const chartData = data.map((item: any) => ({
-              name: item.name.length > 18 ? item.name.slice(0, 18) + "…" : item.name,
-              fullName: item.name,
-              value: comparisonMetric === "units" ? item.unitsSold : item.revenueCentavos,
-              units: item.unitsSold,
-              revenue: item.revenueCentavos,
-              percent: comparisonMetric === "units" ? item.percentUnits : item.percentRevenue,
-            }));
-
-            return (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="rounded-lg border bg-card p-4">
-                  <ResponsiveContainer width="100%" height={Math.max(300, chartData.length * 40)}>
-                    <BarChart
-                      data={chartData}
-                      layout="vertical"
-                      margin={{ top: 5, right: 30, left: 100, bottom: 5 }}
-                    >
-                      <XAxis type="number" hide />
-                      <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={100} />
-                      <Tooltip
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        formatter={(value: any) => [
-                          comparisonMetric === "revenue" ? formatCentavos(value) : `${value} units`,
-                          comparisonMetric === "revenue" ? "Revenue" : "Units Sold",
-                        ]}
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        labelFormatter={(label: any) => {
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                          const item = chartData.find((d: any) => d.name === label);
-                          return item?.fullName ?? label;
-                        }}
-                      />
-                      <Bar dataKey="value" radius={[0, 4, 4, 0]}>
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                        {chartData.map((_: any, i: number) => (
-                          <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="rounded-lg border overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">
-                          {comparisonView === "brand" ? "Brand" : comparisonView === "category" ? "Category" : "Product"}
-                        </th>
-                        {comparisonView === "product" && (
-                          <th className="text-left px-3 py-2 font-medium text-muted-foreground">Brand</th>
-                        )}
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Share</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                      {data.map((item: any, i: number) => (
-                        <tr key={i} className="border-b last:border-0">
-                          <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
-                          <td className="px-3 py-2 font-medium">
-                            {item.name}
-                            {comparisonView === "product" && item.categoryName && (
-                              <p className="text-muted-foreground">{item.categoryName}</p>
-                            )}
-                          </td>
-                          {comparisonView === "product" && (
-                            <td className="px-3 py-2 text-muted-foreground">{item.brandName}</td>
-                          )}
-                          <td className="px-3 py-2 text-right">{item.unitsSold}</td>
-                          <td className="px-3 py-2 text-right">{formatCentavos(item.revenueCentavos)}</td>
-                          <td className="px-3 py-2 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <div className="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className="h-full rounded-full"
-                                  style={{
-                                    width: `${comparisonMetric === "units" ? item.percentUnits : item.percentRevenue}%`,
-                                    backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-                                  }}
-                                />
-                              </div>
-                              <span className="text-muted-foreground w-8 text-right">
-                                {comparisonMetric === "units" ? item.percentUnits : item.percentRevenue}%
-                              </span>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
-
-      {/* ═══ DIAGNOSTIC TAB ═══════════════════════════════════════════════ */}
-      {activeTab === "diagnostic" && (
-        <div className="space-y-6">
-          {/* Product Movement Index */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-semibold">Product Movement Index</h3>
-                <p className="text-xs text-muted-foreground">MI = ADS / DSI — classifies inventory movement speed</p>
-              </div>
-              <div className="flex items-center gap-1 rounded-lg border p-1">
-                {VELOCITY_DAYS.map((d) => (
-                  <button
-                    key={d}
-                    onClick={() => setVelocityDays(d)}
-                    className={cn(
-                      "px-2.5 py-1 text-xs rounded-md font-medium transition-colors",
-                      velocityDays === d
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted"
-                    )}
-                  >
-                    {d}D
-                  </button>
-                ))}
-              </div>
-            </div>
-
+          {/* Product Velocity — unified paginated table */}
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">Product Movement Index — last {velocityDays} days</h3>
             {velocity === undefined ? (
-              <Skeleton className="h-60" />
+              <Skeleton className="h-64" />
             ) : !velocity ? (
-              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                No movement data available
-              </div>
+              <p className="text-sm text-muted-foreground">No branch data.</p>
             ) : (
-              <div className="space-y-4">
-                {(["FAST_MOVING", "MEDIUM_MOVING", "SLOW_MOVING", "NO_MOVEMENT"] as const).map((tier) => {
-                  const items = (tier === "FAST_MOVING" ? velocity.fastMoving : tier === "MEDIUM_MOVING" ? velocity.mediumMoving : tier === "SLOW_MOVING" ? velocity.slowMoving : velocity.noMovement) ?? [];
-                  const colors = MI_COLORS[tier];
-                  return (
-                    <div key={tier} className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${colors.badge}`}>
-                          {colors.label}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {items.length} product{items.length !== 1 ? "s" : ""}
-                          {tier === "FAST_MOVING" && " — MI ≥ 0.30"}
-                          {tier === "MEDIUM_MOVING" && " — MI 0.10–0.29"}
-                          {tier === "SLOW_MOVING" && " — MI < 0.10"}
-                          {tier === "NO_MOVEMENT" && " — No sales in period"}
-                        </span>
-                      </div>
-                      {items.length === 0 ? (
-                        <div className="rounded-lg border p-4 text-center text-xs text-muted-foreground">
-                          No {colors.label.toLowerCase()}-moving products
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border overflow-hidden">
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="bg-muted/50 border-b">
-                                <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
-                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">ADS</th>
-                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">DSI</th>
-                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">MI</th>
-                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {items.map((item) => (
-                                <tr key={item.variantId} className="border-b last:border-0">
-                                  <td className="px-3 py-2">
-                                    <p className="font-medium">{item.styleName}</p>
-                                    <p className="text-muted-foreground">{item.size} / {item.color}</p>
-                                  </td>
-                                  <td className="px-3 py-2 text-right">{item.ads}/day</td>
-                                  <td className="px-3 py-2 text-right">{item.dsi}d</td>
-                                  <td className={`px-3 py-2 text-right font-medium ${colors.text}`}>{item.mi}</td>
-                                  <td className="px-3 py-2 text-right">{item.currentStock}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+              <VelocityTable velocity={velocity} />
             )}
-          </div>
-
-          {/* Demand Gap + Transfer Efficiency */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Demand Gap */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Demand Gap</h3>
-              <p className="text-xs text-muted-foreground">Items customers ask for vs what&apos;s in stock</p>
-              {demandGap === undefined ? (
-                <Skeleton className="h-40" />
-              ) : !demandGap || demandGap.length === 0 ? (
-                <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                  No demand gaps detected this week
-                </div>
-              ) : (
-                <div className="rounded-lg border overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Brand / Design</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Requests</th>
-                        <th className="text-center px-3 py-2 font-medium text-muted-foreground">In Stock?</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {demandGap.map((item, i) => (
-                        <tr key={i} className="border-b last:border-0">
-                          <td className="px-3 py-2">
-                            <p className="font-medium">{item.brand}</p>
-                            {item.design && <p className="text-muted-foreground">{item.design} {item.size && `(${item.size})`}</p>}
-                          </td>
-                          <td className="px-3 py-2 text-right font-medium">{item.requestCount}</td>
-                          <td className="px-3 py-2 text-center">
-                            {item.inStock ? (
-                              <span className="text-green-600 font-medium">{item.currentQuantity} units</span>
-                            ) : (
-                              <span className="text-red-600 font-medium">No</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-
-            {/* Transfer Efficiency */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold">Transfer Efficiency</h3>
-              <p className="text-xs text-muted-foreground">
-                {isWarehouse ? "Outgoing transfer fulfillment (last 30 days)" : "Incoming transfer fulfillment (last 30 days)"}
-              </p>
-              {transferEff === undefined ? (
-                <Skeleton className="h-32" />
-              ) : !transferEff ? (
-                <p className="text-sm text-muted-foreground">No data.</p>
-              ) : (
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-lg border bg-card p-4 text-center">
-                    <p className="text-2xl font-bold">
-                      {transferEff.avgFulfillmentHours > 0
-                        ? `${transferEff.avgFulfillmentHours}h`
-                        : "N/A"}
-                    </p>
-                    <p className="text-xs text-muted-foreground">Avg Fulfillment</p>
-                  </div>
-                  <div className="rounded-lg border bg-card p-4 text-center">
-                    <p className="text-2xl font-bold text-green-600">{transferEff.completedCount}</p>
-                    <p className="text-xs text-muted-foreground">Completed</p>
-                  </div>
-                  <div className="rounded-lg border bg-card p-4 text-center">
-                    <p className="text-2xl font-bold text-amber-600">{transferEff.pendingCount}</p>
-                    <p className="text-xs text-muted-foreground">Pending</p>
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Restock vs Lay Low */}
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold">Restock vs Lay Low</h3>
-              <p className="text-xs text-muted-foreground">
-                Products classified by velocity and stock levels — what to restock and what to reduce
-              </p>
-            </div>
-
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold">Restock vs Lay Low — {periodLabel}</h3>
             {restockVsLayLow === undefined ? (
-              <Skeleton className="h-60" />
-            ) : !restockVsLayLow ? (
+              <Skeleton className="h-48" />
+            ) : !restockVsLayLow || restockVsLayLow.items.length === 0 ? (
               <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                No data available
+                No verdict data for this period
               </div>
             ) : (
-              <>
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="rounded-lg border bg-card p-4 text-center">
-                    <p className="text-2xl font-bold text-green-600">{restockVsLayLow.summary.restockCount}</p>
-                    <p className="text-xs text-muted-foreground">Need Restock</p>
-                  </div>
-                  <div className="rounded-lg border bg-card p-4 text-center">
-                    <p className="text-2xl font-bold text-red-600">{restockVsLayLow.summary.layLowCount}</p>
-                    <p className="text-xs text-muted-foreground">Lay Low</p>
-                  </div>
-                  <div className="rounded-lg border bg-card p-4 text-center">
-                    <p className="text-2xl font-bold text-gray-600">{restockVsLayLow.summary.holdCount}</p>
-                    <p className="text-xs text-muted-foreground">Hold</p>
-                  </div>
-                </div>
-
-                {restockVsLayLow.items.length === 0 ? (
-                  <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                    No items to display
-                  </div>
-                ) : (
-                  <div className="rounded-lg border overflow-hidden">
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="bg-muted/50 border-b">
-                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
-                            <th className="text-left px-3 py-2 font-medium text-muted-foreground">Brand</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sold</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Velocity</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Days Left</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sell-Through</th>
-                            <th className="text-center px-3 py-2 font-medium text-muted-foreground">Verdict</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {restockVsLayLow.items.map((item, i) => (
-                            <tr key={i} className="border-b last:border-0">
-                              <td className="px-3 py-2">
-                                <p className="font-medium">{item.name}</p>
-                                <p className="text-muted-foreground">{item.size} / {item.color}</p>
-                              </td>
-                              <td className="px-3 py-2 text-muted-foreground">{item.brandName}</td>
-                              <td className="px-3 py-2 text-right">{item.currentStock}</td>
-                              <td className="px-3 py-2 text-right">{item.unitsSold}</td>
-                              <td className="px-3 py-2 text-right">{item.velocity}/day</td>
-                              <td className="px-3 py-2 text-right">
-                                <span className={item.daysOfStock <= 7 ? "text-red-600 font-medium" : item.daysOfStock <= 14 ? "text-amber-600" : ""}>
-                                  {item.daysOfStock >= 999 ? "∞" : `${item.daysOfStock}d`}
-                                </span>
-                              </td>
-                              <td className="px-3 py-2 text-right">{item.sellThrough}%</td>
-                              <td className="px-3 py-2 text-center">
-                                <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${VERDICT_COLORS[item.verdict]}`}>
-                                  {VERDICT_LABELS[item.verdict]}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </>
+              <RestockLayLowTable items={restockVsLayLow.items} summary={restockVsLayLow.summary} />
             )}
           </div>
         </div>
       )}
 
-      {/* ═══ PREDICTIVE TAB ═══════════════════════════════════════════════ */}
-      {activeTab === "predictive" && (
+      {/* ═══ DEMAND TAB ══════════════════════════════════════════════════════ */}
+      {activeTab === "demand" && (
         <div className="space-y-6">
-          {/* Sales Forecast (Monthly + Yearly) */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Sales Forecast</h3>
-            <p className="text-xs text-muted-foreground">Monthly and yearly projections based on daily average sales</p>
-            {salesForecast === undefined ? (
-              <Skeleton className="h-40" />
-            ) : !salesForecast ? (
-              <p className="text-sm text-muted-foreground">No data.</p>
-            ) : (
-              <div className="space-y-3">
-                {/* Monthly Forecast */}
-                <div className="rounded-lg border bg-card p-4">
-                  <p className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">Monthly Forecast</p>
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div>
-                      <p className="text-xs text-muted-foreground">This Month ({salesForecast.monthly.daysElapsed}/{salesForecast.monthly.totalDays}d)</p>
-                      <p className="text-lg font-bold">{formatCentavos(salesForecast.monthly.currentRevenueCentavos)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Daily Average</p>
-                      <p className="text-lg font-bold">{formatCentavos(salesForecast.monthly.dailyAverageCentavos)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Projected Month</p>
-                      <p className="text-lg font-bold text-primary">{formatCentavos(salesForecast.monthly.projectedCentavos)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Last Month Actual</p>
-                      <p className="text-lg font-bold">{formatCentavos(salesForecast.monthly.lastPeriodCentavos)}</p>
-                      {salesForecast.monthly.projectedCentavos > 0 && salesForecast.monthly.lastPeriodCentavos > 0 && (
-                        <TrendArrow
-                          current={salesForecast.monthly.projectedCentavos}
-                          previous={salesForecast.monthly.lastPeriodCentavos}
-                          higherIsBetter
-                        />
-                      )}
-                    </div>
-                  </div>
-                </div>
-                {/* Yearly Forecast */}
-                <div className="rounded-lg border bg-card p-4">
-                  <p className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wider">Yearly Forecast</p>
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div>
-                      <p className="text-xs text-muted-foreground">This Year ({salesForecast.yearly.daysElapsed}/{salesForecast.yearly.totalDays}d)</p>
-                      <p className="text-lg font-bold">{formatCentavos(salesForecast.yearly.currentRevenueCentavos)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Daily Average</p>
-                      <p className="text-lg font-bold">{formatCentavos(salesForecast.yearly.dailyAverageCentavos)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Projected Year</p>
-                      <p className="text-lg font-bold text-primary">{formatCentavos(salesForecast.yearly.projectedCentavos)}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Last Year Actual</p>
-                      <p className="text-lg font-bold">{formatCentavos(salesForecast.yearly.lastPeriodCentavos)}</p>
-                      {salesForecast.yearly.projectedCentavos > 0 && salesForecast.yearly.lastPeriodCentavos > 0 && (
-                        <TrendArrow
-                          current={salesForecast.yearly.projectedCentavos}
-                          previous={salesForecast.yearly.lastPeriodCentavos}
-                          higherIsBetter
-                        />
-                      )}
-                    </div>
-                  </div>
-                </div>
+          <div className="space-y-2">
+            <div>
+              <h3 className="text-sm font-semibold">Demand Gap — {periodLabel}</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Customer requests for items that may be out of stock or low</p>
+            </div>
+            {demandGap === undefined ? (
+              <Skeleton className="h-48" />
+            ) : !demandGap || demandGap.length === 0 ? (
+              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
+                No demand gap data for this period
               </div>
+            ) : (
+              <DemandGapTable items={demandGap} />
             )}
           </div>
 
-          {/* Revenue Projection */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Revenue Projection</h3>
-            {projectedRevenue === undefined ? (
-              <Skeleton className="h-20" />
-            ) : !projectedRevenue ? (
-              <p className="text-sm text-muted-foreground">No data.</p>
-            ) : (
-              <div className="rounded-lg border bg-card p-4">
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div>
-                    <p className="text-xs text-muted-foreground">This Week So Far ({projectedRevenue.daysElapsed}d)</p>
-                    <p className="text-lg font-bold">{formatCentavos(projectedRevenue.currentWeekRevenueCentavos)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Daily Average</p>
-                    <p className="text-lg font-bold">{formatCentavos(projectedRevenue.dailyAverageCentavos)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Projected Week Total</p>
-                    <p className="text-lg font-bold text-primary">{formatCentavos(projectedRevenue.projectedWeekTotalCentavos)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">Last Week Actual</p>
-                    <p className="text-lg font-bold">{formatCentavos(projectedRevenue.lastWeekTotalCentavos)}</p>
-                    {projectedRevenue.projectedWeekTotalCentavos > 0 && projectedRevenue.lastWeekTotalCentavos > 0 && (
-                      <TrendArrow
-                        current={projectedRevenue.projectedWeekTotalCentavos}
-                        previous={projectedRevenue.lastWeekTotalCentavos}
-                        higherIsBetter
-                      />
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Restock Suggestions */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Restock Suggestions (7-day velocity)</h3>
+          <div className="space-y-2">
+            <div>
+              <h3 className="text-sm font-semibold">Active Restock Suggestions</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Sorted by days until stockout — most urgent first</p>
+            </div>
             {restockSuggestions === undefined ? (
               <Skeleton className="h-48" />
             ) : !restockSuggestions || restockSuggestions.length === 0 ? (
               <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                No active restock suggestions for this branch
+                No active restock suggestions
               </div>
             ) : (
-              <div className="rounded-lg border overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="bg-muted/50 border-b">
-                        <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Stock</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Velocity</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Days Left</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Suggest</th>
-                        <th className="text-center px-3 py-2 font-medium text-muted-foreground">Confidence</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {restockSuggestions.map((s) => (
-                        <tr key={s.id} className="border-b last:border-0">
-                          <td className="px-3 py-2">
-                            <p className="font-medium">{s.styleName}</p>
-                            <p className="text-muted-foreground">{s.sku} &middot; {s.size} / {s.color}</p>
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            {s.currentStock}
-                            {s.incomingStock > 0 && (
-                              <span className="text-muted-foreground"> (+{s.incomingStock})</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-right">{s.avgDailyVelocity}/day</td>
-                          <td className="px-3 py-2 text-right">
-                            <span className={s.daysUntilStockout <= 2 ? "text-red-600 font-medium" : s.daysUntilStockout <= 5 ? "text-amber-600 font-medium" : ""}>
-                              {s.daysUntilStockout}d
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-right font-medium">{s.suggestedQuantity}</td>
-                          <td className="px-3 py-2 text-center">
-                            <ConfidenceBadge confidence={s.confidence} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              <RestockSuggestionsTable items={restockSuggestions} />
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ TRANSFERS TAB ═══════════════════════════════════════════════════ */}
+      {activeTab === "transfers" && (
+        <div className="space-y-6">
+          {transferEff === undefined ? (
+            <div className="grid grid-cols-3 gap-4">
+              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-20" />)}
+            </div>
+          ) : !transferEff ? (
+            <p className="text-sm text-muted-foreground">No branch data.</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="rounded-lg border bg-card p-4 text-center space-y-1">
+                  <p className="text-2xl font-bold">{transferEff.pendingCount}</p>
+                  <p className="text-xs text-muted-foreground">Pending Transfers</p>
+                </div>
+                <div className="rounded-lg border bg-card p-4 text-center space-y-1">
+                  <p className="text-2xl font-bold">
+                    {transferEff.avgFulfillmentHours > 0 ? `${transferEff.avgFulfillmentHours}h` : "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Avg Fulfillment Time</p>
+                </div>
+                <div className="rounded-lg border bg-card p-4 text-center space-y-1">
+                  <p className="text-2xl font-bold text-green-600">{transferEff.completedCount}</p>
+                  <p className="text-xs text-muted-foreground">Completed (30d)</p>
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* Demand Forecast */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Demand Forecast</h3>
-            <p className="text-xs text-muted-foreground">Trending items from customer demand logs — may need stocking</p>
-            {demandForecast === undefined ? (
-              <Skeleton className="h-40" />
-            ) : !demandForecast || demandForecast.length === 0 ? (
-              <div className="rounded-lg border p-6 text-center text-sm text-muted-foreground">
-                No demand signals this week
+              <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                {transferEff.isWarehouse
+                  ? "Showing outgoing transfer efficiency for this warehouse."
+                  : "Showing incoming transfer efficiency for this branch. Go to Transfers to view individual shipments."}
               </div>
-            ) : (
-              <div className="rounded-lg border overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="bg-muted/50 border-b">
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Brand / Design</th>
-                      <th className="text-right px-3 py-2 font-medium text-muted-foreground">Requests</th>
-                      <th className="text-center px-3 py-2 font-medium text-muted-foreground">Trending</th>
-                      <th className="text-center px-3 py-2 font-medium text-muted-foreground">In Stock?</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {demandForecast.map((item, i) => (
-                      <tr key={i} className="border-b last:border-0">
-                        <td className="px-3 py-2">
-                          <p className="font-medium">{item.brand}</p>
-                          {item.design && <p className="text-muted-foreground">{item.design}</p>}
-                        </td>
-                        <td className="px-3 py-2 text-right font-medium">{item.requestCount}</td>
-                        <td className="px-3 py-2 text-center">
-                          {item.isTrending ? (
-                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-50 text-purple-700 border border-purple-200">
-                              TRENDING
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">-</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          {item.inStock ? (
-                            <span className="text-green-600 font-medium">Yes</span>
-                          ) : (
-                            <span className="text-red-600 font-medium">No</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+            </>
+          )}
         </div>
       )}
     </div>

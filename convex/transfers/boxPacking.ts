@@ -3,6 +3,8 @@ import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { clearReservedOnDelivery } from "../_helpers/transferStock";
+import { generateInternalInvoice } from "../_helpers/internalInvoice";
 
 // ─── Box Code Generation ────────────────────────────────────────────────────
 
@@ -653,7 +655,6 @@ export const confirmBoxReceipt = mutation({
         }
 
         // Clear reserved stock at source
-        const { clearReservedOnDelivery } = await import("../_helpers/transferStock");
         await clearReservedOnDelivery(ctx, box.transferId, transfer.fromBranchId);
 
         // Mark transfer delivered
@@ -670,7 +671,6 @@ export const confirmBoxReceipt = mutation({
 
         // Generate invoice if not a return
         if (transfer.type !== "return") {
-          const { generateInternalInvoice } = await import("../_helpers/internalInvoice");
           await generateInternalInvoice(ctx, {
             transferId: box.transferId,
             fromBranchId: transfer.fromBranchId,

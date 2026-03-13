@@ -45,24 +45,18 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 ];
 
 type ReportKey =
-  | "salesSummary"
-  | "topProducts"
-  | "salesByCategory"
-  | "topBrands"
-  | "topCategories"
   | "inventoryHealth"
   | "restockVsLayLow"
-  | "productMovement";
+  | "productMovement"
+  | "topSellers"
+  | "transferEfficiency";
 
 const REPORT_OPTIONS: { key: ReportKey; label: string; description: string }[] = [
-  { key: "salesSummary",     label: "Sales Summary",          description: "Revenue, transactions, items sold, avg ticket" },
-  { key: "topProducts",      label: "Top Selling Products",   description: "Top 5 products by revenue" },
-  { key: "salesByCategory",  label: "Sales by Category",      description: "Revenue and units per category" },
-  { key: "topBrands",        label: "Top Brands",             description: "Brands ranked by units sold" },
-  { key: "topCategories",    label: "Top Categories",         description: "Categories ranked by units sold" },
-  { key: "inventoryHealth",  label: "Inventory Health",       description: "In-stock, low-stock, out-of-stock snapshot" },
-  { key: "restockVsLayLow",  label: "Restock vs Lay Low",     description: "Verdict per SKU — what to restock or reduce" },
-  { key: "productMovement",  label: "Product Movement Index", description: "Fast, medium, slow, and dead stock" },
+  { key: "inventoryHealth",     label: "Inventory Health",       description: "In-stock, low-stock, out-of-stock snapshot" },
+  { key: "restockVsLayLow",     label: "Restock vs Lay Low",     description: "Verdict per SKU — what to restock or reduce" },
+  { key: "productMovement",     label: "Product Movement Index", description: "Fast, medium, slow, and dead stock" },
+  { key: "topSellers",          label: "Top Sellers",            description: "Most sold products for the period" },
+  { key: "transferEfficiency",  label: "Transfer Efficiency",    description: "Fulfillment speed and pending volumes" },
 ];
 
 // ─── Print table shared style ─────────────────────────────────────────────────
@@ -118,26 +112,6 @@ export default function BranchReportsPage() {
   const branchCtx = useQuery(api.dashboards.branchDashboard.getBranchContext);
 
   // All queries — only active after "Generate" is clicked
-  const salesSummary = useQuery(
-    api.dashboards.branchAnalytics.getWeeklySalesSummary,
-    generated && selected.has("salesSummary") ? { startMs, endMs } : "skip"
-  );
-  const topProducts = useQuery(
-    api.dashboards.branchAnalytics.getTopSellingProducts,
-    generated && selected.has("topProducts") ? { startMs, endMs } : "skip"
-  );
-  const salesByCategory = useQuery(
-    api.dashboards.comparisonAnalytics.getSalesByCategory,
-    generated && selected.has("salesByCategory") ? { startMs, endMs } : "skip"
-  );
-  const topBrands = useQuery(
-    api.dashboards.comparisonAnalytics.getTopBrandsComparison,
-    generated && selected.has("topBrands") ? { startMs, endMs } : "skip"
-  );
-  const topCategories = useQuery(
-    api.dashboards.comparisonAnalytics.getTopCategoriesComparison,
-    generated && selected.has("topCategories") ? { startMs, endMs } : "skip"
-  );
   const inventoryHealth = useQuery(
     api.dashboards.branchAnalytics.getInventoryHealth,
     generated && selected.has("inventoryHealth") ? {} : "skip"
@@ -149,6 +123,14 @@ export default function BranchReportsPage() {
   const velocity = useQuery(
     api.dashboards.branchAnalytics.getProductVelocity,
     generated && selected.has("productMovement") ? { startMs, endMs } : "skip"
+  );
+  const topSellers = useQuery(
+    api.dashboards.branchAnalytics.getTopSellingProducts,
+    generated && selected.has("topSellers") ? { startMs, endMs } : "skip"
+  );
+  const transferEff = useQuery(
+    api.dashboards.branchAnalytics.getTransferEfficiency,
+    generated && selected.has("transferEfficiency") ? {} : "skip"
   );
 
   function toggleReport(key: ReportKey) {
@@ -166,14 +148,11 @@ export default function BranchReportsPage() {
   }, [generated]);
 
   const allLoaded = generated && [
-    !selected.has("salesSummary") || salesSummary !== undefined,
-    !selected.has("topProducts") || topProducts !== undefined,
-    !selected.has("salesByCategory") || salesByCategory !== undefined,
-    !selected.has("topBrands") || topBrands !== undefined,
-    !selected.has("topCategories") || topCategories !== undefined,
     !selected.has("inventoryHealth") || inventoryHealth !== undefined,
     !selected.has("restockVsLayLow") || restockVsLayLow !== undefined,
     !selected.has("productMovement") || velocity !== undefined,
+    !selected.has("topSellers") || topSellers !== undefined,
+    !selected.has("transferEfficiency") || transferEff !== undefined,
   ].every(Boolean);
 
   return (
@@ -280,115 +259,22 @@ export default function BranchReportsPage() {
             <p className="text-xs text-gray-400 mt-1">Generated {generatedAt} &middot; {selected.size} section{selected.size !== 1 ? "s" : ""}</p>
           </div>
 
-          {/* ── Sales Summary ─────────────────────────────────────────── */}
-          {selected.has("salesSummary") && salesSummary && (
+          {/* ── Top Sellers ───────────────────────────────────────────── */}
+          {selected.has("topSellers") && topSellers && topSellers.length > 0 && (
             <section>
-              <SectionHeader title="Sales Summary" description={`Performance for ${periodLabel}`} />
-              <div className="grid grid-cols-4 gap-4 print:gap-3">
-                {[
-                  { label: "Revenue", value: fmt(salesSummary.thisWeek.revenueCentavos), prev: fmt(salesSummary.lastWeek.revenueCentavos) },
-                  { label: "Transactions", value: String(salesSummary.thisWeek.transactionCount), prev: String(salesSummary.lastWeek.transactionCount) },
-                  { label: "Items Sold", value: String(salesSummary.thisWeek.itemsSold), prev: String(salesSummary.lastWeek.itemsSold) },
-                  { label: "Avg Ticket", value: fmt(salesSummary.thisWeek.avgTxnValueCentavos), prev: fmt(salesSummary.lastWeek.avgTxnValueCentavos) },
-                ].map((m) => (
-                  <div key={m.label} className="rounded border border-gray-200 p-3 text-center">
-                    <p className="text-xs text-gray-500">{m.label}</p>
-                    <p className="text-lg font-bold text-gray-900">{m.value}</p>
-                    <p className="text-xs text-gray-400">Prior: {m.prev}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* ── Top Products ──────────────────────────────────────────── */}
-          {selected.has("topProducts") && topProducts && topProducts.length > 0 && (
-            <section>
-              <SectionHeader title="Top Selling Products" description={`Top ${topProducts.length} by revenue — ${periodLabel}`} />
+              <SectionHeader title="Top Sellers" description={`Most sold products — ${periodLabel}`} />
               <PrintTable>
                 <thead>
-                  <tr><Th>#</Th><Th>Product</Th><Th>Size</Th><Th>Color</Th><Th right>Units Sold</Th><Th right>Revenue</Th></tr>
+                  <tr><Th>#</Th><Th>Product</Th><Th>Size</Th><Th>Color</Th><Th right>Units Sold</Th></tr>
                 </thead>
                 <tbody>
-                  {topProducts.map((p, i) => (
+                  {topSellers.map((p, i) => (
                     <tr key={p.variantId}>
                       <Td muted>{i + 1}</Td>
                       <Td>{p.styleName}</Td>
                       <Td muted>{p.size}</Td>
                       <Td muted>{p.color}</Td>
                       <Td right>{p.totalQuantity}</Td>
-                      <Td right>{fmt(p.totalRevenueCentavos)}</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </PrintTable>
-            </section>
-          )}
-
-          {/* ── Sales by Category ────────────────────────────────────── */}
-          {selected.has("salesByCategory") && salesByCategory && salesByCategory.length > 0 && (
-            <section>
-              <SectionHeader title="Sales by Category" description={`Category breakdown — ${periodLabel}`} />
-              <PrintTable>
-                <thead>
-                  <tr><Th>#</Th><Th>Category</Th><Th right>Units Sold</Th><Th right>Revenue</Th><Th right>Share</Th></tr>
-                </thead>
-                <tbody>
-                  {salesByCategory.map((c, i) => (
-                    <tr key={c.categoryId}>
-                      <Td muted>{i + 1}</Td>
-                      <Td>{c.name}</Td>
-                      <Td right>{c.unitsSold}</Td>
-                      <Td right>{fmt(c.revenueCentavos)}</Td>
-                      <Td right>{c.percentage}%</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </PrintTable>
-            </section>
-          )}
-
-          {/* ── Top Brands ───────────────────────────────────────────── */}
-          {selected.has("topBrands") && topBrands && topBrands.length > 0 && (
-            <section>
-              <SectionHeader title="Top Brands" description={`Brands ranked by units sold — ${periodLabel}`} />
-              <PrintTable>
-                <thead>
-                  <tr><Th>#</Th><Th>Brand</Th><Th right>Units Sold</Th><Th right>Revenue</Th><Th right>Unit Share</Th><Th right>Rev. Share</Th></tr>
-                </thead>
-                <tbody>
-                  {topBrands.map((b, i) => (
-                    <tr key={b.brandId}>
-                      <Td muted>{i + 1}</Td>
-                      <Td>{b.name}</Td>
-                      <Td right>{b.unitsSold}</Td>
-                      <Td right>{fmt(b.revenueCentavos)}</Td>
-                      <Td right>{b.percentUnits}%</Td>
-                      <Td right>{b.percentRevenue}%</Td>
-                    </tr>
-                  ))}
-                </tbody>
-              </PrintTable>
-            </section>
-          )}
-
-          {/* ── Top Categories ────────────────────────────────────────── */}
-          {selected.has("topCategories") && topCategories && topCategories.length > 0 && (
-            <section>
-              <SectionHeader title="Top Categories" description={`Categories ranked by units sold — ${periodLabel}`} />
-              <PrintTable>
-                <thead>
-                  <tr><Th>#</Th><Th>Category</Th><Th right>Units Sold</Th><Th right>Revenue</Th><Th right>Unit Share</Th><Th right>Rev. Share</Th></tr>
-                </thead>
-                <tbody>
-                  {topCategories.map((c, i) => (
-                    <tr key={c.categoryId}>
-                      <Td muted>{i + 1}</Td>
-                      <Td>{c.name}</Td>
-                      <Td right>{c.unitsSold}</Td>
-                      <Td right>{fmt(c.revenueCentavos)}</Td>
-                      <Td right>{c.percentUnits}%</Td>
-                      <Td right>{c.percentRevenue}%</Td>
                     </tr>
                   ))}
                 </tbody>
@@ -494,6 +380,25 @@ export default function BranchReportsPage() {
                   </div>
                 );
               })}
+            </section>
+          )}
+
+          {/* ── Transfer Efficiency ───────────────────────────────────── */}
+          {selected.has("transferEfficiency") && transferEff && (
+            <section>
+              <SectionHeader title="Transfer Efficiency" description="Fulfillment speed and pending volumes (last 30 days)" />
+              <div className="grid grid-cols-3 gap-4">
+                {[
+                  { label: "Pending Transfers", value: String(transferEff.pendingCount), color: "text-gray-900" },
+                  { label: "Avg Fulfillment", value: transferEff.avgFulfillmentHours > 0 ? `${transferEff.avgFulfillmentHours}h` : "—", color: "text-gray-900" },
+                  { label: "Completed (30d)", value: String(transferEff.completedCount), color: "text-green-700" },
+                ].map((m) => (
+                  <div key={m.label} className="rounded border border-gray-200 p-3 text-center">
+                    <p className={`text-lg font-bold ${m.color}`}>{m.value}</p>
+                    <p className="text-xs text-gray-500">{m.label}</p>
+                  </div>
+                ))}
+              </div>
             </section>
           )}
 
