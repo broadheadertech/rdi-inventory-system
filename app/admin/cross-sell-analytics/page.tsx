@@ -48,7 +48,7 @@ export default function CrossSellAnalyticsPage() {
             <h1 className="text-2xl font-bold">Cross-Sell Analytics</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Track how often cashiers add "Frequently Bought Together" suggestions.
+            Track how often cashiers add &ldquo;Frequently Bought Together&rdquo; suggestions.
           </p>
         </div>
 

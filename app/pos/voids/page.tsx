@@ -82,7 +82,7 @@ export default function VoidsPage() {
         </Link>
         <div>
           <h1 className="text-lg font-bold">Void Transactions</h1>
-          <p className="text-xs text-muted-foreground">Today's transactions only</p>
+          <p className="text-xs text-muted-foreground">Today&apos;s transactions only</p>
         </div>
       </div>
 

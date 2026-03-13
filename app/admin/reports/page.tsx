@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useQuery } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { api as _api } from "@/convex/_generated/api";
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const api = _api as any;
 import type { Id } from "@/convex/_generated/dataModel";
 import Link from "next/link";
 import {
@@ -78,6 +80,26 @@ function getPresetDates(
 type Preset = "daily" | "yesterday" | "weekly" | "monthly" | "yearly" | "custom";
 type ReportTab = "branches" | "brands" | "invoices" | "cashiers";
 
+type SalesRow = { branchId: string; branchName: string; revenueCentavos: number; txnCount: number; avgTxnValueCentavos: number };
+type BrandRow = { brandId: string; brandName: string; revenueCentavos: number; txnCount: number };
+type InvoiceBranchRow = { branchId: string; branchName: string; revenueCentavos: number; invoiceCount: number };
+type CashierShiftRow = {
+  shiftId: string;
+  cashierName: string;
+  branchName: string;
+  openedAt: number;
+  closedAt: number | null;
+  status: string;
+  closeType: string | null;
+  changeFundCentavos: number;
+  cashSalesCentavos: number;
+  gcashSalesCentavos: number;
+  mayaSalesCentavos: number;
+  totalSalesCentavos: number;
+  transactionCount: number;
+  voidedCount: number;
+};
+
 // ─── Main page component ──────────────────────────────────────────────────────
 
 export default function HqReportsPage() {
@@ -116,14 +138,14 @@ export default function HqReportsPage() {
   });
 
   const filteredBrandData = brandFilter
-    ? brandData?.filter((b) =>
+    ? brandData?.filter((b: { brandName: string }) =>
         b.brandName.toLowerCase().includes(brandFilter.toLowerCase())
       )
     : brandData;
 
   // ── Summary card computations (derived from salesData, no extra query) ────
-  const totalRevenueCentavos = salesData?.reduce((s, r) => s + r.revenueCentavos, 0) ?? 0;
-  const totalTxnCount = salesData?.reduce((s, r) => s + r.txnCount, 0) ?? 0;
+  const totalRevenueCentavos = salesData?.reduce((s: number, r: { revenueCentavos: number }) => s + r.revenueCentavos, 0) ?? 0;
+  const totalTxnCount = salesData?.reduce((s: number, r: { txnCount: number }) => s + r.txnCount, 0) ?? 0;
   const avgTxnValueCentavos = totalTxnCount > 0 ? Math.round(totalRevenueCentavos / totalTxnCount) : 0;
   const topBranch = salesData?.[0];
 
@@ -133,10 +155,10 @@ export default function HqReportsPage() {
     ...(branchId ? { branchId: branchId as Id<"branches"> } : {}),
   });
 
-  const salesPagination = usePagination(salesData);
-  const brandPagination = usePagination(filteredBrandData);
-  const invoicePagination = usePagination(invoiceData?.byBranch);
-  const cashierPagination = usePagination(cashierReport);
+  const salesPagination = usePagination(salesData as SalesRow[] | undefined);
+  const brandPagination = usePagination(filteredBrandData as BrandRow[] | undefined);
+  const invoicePagination = usePagination(invoiceData?.byBranch as InvoiceBranchRow[] | undefined);
+  const cashierPagination = usePagination(cashierReport as CashierShiftRow[] | undefined);
 
   const presets: { key: "daily" | "yesterday" | "weekly" | "monthly" | "yearly"; label: string }[] = [
     { key: "daily", label: "Daily" },
@@ -242,7 +264,7 @@ export default function HqReportsPage() {
               className="rounded-md border px-3 py-1.5 text-sm"
             >
               <option value="">All Branches</option>
-              {(allBranches ?? []).map((b) => (
+              {(allBranches ?? []).map((b: { id: string; name: string }) => (
                 <option key={b.id} value={b.id}>
                   {b.name}
                 </option>
@@ -387,11 +409,11 @@ export default function HqReportsPage() {
                     <td className="pt-2">Total</td>
                     <td className="pt-2 text-right tabular-nums">
                       {formatCentavos(
-                        salesData.reduce((s, r) => s + r.revenueCentavos, 0)
+                        (salesData as SalesRow[]).reduce((s, r) => s + r.revenueCentavos, 0)
                       )}
                     </td>
                     <td className="pt-2 text-right tabular-nums">
-                      {salesData
+                      {(salesData as SalesRow[])
                         .reduce((s, r) => s + r.txnCount, 0)
                         .toLocaleString()}
                     </td>

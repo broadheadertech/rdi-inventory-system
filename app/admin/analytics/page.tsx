@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
 import {
   BarChart,
@@ -341,7 +342,7 @@ export default function HQAnalyticsPage() {
   const salesBySubcategory = useQuery(
     api.dashboards.comparisonAnalytics.getHQSalesBySubcategory,
     activeTab === "descriptive" && selectedCategoryId
-      ? { categoryId: selectedCategoryId as any, startMs, endMs }
+      ? { categoryId: selectedCategoryId as Id<"categories">, startMs, endMs }
       : "skip"
   );
 
@@ -674,6 +675,7 @@ export default function HQAnalyticsPage() {
                         outerRadius={110}
                         dataKey="value"
                         nameKey="name"
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         onClick={(entry: any) => {
                           const cat = salesByCategory.find((c) => c.name === entry.name);
                           if (cat) setSelectedCategoryId(selectedCategoryId === cat.categoryId ? null : cat.categoryId);
@@ -685,6 +687,7 @@ export default function HQAnalyticsPage() {
                         ))}
                       </Pie>
                       <Tooltip
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         formatter={(value: any) => [formatCentavos(value), "Revenue"]}
                       />
                     </PieChart>
@@ -845,6 +848,7 @@ export default function HQAnalyticsPage() {
                 </div>
               );
 
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const chartData = data.map((item: any) => ({
               name: item.name.length > 18 ? item.name.slice(0, 18) + "…" : item.name,
               fullName: item.name,
@@ -872,16 +876,20 @@ export default function HQAnalyticsPage() {
                         width={100}
                       />
                       <Tooltip
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         formatter={(value: any) => [
                           comparisonMetric === "revenue" ? formatCentavos(value) : `${value} units`,
                           comparisonMetric === "revenue" ? "Revenue" : "Units Sold",
                         ]}
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         labelFormatter={(label: any) => {
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
                           const item = chartData.find((d: any) => d.name === label);
                           return item?.fullName ?? label;
                         }}
                       />
                       <Bar dataKey="value" radius={[0, 4, 4, 0]}>
+                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                         {chartData.map((_: any, i: number) => (
                           <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                         ))}
@@ -908,6 +916,7 @@ export default function HQAnalyticsPage() {
                       </tr>
                     </thead>
                     <tbody>
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                       {data.map((item: any, i: number) => (
                         <tr key={i} className="border-b last:border-0">
                           <td className="px-3 py-2 text-muted-foreground">{i + 1}</td>
