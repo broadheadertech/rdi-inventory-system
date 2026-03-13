@@ -99,10 +99,10 @@ function NavSection({
   label?: string;
 }) {
   const visible = items.filter((item) => item.roles.includes(userRole));
-  if (visible.length === 0) return null;
-
   const hasActive = visible.some((item) => pathname.startsWith(item.href));
   const [open, setOpen] = useState(hasActive);
+
+  if (visible.length === 0) return null;
 
   return (
     <div>
