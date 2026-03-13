@@ -43,6 +43,8 @@ import type * as audit_logs from "../audit/logs.js";
 import type * as auth_branches from "../auth/branches.js";
 import type * as auth_clerkWebhook from "../auth/clerkWebhook.js";
 import type * as auth_users from "../auth/users.js";
+import type * as branches_cashierAccounts from "../branches/cashierAccounts.js";
+import type * as branches_cashierAccountsActions from "../branches/cashierAccountsActions.js";
 import type * as cashier_auth from "../cashier/auth.js";
 import type * as cashier_authActions from "../cashier/authActions.js";
 import type * as catalog_brands from "../catalog/brands.js";
@@ -179,6 +181,8 @@ declare const fullApi: ApiFromModules<{
   "auth/branches": typeof auth_branches;
   "auth/clerkWebhook": typeof auth_clerkWebhook;
   "auth/users": typeof auth_users;
+  "branches/cashierAccounts": typeof branches_cashierAccounts;
+  "branches/cashierAccountsActions": typeof branches_cashierAccountsActions;
   "cashier/auth": typeof cashier_auth;
   "cashier/authActions": typeof cashier_authActions;
   "catalog/brands": typeof catalog_brands;

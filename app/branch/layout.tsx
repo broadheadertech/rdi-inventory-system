@@ -24,6 +24,7 @@ import {
   UserCheck,
   Sparkles,
   ChevronDown,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -66,6 +67,7 @@ const insightsNavItems: NavItem[] = [
 const teamNavItems: NavItem[] = [
   { href: "/branch/champions", label: "Champions", icon: Trophy },
   { href: "/branch/fashion-assistants", label: "Fashion Assistants", icon: UserCheck },
+  { href: "/branch/cashiers", label: "Cashiers", icon: Users },
 ];
 
 function NavSection({
