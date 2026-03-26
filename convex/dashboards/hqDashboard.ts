@@ -1,122 +1,57 @@
 import { query } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
+import {
+  getAllBranchSnapshots,
+  getPHTDate,
+} from "../snapshots/readers";
 
 // NOTE: HQ_ROLES = ["admin", "hqStaff"]
 // HQ staff bypass branch scoping — they see ALL branches' data.
 // Do NOT use withBranchScope() here.
 
-// ─── Philippine Time (UTC+8) day boundary helper ─────────────────────────────
-// Returns the UTC millisecond timestamp for midnight PHT on the current calendar day.
-function getPHTDayStartMs(): number {
-  const PHT_OFFSET_MS = 8 * 60 * 60 * 1000; // UTC+8
-  const nowUtcMs = Date.now();
-  const nowPhtMs = nowUtcMs + PHT_OFFSET_MS;
-  // Floor to midnight PHT
-  const todayPhtStartMs = nowPhtMs - (nowPhtMs % (24 * 60 * 60 * 1000));
-  return todayPhtStartMs - PHT_OFFSET_MS; // convert back to UTC ms
-}
-
 // ─── getHqMetrics ─────────────────────────────────────────────────────────────
 // Top-row MetricCards: today + yesterday revenue/transaction totals, active alert
 // count, and transfer status summary.
+// Now reads from branchDailySnapshots instead of scanning all transactions.
 
 export const getHqMetrics = query({
   args: {},
   handler: async (ctx) => {
     await requireRole(ctx, HQ_ROLES);
 
-    const todayStart = getPHTDayStartMs();
-    const yesterdayStart = todayStart - 86400000; // 24h before today start
+    const todayDate = getPHTDate(0);
+    const yesterdayDate = getPHTDate(1);
 
-    // Fetch all active branches — use per-branch index queries (bounded by ≤20 branches)
-    const branches = await ctx.db
-      .query("branches")
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .collect();
+    const [todaySnaps, yesterdaySnaps] = await Promise.all([
+      getAllBranchSnapshots(ctx, todayDate),
+      getAllBranchSnapshots(ctx, yesterdayDate),
+    ]);
 
-    // Single query per branch covering yesterday + today (minimise roundtrips)
-    const branchMetrics = await Promise.all(
-      branches.map(async (branch) => {
-        const recentTxns = await ctx.db
-          .query("transactions")
-          .withIndex("by_branch_date", (q) =>
-            q.eq("branchId", branch._id).gte("createdAt", yesterdayStart)
-          )
-          .collect();
+    const posTodayRevenue = todaySnaps.reduce((s, r) => s + r.salesTotalCentavos, 0);
+    const posTodayCount = todaySnaps.reduce((s, r) => s + r.salesTransactionCount, 0);
+    const posYesterdayRevenue = yesterdaySnaps.reduce((s, r) => s + r.salesTotalCentavos, 0);
+    const posYesterdayCount = yesterdaySnaps.reduce((s, r) => s + r.salesTransactionCount, 0);
 
-        const todayFiltered = recentTxns.filter((t) => t.createdAt >= todayStart);
-        const yesterdayFiltered = recentTxns.filter((t) => t.createdAt < todayStart);
-
-        return {
-          todayRev: todayFiltered.reduce((sum, t) => sum + t.totalCentavos, 0),
-          todayCount: todayFiltered.length,
-          yesterdayRev: yesterdayFiltered.reduce((sum, t) => sum + t.totalCentavos, 0),
-          yesterdayCount: yesterdayFiltered.length,
-        };
-      })
-    );
-
-    const posTodayRevenue = branchMetrics.reduce((s, b) => s + b.todayRev, 0);
-    const posTodayCount = branchMetrics.reduce((s, b) => s + b.todayCount, 0);
-    const posYesterdayRevenue = branchMetrics.reduce((s, b) => s + b.yesterdayRev, 0);
-    const posYesterdayCount = branchMetrics.reduce((s, b) => s + b.yesterdayCount, 0);
-
-    // Warehouse transfer revenue — internal invoices credited to warehouse
-    const todayInvoices = await ctx.db
-      .query("internalInvoices")
-      .withIndex("by_createdAt", (q) => q.gte("createdAt", todayStart))
-      .collect();
-    const yesterdayInvoices = await ctx.db
-      .query("internalInvoices")
-      .withIndex("by_createdAt", (q) => q.gte("createdAt", yesterdayStart))
-      .collect();
-
-    const warehouseTodayRevenue = todayInvoices.reduce((s, inv) => s + inv.totalCentavos, 0);
-    const warehouseTodayCount = todayInvoices.length;
-    const yesterdayOnlyInvoices = yesterdayInvoices.filter((inv) => inv.createdAt < todayStart);
-    const warehouseYesterdayRevenue = yesterdayOnlyInvoices.reduce((s, inv) => s + inv.totalCentavos, 0);
-    const warehouseYesterdayCount = yesterdayOnlyInvoices.length;
+    const warehouseTodayRevenue = todaySnaps.reduce((s, r) => s + r.invoiceTotalCentavos, 0);
+    const warehouseTodayCount = todaySnaps.reduce((s, r) => s + r.invoiceCount, 0);
+    const warehouseYesterdayRevenue = yesterdaySnaps.reduce((s, r) => s + r.invoiceTotalCentavos, 0);
 
     const todayRevenueCentavos = posTodayRevenue + warehouseTodayRevenue;
     const todayTransactionCount = posTodayCount + warehouseTodayCount;
     const yesterdayRevenueCentavos = posYesterdayRevenue + warehouseYesterdayRevenue;
-    const yesterdayTransactionCount = posYesterdayCount + warehouseYesterdayCount;
+    const yesterdayTransactionCount = posYesterdayCount + yesterdaySnaps.reduce((s, r) => s + r.invoiceCount, 0);
 
-    // Active alerts — full table scan (lowStockAlerts has no global by_status index)
-    const activeAlerts = await ctx.db
-      .query("lowStockAlerts")
-      .filter((q) => q.eq(q.field("status"), "active"))
-      .collect();
+    const activeAlertsCount = todaySnaps.reduce((s, r) => s + r.activeAlertCount, 0);
+    const yesterdayAlertsCount = yesterdaySnaps.reduce((s, r) => s + r.activeAlertCount, 0);
 
-    // Alert trend: new alerts created today vs yesterday (still-active only;
-    // dismissed alerts are excluded since there is no historical snapshot)
-    const todayNewAlertsCount = activeAlerts.filter(
-      (a) => a._creationTime >= todayStart
-    ).length;
-    const yesterdayNewAlertsCount = activeAlerts.filter(
-      (a) => a._creationTime >= yesterdayStart && a._creationTime < todayStart
-    ).length;
-
-    // Transfer counts — by_status index is efficient
+    // Transfer counts — by_status index is efficient (no N+1)
     const [requestedTransfers, approvedTransfers, packedTransfers, inTransitTransfers] =
       await Promise.all([
-        ctx.db
-          .query("transfers")
-          .withIndex("by_status", (q) => q.eq("status", "requested"))
-          .collect(),
-        ctx.db
-          .query("transfers")
-          .withIndex("by_status", (q) => q.eq("status", "approved"))
-          .collect(),
-        ctx.db
-          .query("transfers")
-          .withIndex("by_status", (q) => q.eq("status", "packed"))
-          .collect(),
-        ctx.db
-          .query("transfers")
-          .withIndex("by_status", (q) => q.eq("status", "inTransit"))
-          .collect(),
+        ctx.db.query("transfers").withIndex("by_status", (q) => q.eq("status", "requested")).collect(),
+        ctx.db.query("transfers").withIndex("by_status", (q) => q.eq("status", "approved")).collect(),
+        ctx.db.query("transfers").withIndex("by_status", (q) => q.eq("status", "packed")).collect(),
+        ctx.db.query("transfers").withIndex("by_status", (q) => q.eq("status", "inTransit")).collect(),
       ]);
 
     return {
@@ -124,19 +59,15 @@ export const getHqMetrics = query({
       yesterdayRevenueCentavos,
       todayTransactionCount,
       yesterdayTransactionCount,
-      // Warehouse transfer revenue (subset of total — for separate display)
       warehouseTodayRevenueCentavos: warehouseTodayRevenue,
       warehouseYesterdayRevenueCentavos: warehouseYesterdayRevenue,
       warehouseTodayInvoiceCount: warehouseTodayCount,
-      activeAlertsCount: activeAlerts.length,
-      todayNewAlertsCount,
-      yesterdayNewAlertsCount,
+      activeAlertsCount,
+      todayNewAlertsCount: activeAlertsCount - yesterdayAlertsCount,
+      yesterdayNewAlertsCount: 0, // historical data not in snapshots — show 0
       transferSummary: {
-        pendingApproval: requestedTransfers.length, // needs HQ action
-        inFlight:
-          approvedTransfers.length +
-          packedTransfers.length +
-          inTransitTransfers.length,
+        pendingApproval: requestedTransfers.length,
+        inFlight: approvedTransfers.length + packedTransfers.length + inTransitTransfers.length,
       },
     };
   },
@@ -144,114 +75,57 @@ export const getHqMetrics = query({
 
 // ─── getBranchStatusCards ─────────────────────────────────────────────────────
 // Per-branch summary cards with health indicator.
+// Now reads from branchDailySnapshots — one indexed read per branch date pair.
 
 export const getBranchStatusCards = query({
   args: {},
   handler: async (ctx) => {
     await requireRole(ctx, HQ_ROLES);
 
-    const todayStart = getPHTDayStartMs();
-    const yesterday24hAgo = Date.now() - 24 * 60 * 60 * 1000;
+    const todayDate = getPHTDate(0);
+    const todaySnaps = await getAllBranchSnapshots(ctx, todayDate);
 
-    const branches = await ctx.db
-      .query("branches")
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .collect();
+    // Need branch names + types
+    const branches = await ctx.db.query("branches").collect();
+    const branchMap = new Map(branches.filter((b) => b.isActive).map((b) => [b._id as string, b]));
 
-    return await Promise.all(
-      branches.map(async (branch) => {
-        // Today's transactions via by_branch_date index
-        const todayTxns = await ctx.db
-          .query("transactions")
-          .withIndex("by_branch_date", (q) =>
-            q.eq("branchId", branch._id).gte("createdAt", todayStart)
-          )
-          .collect();
+    return todaySnaps
+      .map((snap) => {
+        const branch = branchMap.get(snap.branchId as string);
+        if (!branch) return null;
 
-        let todayRevenueCentavos = todayTxns.reduce(
-          (sum, t) => sum + t.totalCentavos,
-          0
-        );
-        let todayTransactionCount = todayTxns.length;
+        const todayRevenueCentavos = snap.salesTotalCentavos + snap.invoiceTotalCentavos;
+        const todayTransactionCount = snap.salesTransactionCount + snap.invoiceCount;
 
-        // Warehouse branches: credit internal invoice revenue from transfers
-        if (branch.type === "warehouse") {
-          const todayInvoices = await ctx.db
-            .query("internalInvoices")
-            .withIndex("by_createdAt", (q) => q.gte("createdAt", todayStart))
-            .collect();
-          const warehouseInvoices = todayInvoices.filter(
-            (inv) => inv.fromBranchId === branch._id
-          );
-          todayRevenueCentavos += warehouseInvoices.reduce(
-            (sum, inv) => sum + inv.totalCentavos,
-            0
-          );
-          todayTransactionCount += warehouseInvoices.length;
-        }
-
-        // Most recent transaction — order by_branch_date desc for correct createdAt ordering
-        const lastTxn = await ctx.db
-          .query("transactions")
-          .withIndex("by_branch_date", (q) => q.eq("branchId", branch._id))
-          .order("desc")
-          .first();
-        // For warehouse: also check latest invoice as "activity"
-        let lastActivityAt = lastTxn?.createdAt ?? null;
-        if (branch.type === "warehouse") {
-          const lastInvoice = await ctx.db
-            .query("internalInvoices")
-            .withIndex("by_createdAt")
-            .order("desc")
-            .first();
-          if (lastInvoice && lastInvoice.fromBranchId === branch._id) {
-            const invoiceTime = lastInvoice.createdAt;
-            if (!lastActivityAt || invoiceTime > lastActivityAt) {
-              lastActivityAt = invoiceTime;
-            }
-          }
-        }
-
-        // Active alerts — per-branch by_branch_status index
-        const branchAlerts = await ctx.db
-          .query("lowStockAlerts")
-          .withIndex("by_branch_status", (q) =>
-            q.eq("branchId", branch._id).eq("status", "active")
-          )
-          .collect();
-        const activeAlertCount = branchAlerts.length;
-
-        // Health status logic (AC #2: healthy requires 0 alerts AND ≥1 transaction today)
+        // Health status
         let healthStatus: "healthy" | "attention" | "critical" | "offline";
-        if (!lastActivityAt || lastActivityAt < yesterday24hAgo) {
+        if (todayTransactionCount === 0) {
           healthStatus = "offline";
-        } else if (activeAlertCount >= 3) {
+        } else if (snap.activeAlertCount >= 3) {
           healthStatus = "critical";
-        } else if (activeAlertCount >= 1) {
+        } else if (snap.activeAlertCount >= 1) {
           healthStatus = "attention";
-        } else if (todayTransactionCount > 0) {
-          healthStatus = "healthy";
         } else {
-          // Active within 24h but no sales today (e.g. branch not yet open this morning)
-          healthStatus = "offline";
+          healthStatus = "healthy";
         }
 
         return {
-          branchId: branch._id,
+          branchId: snap.branchId,
           branchName: branch.name,
           todayRevenueCentavos,
           todayTransactionCount,
-          activeAlertCount,
+          activeAlertCount: snap.activeAlertCount,
           healthStatus,
-          lastActivityAt,
+          lastActivityAt: snap.generatedAt, // approximate — snapshot time
         };
       })
-    );
+      .filter((r): r is NonNullable<typeof r> => r !== null);
   },
 });
 
 // ─── getAttentionItems ────────────────────────────────────────────────────────
 // Priority-sorted list of actionable alerts for HQ.
+// Transfer + unsynced queries are lightweight (index-bounded), no snapshot needed.
 
 type AttentionItem = {
   id: string;
@@ -270,7 +144,6 @@ export const getAttentionItems = query({
 
     const items: AttentionItem[] = [];
 
-    // Branch name cache — same pattern as fulfillment.ts (use ?? not ! per L1 lesson)
     const branchCache = new Map<string, string>();
     async function getBranchName(branchId: Id<"branches">): Promise<string> {
       const key = branchId as string;
@@ -281,27 +154,25 @@ export const getAttentionItems = query({
       return name;
     }
 
-    // 1. Low-stock alerts (warning priority)
-    // No global by_status index on lowStockAlerts — use full scan with filter
-    const activeAlerts = await ctx.db
-      .query("lowStockAlerts")
-      .filter((q) => q.eq(q.field("status"), "active"))
-      .collect();
-
-    for (const alert of activeAlerts) {
-      const branchName = await getBranchName(alert.branchId);
-      items.push({
-        id: alert._id as string,
-        type: "low-stock",
-        priority: "warning",
-        title: `Low stock at ${branchName}`,
-        description: "Stock level below minimum threshold — click to review",
-        branchName,
-        linkTo: "/admin/dashboard",
-      });
+    // 1. Low-stock alerts — use snapshot count to show summary instead of per-alert items
+    const todayDate = getPHTDate(0);
+    const snaps = await getAllBranchSnapshots(ctx, todayDate);
+    for (const snap of snaps) {
+      if (snap.activeAlertCount > 0) {
+        const branchName = await getBranchName(snap.branchId);
+        items.push({
+          id: snap.branchId as string,
+          type: "low-stock",
+          priority: snap.activeAlertCount >= 3 ? "critical" : "warning",
+          title: `${snap.activeAlertCount} low stock alert${snap.activeAlertCount > 1 ? "s" : ""} at ${branchName}`,
+          description: `${snap.lowStockCount} items below threshold, ${snap.outOfStockCount} out of stock`,
+          branchName,
+          linkTo: "/admin/dashboard",
+        });
+      }
     }
 
-    // 2. Pending transfer requests — status "requested" needs HQ approval action
+    // 2. Pending transfer requests
     const requestedTransfers = await ctx.db
       .query("transfers")
       .withIndex("by_status", (q) => q.eq("status", "requested"))
@@ -321,9 +192,7 @@ export const getAttentionItems = query({
       });
     }
 
-    // 3. Unsynced offline transactions (critical priority)
-    // No compound index for isOffline+syncedAt — in-memory filter is acceptable
-    // (offline transactions are infrequent; full scan is bounded by transaction volume)
+    // 3. Unsynced offline transactions
     const offlineTxns = await ctx.db
       .query("transactions")
       .filter((q) => q.eq(q.field("isOffline"), true))
@@ -343,7 +212,6 @@ export const getAttentionItems = query({
       });
     }
 
-    // Sort: critical first, then warning, then info
     const PRIORITY_ORDER: Record<string, number> = { critical: 0, warning: 1, info: 2 };
     return items.sort(
       (a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]

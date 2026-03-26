@@ -1,24 +1,28 @@
+// convex/ai/restockSuggestions.ts
+//
+// NOW READS FROM variantDailySnapshots + branchDailySnapshots instead of scanning
+// transactions → transactionItems per branch. Reduces from ~881K queries to ~3.
+//
+// Note: branchSales array in variantDailySnapshots gives per-branch breakdown.
+
 import { internalMutation, query, mutation } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { getAllVariantSnapshots, getPHTDate } from "../snapshots/readers";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const ANALYSIS_WINDOW_DAYS = 7;
 const SUGGESTION_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48 hours
-const STOCKOUT_THRESHOLD_DAYS = 7; // Suggest restock if <7 days of stock
+const STOCKOUT_THRESHOLD_DAYS = 7;
 
 // ─── generateRestockSuggestions ──────────────────────────────────────────────
 // Called by cron daily at 5 AM PHT (21:00 UTC previous day).
-// Analyzes 7-day sales velocity per variant per branch, generates suggestions
-// for variants projected to stock out within 7 days.
+// Reads variant snapshots for velocity + stock data, generates suggestions.
 
 export const generateRestockSuggestions = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
-    const windowStart = now - ANALYSIS_WINDOW_DAYS * DAY_MS;
     const expiresAt = now + SUGGESTION_EXPIRY_MS;
 
     // 1. Expire old active suggestions
@@ -32,127 +36,103 @@ export const generateRestockSuggestions = internalMutation({
       }
     }
 
-    // 2. Get all active branches
+    // 2. Read today's variant snapshots (contains velocity + stock + per-branch sales)
+    const todayDate = getPHTDate(0);
+    const snapshots = await getAllVariantSnapshots(ctx, todayDate);
+
+    if (snapshots.length === 0) return;
+
+    // 3. Get all active branches
     const branches = (await ctx.db.query("branches").collect()).filter(
       (b) => b.isActive
     );
+    const branchIds = new Set(branches.map((b) => b._id as string));
 
-    // 3. Get all inventory records
-    const allInventory = await ctx.db.query("inventory").collect();
-
-    // 4. Per-branch analysis
-    for (const branch of branches) {
-      // Bound to 2000 most recent transactions to cap N+1 reads on transactionItems
-      const txns = await ctx.db
-        .query("transactions")
-        .withIndex("by_branch_date", (q) =>
-          q.eq("branchId", branch._id).gte("createdAt", windowStart)
-        )
-        .order("desc")
-        .take(2000);
-
-      if (txns.length === 0) continue;
-
-      // 5. Aggregate sales velocity: variant → total units sold
-      const variantSales = new Map<string, number>();
-      for (const txn of txns) {
-        const items = await ctx.db
-          .query("transactionItems")
-          .withIndex("by_transaction", (q) =>
-            q.eq("transactionId", txn._id)
-          )
-          .collect();
-        for (const item of items) {
-          const key = item.variantId as string;
-          variantSales.set(key, (variantSales.get(key) ?? 0) + item.quantity);
-        }
-      }
-
-      // 6. Build inventory map for this branch
-      const branchInventory = allInventory.filter(
-        (inv) => (inv.branchId as string) === (branch._id as string)
-      );
-      const invMap = new Map(
-        branchInventory.map((inv) => [inv.variantId as string, inv])
-      );
-
-      // 7. Count incoming stock (transfers approved/packed/inTransit TO this branch)
-      // Bound to 200 most recent to avoid loading full transfer history
-      const incomingTransfers = await ctx.db
+    // 4. Count incoming stock per variant per branch (transfers approved/packed/inTransit)
+    // Read all active transfers at once (bounded by status index)
+    const pendingStatuses = ["approved", "packed", "inTransit"] as const;
+    const allPendingTransfers = [];
+    for (const status of pendingStatuses) {
+      const transfers = await ctx.db
         .query("transfers")
-        .withIndex("by_to_branch", (q) => q.eq("toBranchId", branch._id))
-        .order("desc")
-        .take(200);
-      const activeIncoming = incomingTransfers.filter((t) =>
-        ["approved", "packed", "inTransit"].includes(t.status)
-      );
-      const incomingByVariant = new Map<string, number>();
-      for (const transfer of activeIncoming) {
-        const tItems = await ctx.db
-          .query("transferItems")
-          .withIndex("by_transfer", (q) =>
-            q.eq("transferId", transfer._id)
-          )
-          .collect();
-        for (const ti of tItems) {
-          const key = ti.variantId as string;
-          const qty = ti.packedQuantity ?? ti.requestedQuantity;
-          incomingByVariant.set(key, (incomingByVariant.get(key) ?? 0) + qty);
-        }
+        .withIndex("by_status", (q) => q.eq("status", status))
+        .collect();
+      allPendingTransfers.push(...transfers);
+    }
+
+    // Build incoming map: branchId+variantId → incoming qty
+    const incomingMap = new Map<string, number>();
+    for (const transfer of allPendingTransfers) {
+      const items = await ctx.db
+        .query("transferItems")
+        .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+        .collect();
+      for (const ti of items) {
+        const key = `${transfer.toBranchId}:${ti.variantId}`;
+        const qty = ti.packedQuantity ?? ti.requestedQuantity;
+        incomingMap.set(key, (incomingMap.get(key) ?? 0) + qty);
       }
+    }
 
-      // 8. Generate suggestions
-      for (const [variantIdStr, totalSold] of variantSales) {
-        const avgDaily = totalSold / ANALYSIS_WINDOW_DAYS;
-        if (avgDaily < 0.1) continue; // Skip very slow movers
+    // 5. Get per-branch inventory for all variants
+    const allInventory = await ctx.db.query("inventory").collect();
+    const invMap = new Map<string, number>(); // branchId:variantId → qty
+    for (const inv of allInventory) {
+      invMap.set(`${inv.branchId}:${inv.variantId}`, inv.quantity);
+    }
 
-        const inv = invMap.get(variantIdStr);
-        const currentStock = inv?.quantity ?? 0;
-        const incoming = incomingByVariant.get(variantIdStr) ?? 0;
+    // 6. Generate suggestions using snapshot velocity data
+    for (const snap of snapshots) {
+      if (snap.avgDailyVelocity7d < 0.1) continue; // Skip very slow movers
+
+      // Check each branch that sells this variant
+      for (const branchSale of snap.branchSales) {
+        if (!branchIds.has(branchSale.branchId as string)) continue;
+
+        const branchDailyVelocity = branchSale.qtySold / 7; // approximate from snapshot's 7d window
+        if (branchDailyVelocity < 0.1) continue;
+
+        const currentStock = invMap.get(`${branchSale.branchId}:${snap.variantId}`) ?? 0;
+        const incoming = incomingMap.get(`${branchSale.branchId}:${snap.variantId}`) ?? 0;
         const effectiveStock = currentStock + incoming;
-        const daysLeft =
-          avgDaily > 0 ? Math.round(effectiveStock / avgDaily) : 999;
+        const daysLeft = branchDailyVelocity > 0
+          ? Math.round(effectiveStock / branchDailyVelocity)
+          : 999;
 
         if (daysLeft >= STOCKOUT_THRESHOLD_DAYS) continue;
 
-        // Check for existing active suggestion for this branch+variant
+        // Check for existing active suggestion
         const existingSuggestion = await ctx.db
           .query("restockSuggestions")
           .withIndex("by_branch_variant", (q) =>
-            q
-              .eq("branchId", branch._id)
-              .eq("variantId", variantIdStr as Id<"variants">)
+            q.eq("branchId", branchSale.branchId).eq("variantId", snap.variantId)
           )
           .collect();
-        const hasActive = existingSuggestion.some(
-          (s) => s.status === "active"
-        );
+        const hasActive = existingSuggestion.some((s) => s.status === "active");
         if (hasActive) continue;
 
-        // Suggested quantity: cover 14 days of sales minus effective stock
         const suggestedQty = Math.max(
           1,
-          Math.ceil(avgDaily * ANALYSIS_WINDOW_DAYS) - effectiveStock
+          Math.ceil(branchDailyVelocity * 7) - effectiveStock
         );
 
-        // Confidence scoring
         let confidence: "high" | "medium" | "low";
-        if (avgDaily >= 2 && daysLeft <= 3) confidence = "high";
-        else if (avgDaily >= 1 || daysLeft <= 5) confidence = "medium";
+        if (branchDailyVelocity >= 2 && daysLeft <= 3) confidence = "high";
+        else if (branchDailyVelocity >= 1 || daysLeft <= 5) confidence = "medium";
         else confidence = "low";
 
         const rationale =
-          `Selling ${avgDaily.toFixed(1)}/day, ` +
+          `Selling ${branchDailyVelocity.toFixed(1)}/day, ` +
           `${currentStock} in stock` +
           (incoming > 0 ? ` (+${incoming} incoming)` : "") +
           `, ~${daysLeft} days left`;
 
         await ctx.db.insert("restockSuggestions", {
-          branchId: branch._id,
-          variantId: variantIdStr as Id<"variants">,
+          branchId: branchSale.branchId,
+          variantId: snap.variantId,
           suggestedQuantity: suggestedQty,
           currentStock,
-          avgDailyVelocity: Math.round(avgDaily * 10) / 10,
+          avgDailyVelocity: Math.round(branchDailyVelocity * 10) / 10,
           daysUntilStockout: daysLeft,
           incomingStock: incoming,
           confidence,
@@ -167,8 +147,6 @@ export const generateRestockSuggestions = internalMutation({
 });
 
 // ─── listActiveSuggestions ───────────────────────────────────────────────────
-// Returns active suggestions enriched with branch name + variant info,
-// sorted by urgency (lowest daysUntilStockout first).
 
 export const listActiveSuggestions = query({
   args: { branchId: v.optional(v.id("branches")) },
@@ -190,7 +168,6 @@ export const listActiveSuggestions = query({
         .collect();
     }
 
-    // Enrich with branch name + variant info using caches
     const branchCache = new Map<string, string>();
     const variantCache = new Map<
       string,
@@ -199,7 +176,6 @@ export const listActiveSuggestions = query({
 
     const enriched = await Promise.all(
       suggestions.map(async (s) => {
-        // Branch name
         let branchName = branchCache.get(s.branchId as string);
         if (!branchName) {
           const branch = await ctx.db.get(s.branchId);
@@ -207,7 +183,6 @@ export const listActiveSuggestions = query({
           branchCache.set(s.branchId as string, branchName);
         }
 
-        // Variant info
         let variantInfo = variantCache.get(s.variantId as string);
         if (!variantInfo) {
           const variant = await ctx.db.get(s.variantId);
@@ -244,8 +219,6 @@ export const listActiveSuggestions = query({
 });
 
 // ─── acceptSuggestion ────────────────────────────────────────────────────────
-// Creates a transfer request inline (not calling createTransferRequest which
-// uses withBranchScope — HQ staff have no branch assignment).
 
 export const acceptSuggestion = mutation({
   args: {
@@ -256,56 +229,24 @@ export const acceptSuggestion = mutation({
     const user = await requireRole(ctx, HQ_ROLES);
 
     const suggestion = await ctx.db.get(args.suggestionId);
-    if (!suggestion) {
-      throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "Suggestion not found.",
-      });
-    }
-    if (suggestion.status !== "active") {
-      throw new ConvexError({
-        code: "INVALID_STATE",
-        message: "Suggestion is no longer active.",
-      });
-    }
+    if (!suggestion) throw new ConvexError({ code: "NOT_FOUND", message: "Suggestion not found." });
+    if (suggestion.status !== "active") throw new ConvexError({ code: "INVALID_STATE", message: "Suggestion is no longer active." });
 
     const fromBranch = await ctx.db.get(args.fromBranchId);
-    if (!fromBranch || !fromBranch.isActive) {
-      throw new ConvexError({
-        code: "INVALID_ARGUMENT",
-        message: "Invalid source branch.",
-      });
-    }
-    if ((args.fromBranchId as string) === (suggestion.branchId as string)) {
-      throw new ConvexError({
-        code: "INVALID_ARGUMENT",
-        message: "Source and target branch cannot be the same.",
-      });
-    }
+    if (!fromBranch || !fromBranch.isActive) throw new ConvexError({ code: "INVALID_ARGUMENT", message: "Invalid source branch." });
+    if ((args.fromBranchId as string) === (suggestion.branchId as string)) throw new ConvexError({ code: "INVALID_ARGUMENT", message: "Source and target branch cannot be the same." });
 
     const variant = await ctx.db.get(suggestion.variantId);
-    if (!variant) {
-      throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "Variant no longer exists.",
-      });
-    }
+    if (!variant) throw new ConvexError({ code: "NOT_FOUND", message: "Variant no longer exists." });
 
-    // Validate source branch has stock of this variant
     const sourceInventory = await ctx.db
       .query("inventory")
       .withIndex("by_branch_variant", (q) =>
         q.eq("branchId", args.fromBranchId).eq("variantId", suggestion.variantId)
       )
       .unique();
-    if (!sourceInventory || sourceInventory.quantity <= 0) {
-      throw new ConvexError({
-        code: "INVALID_ARGUMENT",
-        message: "Source branch has no stock of this variant.",
-      });
-    }
+    if (!sourceInventory || sourceInventory.quantity <= 0) throw new ConvexError({ code: "INVALID_ARGUMENT", message: "Source branch has no stock of this variant." });
 
-    // Create transfer request inline
     const now = Date.now();
     const transferId = await ctx.db.insert("transfers", {
       fromBranchId: args.fromBranchId,
@@ -329,7 +270,6 @@ export const acceptSuggestion = mutation({
       transferId,
     });
 
-    // Audit the transfer creation
     await _logAuditEntry(ctx, {
       action: "transfer.create",
       userId: user._id,
@@ -345,7 +285,6 @@ export const acceptSuggestion = mutation({
       },
     });
 
-    // Audit the suggestion acceptance
     await _logAuditEntry(ctx, {
       action: "restock.accept",
       userId: user._id,
@@ -369,18 +308,8 @@ export const dismissSuggestion = mutation({
     const user = await requireRole(ctx, HQ_ROLES);
 
     const suggestion = await ctx.db.get(args.suggestionId);
-    if (!suggestion) {
-      throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "Suggestion not found.",
-      });
-    }
-    if (suggestion.status !== "active") {
-      throw new ConvexError({
-        code: "INVALID_STATE",
-        message: "Suggestion is no longer active.",
-      });
-    }
+    if (!suggestion) throw new ConvexError({ code: "NOT_FOUND", message: "Suggestion not found." });
+    if (suggestion.status !== "active") throw new ConvexError({ code: "INVALID_STATE", message: "Suggestion is no longer active." });
 
     await ctx.db.patch(args.suggestionId, { status: "dismissed" as const });
 
@@ -395,7 +324,6 @@ export const dismissSuggestion = mutation({
 });
 
 // ─── getBranchesWithStock ────────────────────────────────────────────────────
-// Returns branches that have stock of a given variant, for the accept dialog.
 
 export const getBranchesWithStock = query({
   args: { variantId: v.id("variants") },

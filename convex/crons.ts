@@ -3,6 +3,10 @@
 import { cronJobs } from "convex/server";
 import { internal } from "./_generated/api";
 
+// Cast — generated types may not include notifications module until next codegen
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const _internal = internal as any;
+
 const crons = cronJobs();
 
 // Hourly low-stock sweep — fallback for stock changes not triggered by POS transactions
@@ -46,6 +50,49 @@ crons.daily(
   "trading-calendar-reminders",
   { hourUTC: 0, minuteUTC: 0 },
   internal.analytics.tradingCalendarReminderJob.sendTradingReminders
+);
+
+// ─── Snapshot Generation ────────────────────────────────────────────────────
+// Hourly snapshot — computes branchDailySnapshots + variantDailySnapshots.
+// Runs every hour so dashboards always have fresh data. Idempotent per date.
+// Must run BEFORE restock/scoring crons that depend on snapshot data.
+crons.interval(
+  "snapshot-generation",
+  { hours: 1 },
+  _internal.snapshots.generate.orchestrate
+);
+
+// ─── Email Digest Crons ─────────────────────────────────────────────────────
+
+// Daily low-stock email digest — 7 AM PHT = 23:00 UTC previous day
+crons.daily(
+  "low-stock-email-digest",
+  { hourUTC: 23, minuteUTC: 0 },
+  _internal.notifications.emailDigests.sendLowStockDigest
+);
+
+// Daily restock suggestions email — 5:30 AM PHT = 21:30 UTC previous day
+// Runs 30 min after restock generation to ensure data is fresh
+crons.daily(
+  "restock-email-digest",
+  { hourUTC: 21, minuteUTC: 30 },
+  _internal.notifications.emailDigests.sendRestockDigest
+);
+
+// Daily branch performance scores email — 6:30 AM PHT = 22:30 UTC previous day
+// Runs 30 min after branch scoring to ensure data is ready
+crons.daily(
+  "branch-scores-email-digest",
+  { hourUTC: 22, minuteUTC: 30 },
+  _internal.notifications.emailDigests.sendBranchScoresDigest
+);
+
+// Weekly demand summary email — Monday 6:30 AM PHT = Sunday 22:30 UTC
+// Runs 30 min after demand summary generation
+crons.weekly(
+  "demand-email-digest",
+  { dayOfWeek: "sunday", hourUTC: 22, minuteUTC: 30 },
+  _internal.notifications.emailDigests.sendDemandDigest
 );
 
 export default crons;

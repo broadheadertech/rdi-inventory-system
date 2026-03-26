@@ -1,35 +1,16 @@
-import { query, type QueryCtx } from "../_generated/server";
+// convex/dashboards/productMovers.ts
+//
+// NOW READS FROM variantDailySnapshots instead of scanning transactions + transactionItems.
+// Query count: ~1 (snapshot read) + batch enrichment.
+// Previously: ~800K+ queries at 400 branches.
+
+import { query } from "../_generated/server";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
-
-// NOTE: All queries use requireRole(ctx, HQ_ROLES) — NOT withBranchScope.
-
-const PHT_OFFSET_MS = 8 * 60 * 60 * 1000; // UTC+8
-
-function getPhilippineDateRange(dateStr: string): { startMs: number; endMs: number } {
-  const year = parseInt(dateStr.slice(0, 4));
-  const month = parseInt(dateStr.slice(4, 6)) - 1;
-  const day = parseInt(dateStr.slice(6, 8));
-  const startMs = Date.UTC(year, month, day) - PHT_OFFSET_MS;
-  const endMs = startMs + 86_400_000 - 1;
-  return { startMs, endMs };
-}
+import { getAllVariantSnapshots, getPHTDate } from "../snapshots/readers";
 
 // ─── Classification types ────────────────────────────────────────────────────
-// Movement Index (MI) formula:
-//   ADS = Total Units Sold / Number of Days
-//   DSI = Current Inventory / ADS
-//   MI  = ADS / DSI  (simplified: ADS² / Current Inventory)
-//
-// Primary classification by MI:
-//   FAST:   MI >= 0.30
-//   NORMAL: MI 0.10–0.29
-//   SLOW:   MI < 0.10 (but has sales)
-//   DEAD:   0 sales in period
-//
-// Sub-classification by DSI (Days of Supply):
-//   low: < 14d | medium: 14–60d | high: > 60d
 
 type DsiBucket = "low" | "medium" | "high";
 type Classification = "fast" | "normal" | "slow" | "dead";
@@ -74,128 +55,9 @@ function classifyByMI(
     if (dsiBucket === "medium") return { classification: "normal", subClassification: "normal" };
     return { classification: "slow", subClassification: "slow-overstock" };
   }
-  // MI < 0.10
   if (dsiBucket === "low") return { classification: "normal", subClassification: "normal-low" };
   if (dsiBucket === "medium") return { classification: "slow", subClassification: "slow-overstock" };
   return { classification: "slow", subClassification: "slow-critical" };
-}
-
-// ─── Shared aggregation logic ────────────────────────────────────────────────
-
-async function aggregateMovers(
-  ctx: QueryCtx,
-  args: { dateStart: string; dateEnd: string; branchId?: Id<"branches"> }
-) {
-  const { startMs } = getPhilippineDateRange(args.dateStart);
-  const { endMs } = getPhilippineDateRange(args.dateEnd);
-  const periodDays = Math.max(1, Math.round((endMs - startMs + 1) / 86_400_000));
-
-  // Fetch branches
-  const branches = args.branchId
-    ? await ctx.db.get(args.branchId).then((b) => (b && b.isActive ? [b] : []))
-    : await ctx.db
-        .query("branches")
-        .filter((q) => q.eq(q.field("isActive"), true))
-        .collect();
-
-  // Sales aggregation — parallel per-branch, capped at 2000 txns each
-  const allTxnArrays = await Promise.all(
-    branches.map((branch) =>
-      ctx.db
-        .query("transactions")
-        .withIndex("by_branch_date", (q) =>
-          q.eq("branchId", branch._id).gte("createdAt", startMs).lte("createdAt", endMs)
-        )
-        .take(2000)
-    )
-  );
-  const allTxns = allTxnArrays.flat();
-
-  // Build soldMap: variantId → totalSold
-  const soldMap = new Map<string, number>();
-  for (const txn of allTxns) {
-    const items = await ctx.db
-      .query("transactionItems")
-      .withIndex("by_transaction", (q) => q.eq("transactionId", txn._id))
-      .collect();
-    for (const item of items) {
-      const key = item.variantId as string;
-      soldMap.set(key, (soldMap.get(key) ?? 0) + item.quantity);
-    }
-  }
-
-  // Inventory snapshot — parallel per-branch
-  const allInventory = (
-    await Promise.all(
-      branches.map((branch) =>
-        ctx.db
-          .query("inventory")
-          .withIndex("by_branch", (q) => q.eq("branchId", branch._id))
-          .collect()
-      )
-    )
-  ).flat();
-
-  // Sum stock per variant (across branches when no filter)
-  const stockMap = new Map<string, number>();
-  for (const inv of allInventory) {
-    const key = inv.variantId as string;
-    stockMap.set(key, (stockMap.get(key) ?? 0) + inv.quantity);
-  }
-
-  // Union of variantIds with stock > 0 OR sales > 0
-  const allVariantIds = new Set<string>();
-  for (const [vid, qty] of stockMap) {
-    if (qty > 0) allVariantIds.add(vid);
-  }
-  for (const vid of soldMap.keys()) {
-    allVariantIds.add(vid);
-  }
-
-  // Compute metrics per variant using Movement Index
-  const entries: {
-    variantId: string;
-    totalSold: number;
-    ads: number;
-    dsi: number;
-    mi: number;
-    currentStock: number;
-    classification: Classification;
-    subClassification: SubClassification;
-  }[] = [];
-
-  for (const vid of allVariantIds) {
-    const totalSold = soldMap.get(vid) ?? 0;
-    const currentStock = stockMap.get(vid) ?? 0;
-    if (totalSold === 0 && currentStock === 0) continue;
-
-    const ads = totalSold / periodDays;
-    const dsi = ads > 0 ? currentStock / ads : 0;
-    const mi = ads > 0 && currentStock > 0 ? (ads * ads) / currentStock : (ads > 0 ? 999 : 0);
-    const hasSales = totalSold > 0;
-
-    // DSI bucket for sub-classification
-    const dsiBucket: DsiBucket = !hasSales || currentStock <= 0
-      ? "low"
-      : dsi >= 999
-        ? "high"
-        : classifyDsi(dsi);
-
-    const { classification, subClassification } = classifyByMI(mi, hasSales, dsiBucket);
-
-    entries.push({
-      variantId: vid,
-      totalSold,
-      ads: Math.round(ads),
-      dsi: Math.round(dsi),
-      mi: Math.round(mi * 100) / 100,
-      currentStock,
-      classification,
-      subClassification,
-    });
-  }
-
-  return { entries, periodDays };
 }
 
 // ─── getProductMovers ────────────────────────────────────────────────────────
@@ -209,103 +71,61 @@ export const getProductMovers = query({
   handler: async (ctx, args) => {
     await requireRole(ctx, HQ_ROLES);
 
-    const { entries, periodDays } = await aggregateMovers(ctx, args);
+    // Read today's variant snapshots (already has velocity, stock, hierarchy)
+    const todayDate = getPHTDate(0);
+    const snapshots = await getAllVariantSnapshots(ctx, todayDate);
 
-    // 4-wave batch enrichment (variant → style → category → brand)
+    const items = snapshots
+      .filter((snap) => snap.totalQtySold > 0 || snap.totalStock > 0)
+      .map((snap) => {
+        const hasSales = snap.totalQtySold > 0;
+        const ads = snap.avgDailyVelocity7d;
+        const dsi = snap.daysOfSupply;
+        const mi = snap.movementIndex;
 
-    // Wave 1: variants
-    const uniqueVariantIds = [...new Set(entries.map((e) => e.variantId))];
-    const variantDocs = await Promise.all(
-      uniqueVariantIds.map((id) => ctx.db.get(id as Id<"variants">))
-    );
-    const variantMap = new Map<
-      string,
-      { sku: string; size: string; color: string; priceCentavos: number; styleId: Id<"styles"> }
-    >();
-    uniqueVariantIds.forEach((id, i) => {
-      const doc = variantDocs[i];
-      if (doc) {
-        variantMap.set(id, {
-          sku: doc.sku ?? "—",
-          size: doc.size ?? "—",
-          color: doc.color ?? "—",
-          priceCentavos: doc.priceCentavos ?? 0,
-          styleId: doc.styleId,
-        });
-      }
-    });
+        const dsiBucket: DsiBucket = !hasSales || snap.totalStock <= 0
+          ? "low"
+          : dsi >= 999 ? "high" : classifyDsi(dsi);
 
-    // Wave 2: styles
-    const uniqueStyleIds = [...new Set(
-      Array.from(variantMap.values()).map((v) => v.styleId)
-    )];
-    const styleDocs = await Promise.all(
-      uniqueStyleIds.map((id) => ctx.db.get(id))
-    );
-    const styleMap = new Map<string, { name: string; categoryId: Id<"categories"> }>();
-    uniqueStyleIds.forEach((id, i) => {
-      const doc = styleDocs[i];
-      if (doc) styleMap.set(id as string, { name: doc.name, categoryId: doc.categoryId });
-    });
+        const { classification, subClassification } = classifyByMI(mi, hasSales, dsiBucket);
 
-    // Wave 3: categories
-    const uniqueCategoryIds = [...new Set(
-      Array.from(styleMap.values()).map((s) => s.categoryId)
-    )];
-    const categoryDocs = await Promise.all(
-      uniqueCategoryIds.map((id) => ctx.db.get(id))
-    );
-    const categoryMap = new Map<string, { name: string; brandId: Id<"brands"> }>();
-    uniqueCategoryIds.forEach((id, i) => {
-      const doc = categoryDocs[i];
-      if (doc) categoryMap.set(id as string, { name: doc.name, brandId: doc.brandId });
-    });
+        return {
+          variantId: snap.variantId as string,
+          sku: snap.sku,
+          styleName: snap.styleName,
+          size: snap.size,
+          color: snap.color,
+          brandName: snap.brandName,
+          categoryName: snap.categoryName,
+          priceCentavos: snap.priceCentavos,
+          currentStock: snap.totalStock,
+          totalSold: snap.totalQtySold,
+          ads: Math.round(ads),
+          dsi: Math.round(dsi),
+          mi: Math.round(mi * 100) / 100,
+          classification,
+          subClassification,
+        };
+      });
 
-    // Wave 4: brands
-    const uniqueBrandIds = [...new Set(
-      Array.from(categoryMap.values()).map((c) => c.brandId)
-    )];
-    const brandDocs = await Promise.all(
-      uniqueBrandIds.map((id) => ctx.db.get(id))
-    );
-    const brandNameMap = new Map<string, string>();
-    uniqueBrandIds.forEach((id, i) => {
-      const doc = brandDocs[i];
-      if (doc) brandNameMap.set(id as string, doc.name);
-    });
-
-    // Assemble enriched items
-    const items = entries.map((entry) => {
-      const variant = variantMap.get(entry.variantId);
-      const style = variant ? styleMap.get(variant.styleId as string) : null;
-      const category = style ? categoryMap.get(style.categoryId as string) : null;
-      const brandName = category ? brandNameMap.get(category.brandId as string) ?? "Unknown" : "Unknown";
-
-      return {
-        variantId: entry.variantId,
-        sku: variant?.sku ?? "—",
-        styleName: style?.name ?? "Unknown",
-        size: variant?.size ?? "—",
-        color: variant?.color ?? "—",
-        brandName,
-        categoryName: category?.name ?? "Unknown",
-        priceCentavos: variant?.priceCentavos ?? 0,
-        currentStock: entry.currentStock,
-        totalSold: entry.totalSold,
-        ads: entry.ads,
-        dsi: entry.dsi,
-        mi: entry.mi,
-        classification: entry.classification,
-        subClassification: entry.subClassification,
-      };
-    });
-
-    // Sort: dead → slow → normal → fast, then MI descending within same class
+    // Sort: dead → slow → normal → fast, then MI descending
     items.sort((a, b) => {
       const classDiff = CLASS_PRIORITY[a.classification] - CLASS_PRIORITY[b.classification];
       if (classDiff !== 0) return classDiff;
       return b.mi - a.mi;
     });
+
+    // Calculate period days from args
+    const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
+    const startYear = parseInt(args.dateStart.slice(0, 4));
+    const startMonth = parseInt(args.dateStart.slice(4, 6)) - 1;
+    const startDay = parseInt(args.dateStart.slice(6, 8));
+    const endYear = parseInt(args.dateEnd.slice(0, 4));
+    const endMonth = parseInt(args.dateEnd.slice(4, 6)) - 1;
+    const endDay = parseInt(args.dateEnd.slice(6, 8));
+    const startMs = Date.UTC(startYear, startMonth, startDay) - PHT_OFFSET_MS;
+    const endMs = Date.UTC(endYear, endMonth, endDay) - PHT_OFFSET_MS + 86_400_000 - 1;
+    const periodDays = Math.max(1, Math.round((endMs - startMs + 1) / 86_400_000));
 
     return {
       items,
@@ -328,61 +148,72 @@ export const getMoversOverview = query({
   handler: async (ctx, args) => {
     await requireRole(ctx, HQ_ROLES);
 
-    const { entries } = await aggregateMovers(ctx, args);
+    const todayDate = getPHTDate(0);
+    const snapshots = await getAllVariantSnapshots(ctx, todayDate);
 
     let fastMovers = 0;
     let normal = 0;
     let slowMovers = 0;
     let deadStock = 0;
 
-    // Collect fast-restock items for urgent callout
-    const fastRestockEntries: typeof entries = [];
+    const fastRestockEntries: Array<{
+      sku: string;
+      styleName: string;
+      size: string;
+      color: string;
+      dsi: number;
+      mi: number;
+    }> = [];
 
-    for (const entry of entries) {
-      switch (entry.classification) {
+    for (const snap of snapshots) {
+      if (snap.totalQtySold === 0 && snap.totalStock === 0) continue;
+
+      const hasSales = snap.totalQtySold > 0;
+      const dsi = snap.daysOfSupply;
+      const mi = snap.movementIndex;
+
+      const dsiBucket: DsiBucket = !hasSales || snap.totalStock <= 0
+        ? "low"
+        : dsi >= 999 ? "high" : classifyDsi(dsi);
+
+      const { classification, subClassification } = classifyByMI(mi, hasSales, dsiBucket);
+
+      switch (classification) {
         case "fast":
           fastMovers++;
-          if (entry.subClassification === "fast-restock") {
-            fastRestockEntries.push(entry);
+          if (subClassification === "fast-restock") {
+            fastRestockEntries.push({
+              sku: snap.sku,
+              styleName: snap.styleName,
+              size: snap.size,
+              color: snap.color,
+              dsi: Math.round(dsi),
+              mi,
+            });
           }
           break;
-        case "normal":
-          normal++;
-          break;
-        case "slow":
-          slowMovers++;
-          break;
-        case "dead":
-          deadStock++;
-          break;
+        case "normal": normal++; break;
+        case "slow": slowMovers++; break;
+        case "dead": deadStock++; break;
       }
     }
 
-    // Enrich only top 3 fast-restock items (minimal enrichment)
-    const top3 = fastRestockEntries
-      .sort((a, b) => b.mi - a.mi)
-      .slice(0, 3);
-
-    const urgentRestock = await Promise.all(
-      top3.map(async (entry) => {
-        const variant = await ctx.db.get(entry.variantId as Id<"variants">);
-        const style = variant ? await ctx.db.get(variant.styleId) : null;
-        return {
-          sku: variant?.sku ?? "—",
-          styleName: style?.name ?? "Unknown",
-          size: variant?.size ?? "—",
-          color: variant?.color ?? "—",
-          dsi: entry.dsi,
-        };
-      })
-    );
+    // Top 3 urgent restocks
+    fastRestockEntries.sort((a, b) => b.mi - a.mi);
+    const urgentRestock = fastRestockEntries.slice(0, 3).map((e) => ({
+      sku: e.sku,
+      styleName: e.styleName,
+      size: e.size,
+      color: e.color,
+      dsi: e.dsi,
+    }));
 
     return {
       fastMovers,
       normal,
       slowMovers,
       deadStock,
-      totalVariants: entries.length,
+      totalVariants: fastMovers + normal + slowMovers + deadStock,
       urgentRestock,
     };
   },
