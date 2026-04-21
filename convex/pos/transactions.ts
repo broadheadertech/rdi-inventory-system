@@ -218,9 +218,10 @@ export const createTransaction = mutation({
         const style = await ctx.db.get(variant.styleId);
         if (!style) continue;
 
-        const categoryId = String(style.categoryId);
-        let brandId2 = categoryBrandCache.get(categoryId);
-        if (!brandId2) {
+        const categoryId = String(style.categoryId ?? "");
+        // Resolve brandId: new path (style.brandId) or legacy (category.brandId)
+        let brandId2 = style.brandId ? String(style.brandId) : categoryBrandCache.get(categoryId);
+        if (!brandId2 && style.categoryId) {
           const cat = await ctx.db.get(style.categoryId);
           brandId2 = cat ? String(cat.brandId) : "";
           categoryBrandCache.set(categoryId, brandId2);
@@ -243,7 +244,7 @@ export const createTransaction = mutation({
 
         enrichedItems.push({
           variantId: String(vi.variantId),
-          brandId: brandId2,
+          brandId: brandId2 ?? "",
           categoryId,
           styleId: String(variant.styleId),
           gender: variant.gender ?? "",

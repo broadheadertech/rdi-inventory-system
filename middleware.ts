@@ -17,6 +17,7 @@ const PUBLIC_PREFIXES = [
   "/checkout",
   "/wishlist",
   "/account",
+  "/bootstrap",
 ];
 
 const ROLE_ROUTE_ACCESS: Record<string, readonly string[]> = {

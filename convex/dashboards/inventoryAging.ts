@@ -149,15 +149,15 @@ export const getAgingReport = query({
     const styleDocs = await Promise.all(
       uniqueStyleIds.map((id) => ctx.db.get(id))
     );
-    const styleMap = new Map<string, { name: string; categoryId: Id<"categories"> }>();
+    const styleMap = new Map<string, { name: string; categoryId: Id<"categories"> | undefined; brandId: Id<"brands"> | undefined }>();
     uniqueStyleIds.forEach((id, i) => {
       const doc = styleDocs[i];
-      if (doc) styleMap.set(id as string, { name: doc.name, categoryId: doc.categoryId });
+      if (doc) styleMap.set(id as string, { name: doc.name, categoryId: doc.categoryId, brandId: doc.brandId });
     });
 
     // Wave 3: categories
     const uniqueCategoryIds = [...new Set(
-      Array.from(styleMap.values()).map((s) => s.categoryId)
+      Array.from(styleMap.values()).map((s) => s.categoryId).filter((id): id is Id<"categories"> => id !== undefined)
     )];
     const categoryDocs = await Promise.all(
       uniqueCategoryIds.map((id) => ctx.db.get(id))
@@ -169,9 +169,10 @@ export const getAgingReport = query({
     });
 
     // Wave 4: brands
-    const uniqueBrandIds = [...new Set(
-      Array.from(categoryMap.values()).map((c) => c.brandId)
-    )];
+    const uniqueBrandIds = [...new Set([
+      ...Array.from(categoryMap.values()).map((c) => c.brandId),
+      ...Array.from(styleMap.values()).map((s) => s.brandId).filter(Boolean) as Id<"brands">[],
+    ])];
     const brandDocs = await Promise.all(
       uniqueBrandIds.map((id) => ctx.db.get(id))
     );
@@ -185,8 +186,10 @@ export const getAgingReport = query({
     const items = entries.map((entry) => {
       const variant = variantMap.get(entry.variantId);
       const style = variant ? styleMap.get(variant.styleId as string) : null;
-      const category = style ? categoryMap.get(style.categoryId as string) : null;
-      const brandName = category ? brandNameMap.get(category.brandId as string) ?? "Unknown" : "Unknown";
+      const category = style && style.categoryId ? categoryMap.get(style.categoryId as string) : null;
+      const brandName = style?.brandId
+        ? brandNameMap.get(style.brandId as string) ?? "Unknown"
+        : category ? brandNameMap.get(category.brandId as string) ?? "Unknown" : "Unknown";
 
       const weightedAvgAge = entry.totalQty > 0
         ? Math.round(entry.weightedAgeDaysSum / entry.totalQty)
@@ -298,14 +301,14 @@ export const getBranchAgingReport = query({
     const styleDocs = await Promise.all(
       uniqueStyleIds.map((id) => ctx.db.get(id))
     );
-    const styleMap = new Map<string, { name: string; categoryId: Id<"categories"> }>();
+    const styleMap = new Map<string, { name: string; categoryId: Id<"categories"> | undefined; brandId: Id<"brands"> | undefined }>();
     uniqueStyleIds.forEach((id, i) => {
       const doc = styleDocs[i];
-      if (doc) styleMap.set(id as string, { name: doc.name, categoryId: doc.categoryId });
+      if (doc) styleMap.set(id as string, { name: doc.name, categoryId: doc.categoryId, brandId: doc.brandId });
     });
 
     const uniqueCategoryIds = [...new Set(
-      Array.from(styleMap.values()).map((s) => s.categoryId)
+      Array.from(styleMap.values()).map((s) => s.categoryId).filter((id): id is Id<"categories"> => id !== undefined)
     )];
     const categoryDocs = await Promise.all(
       uniqueCategoryIds.map((id) => ctx.db.get(id))
@@ -316,9 +319,10 @@ export const getBranchAgingReport = query({
       if (doc) categoryMap.set(id as string, { name: doc.name, brandId: doc.brandId });
     });
 
-    const uniqueBrandIds = [...new Set(
-      Array.from(categoryMap.values()).map((c) => c.brandId)
-    )];
+    const uniqueBrandIds = [...new Set([
+      ...Array.from(categoryMap.values()).map((c) => c.brandId),
+      ...Array.from(styleMap.values()).map((s) => s.brandId).filter(Boolean) as Id<"brands">[],
+    ])];
     const brandDocs = await Promise.all(
       uniqueBrandIds.map((id) => ctx.db.get(id))
     );
@@ -331,8 +335,10 @@ export const getBranchAgingReport = query({
     const items = entries.map((entry) => {
       const variant = variantMap.get(entry.variantId);
       const style = variant ? styleMap.get(variant.styleId as string) : null;
-      const category = style ? categoryMap.get(style.categoryId as string) : null;
-      const brandName = category ? brandNameMap.get(category.brandId as string) ?? "Unknown" : "Unknown";
+      const category = style && style.categoryId ? categoryMap.get(style.categoryId as string) : null;
+      const brandName = style?.brandId
+        ? brandNameMap.get(style.brandId as string) ?? "Unknown"
+        : category ? brandNameMap.get(category.brandId as string) ?? "Unknown" : "Unknown";
 
       const weightedAvgAge = entry.totalQty > 0
         ? Math.round(entry.weightedAgeDaysSum / entry.totalQty)

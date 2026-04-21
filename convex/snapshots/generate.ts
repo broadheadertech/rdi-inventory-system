@@ -42,7 +42,7 @@ export const _getActiveBranchIds = internalQuery({
     const branches = await ctx.db.query("branches").collect();
     return branches
       .filter((b) => b.isActive)
-      .map((b) => ({ _id: b._id, name: b.name, type: b.type }));
+      .map((b) => ({ _id: b._id, name: b.name, channel: b.channel }));
   },
 });
 
@@ -270,17 +270,19 @@ export const _generateVariantChunk = internalMutation({
       }
       if (!style) continue;
 
-      let category = categoryCache.get(style.categoryId as string);
-      if (category === undefined) {
+      let category = style.categoryId ? categoryCache.get(style.categoryId as string) : undefined;
+      if (category === undefined && style.categoryId) {
         category = await ctx.db.get(style.categoryId);
         categoryCache.set(style.categoryId as string, category);
       }
-      if (!category) continue;
+      if (!category && !style.brandId) continue;
 
-      let brand = brandCache.get(category.brandId as string);
+      const resolvedBrandId = (style.brandId ?? category?.brandId) as Id<"brands"> | undefined;
+      if (!resolvedBrandId) continue;
+      let brand = brandCache.get(resolvedBrandId as string);
       if (brand === undefined) {
-        brand = await ctx.db.get(category.brandId);
-        brandCache.set(category.brandId as string, brand);
+        brand = await ctx.db.get(resolvedBrandId);
+        brandCache.set(resolvedBrandId as string, brand);
       }
       if (!brand) continue;
 
@@ -374,8 +376,8 @@ export const _generateVariantChunk = internalMutation({
         sku: variant.sku,
         styleName: style.name,
         styleId: style._id,
-        categoryId: category._id,
-        categoryName: category.name,
+        categoryId: category?._id as any,
+        categoryName: category?.name ?? "",
         brandId: brand._id,
         brandName: brand.name,
         size: variant.size,

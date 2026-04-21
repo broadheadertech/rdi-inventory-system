@@ -16,8 +16,10 @@ export const getUpcomingDrops = query({
 
     const results = [];
     for (const style of upcoming) {
-      const category = await ctx.db.get(style.categoryId);
-      const brand = category ? await ctx.db.get(category.brandId) : null;
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+      const brand = style.brandId
+        ? await ctx.db.get(style.brandId)
+        : category ? await ctx.db.get(category.brandId) : null;
 
       const exclusiveBranchNames: string[] = [];
       if (style.exclusiveBranchIds) {
@@ -50,8 +52,10 @@ export const listExclusiveDrops = query({
 
     const results = [];
     for (const style of exclusiveStyles) {
-      const category = await ctx.db.get(style.categoryId);
-      const brand = category ? await ctx.db.get(category.brandId) : null;
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+      const brand = style.brandId
+        ? await ctx.db.get(style.brandId)
+        : category ? await ctx.db.get(category.brandId) : null;
 
       // Resolve exclusive branch names
       const branchNames: string[] = [];
@@ -111,8 +115,10 @@ export const searchStyles = query({
 
     const results = [];
     for (const style of matches) {
-      const category = await ctx.db.get(style.categoryId);
-      const brand = category ? await ctx.db.get(category.brandId) : null;
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+      const brand = style.brandId
+        ? await ctx.db.get(style.brandId)
+        : category ? await ctx.db.get(category.brandId) : null;
       results.push({
         _id: style._id,
         name: style.name,

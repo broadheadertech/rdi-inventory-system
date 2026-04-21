@@ -30,8 +30,10 @@ export const getMyWishlist = query({
         const style = await ctx.db.get(variant.styleId);
         if (!style || !style.isActive) return null;
 
-        const category = await ctx.db.get(style.categoryId);
-        const brand = category ? await ctx.db.get(category.brandId) : null;
+        const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+        const brand = style.brandId
+          ? await ctx.db.get(style.brandId)
+          : category ? await ctx.db.get(category.brandId) : null;
 
         // Get primary image
         const images = await ctx.db
@@ -51,7 +53,7 @@ export const getMyWishlist = query({
           .collect();
         const allBranches = await ctx.db.query("branches").collect();
         const warehouseIds = new Set(
-          allBranches.filter((b) => b.type === "warehouse").map((b) => String(b._id))
+          allBranches.filter((b) => b.channel === "warehouse").map((b) => String(b._id))
         );
         const totalStock = inventory
           .filter((inv) => !warehouseIds.has(String(inv.branchId)))
@@ -231,8 +233,10 @@ export const getSharedWishlist = query({
         const style = await ctx.db.get(variant.styleId);
         if (!style || !style.isActive) return null;
 
-        const category = await ctx.db.get(style.categoryId);
-        const brand = category ? await ctx.db.get(category.brandId) : null;
+        const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+        const brand = style.brandId
+          ? await ctx.db.get(style.brandId)
+          : category ? await ctx.db.get(category.brandId) : null;
 
         // Get primary image
         const images = await ctx.db

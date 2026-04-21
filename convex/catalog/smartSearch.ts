@@ -48,10 +48,10 @@ export const searchProducts = query({
     const styleResults: SearchResult[] = await Promise.all(
       matchingStyles.map(async (style) => {
         // Resolve brand name: style → category → brand
-        const category = catMap.get(String(style.categoryId));
-        const brand = category
-          ? brandMap.get(String(category.brandId))
-          : null;
+        const category = style.categoryId ? catMap.get(String(style.categoryId)) : null;
+        const brand = style.brandId
+          ? brandMap.get(String(style.brandId))
+          : category ? brandMap.get(String(category.brandId)) : null;
 
         // Get primary product image
         const images = await ctx.db

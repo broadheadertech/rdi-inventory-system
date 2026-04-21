@@ -50,11 +50,12 @@ export const getBranchStock = query({
         if (!style || !style.isActive) return null;
 
         // Load category (has brandId); skip if missing or inactive
-        const category = await ctx.db.get(style.categoryId);
-        if (!category || !category.isActive) return null;
+        const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+        if ((!category || !category.isActive) && !style.brandId) return null;
 
         // M1: Apply brandId filter BEFORE loading brand — avoids wasted db read on filtered-out items
-        if (args.brandId && category.brandId !== args.brandId) return null;
+        const resolvedBrandId = style.brandId ?? category?.brandId;
+        if (args.brandId && resolvedBrandId !== args.brandId) return null;
 
         // Apply categoryId filter if provided
         if (args.categoryId && style.categoryId !== args.categoryId) return null;
@@ -68,17 +69,17 @@ export const getBranchStock = query({
         }
 
         // Load brand only for items that pass all filters
-        const brand = await ctx.db.get(category.brandId);
+        const brand = resolvedBrandId ? await ctx.db.get(resolvedBrandId) : null;
 
         return {
           inventoryId: inv._id,
           variantId: variant._id,
           styleId: style._id,
           styleName: style.name,
-          brandId: category.brandId,
+          brandId: resolvedBrandId,
           brandName: brand?.name ?? "Unknown",
           categoryId: style.categoryId,
-          categoryName: category.name,
+          categoryName: category?.name ?? "",
           size: variant.size,
           color: variant.color,
           gender: variant.gender ?? null,
@@ -213,8 +214,8 @@ export const getAllInventory = query({
         const style = await ctx.db.get(variant.styleId);
         if (!style || !style.isActive) return null;
 
-        const category = await ctx.db.get(style.categoryId);
-        if (!category || !category.isActive) return null;
+        const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+        if ((!category || !category.isActive) && !style.brandId) return null;
 
         if (args.searchText) {
           const needle = args.searchText.slice(0, 200).toLowerCase();
@@ -223,7 +224,9 @@ export const getAllInventory = query({
           if (!matchesName && !matchesSku) return null;
         }
 
-        const brand = await ctx.db.get(category.brandId);
+        const brand = style.brandId
+          ? await ctx.db.get(style.brandId)
+          : category ? await ctx.db.get(category.brandId) : null;
         const branch = await ctx.db.get(inv.branchId);
 
         return {
@@ -234,7 +237,7 @@ export const getAllInventory = query({
           styleId: style._id,
           styleName: style.name,
           brandName: brand?.name ?? "Unknown",
-          categoryName: category.name,
+          categoryName: category?.name ?? "",
           size: variant.size,
           color: variant.color,
           sku: variant.sku,

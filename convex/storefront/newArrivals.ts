@@ -33,7 +33,7 @@ export const getNewArrivals = query({
         (s) =>
           s.isActive &&
           s.createdAt >= thirtyDaysAgo &&
-          activeCategoryIds.has(String(s.categoryId))
+          s.categoryId !== undefined && activeCategoryIds.has(String(s.categoryId))
       )
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, 24);
@@ -56,17 +56,17 @@ export const getNewArrivals = query({
     const allBranches = await ctx.db.query("branches").collect();
     const warehouseIds = new Set(
       allBranches
-        .filter((b) => b.type === "warehouse")
+        .filter((b) => b.channel === "warehouse")
         .map((b) => b._id as string)
     );
 
     // ── Enrich each style ──
     return Promise.all(
       newStyles.map(async (style) => {
-        const category = categoryMap.get(String(style.categoryId));
-        const brand = category
-          ? brandMap.get(String(category.brandId))
-          : null;
+        const category = style.categoryId ? categoryMap.get(String(style.categoryId)) : null;
+        const brand = style.brandId
+          ? brandMap.get(String(style.brandId))
+          : category ? brandMap.get(String(category.brandId)) : null;
 
         // Primary image
         const images = await ctx.db

@@ -1,5 +1,5 @@
 import { v, ConvexError } from "convex/values";
-import { query, mutation } from "../_generated/server";
+import { query, mutation, internalMutation } from "../_generated/server";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 
@@ -120,6 +120,31 @@ export const updateColor = mutation({
       before,
       after,
     });
+  },
+});
+
+export const _seedColors = internalMutation({
+  args: {
+    items: v.array(v.object({ name: v.string(), hexCode: v.optional(v.string()) })),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.query("colors").collect();
+    const existingNames = new Set(existing.map((c) => c.name.toUpperCase()));
+    let created = 0;
+    for (const item of args.items) {
+      const upper = item.name.toUpperCase();
+      if (existingNames.has(upper)) continue;
+      await ctx.db.insert("colors", {
+        name: upper,
+        hexCode: item.hexCode,
+        isActive: true,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      });
+      existingNames.add(upper);
+      created++;
+    }
+    return { created, skipped: args.items.length - created };
   },
 });
 

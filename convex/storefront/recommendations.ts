@@ -41,10 +41,11 @@ export const getCompleteTheLook = query({
     if (!style || !style.isActive) return [];
 
     // 2. Resolve category → brand
-    const category = await ctx.db.get(style.categoryId);
-    if (!category || !category.isActive) return [];
+    const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+    if (!category?.isActive && !style.brandId) return [];
 
-    const brand = await ctx.db.get(category.brandId);
+    const brandId = style.brandId ?? category?.brandId;
+    const brand = brandId ? await ctx.db.get(brandId) : null;
     if (!brand || !brand.isActive) return [];
 
     // 3. Find all active categories for this brand (excluding the current one)
@@ -54,13 +55,13 @@ export const getCompleteTheLook = query({
       .collect();
 
     const otherCategories = brandCategories.filter(
-      (c) => c.isActive && String(c._id) !== String(category._id)
+      (c) => c.isActive && (!category || String(c._id) !== String(category._id))
     );
 
     if (otherCategories.length === 0) return [];
 
     // 4. Determine complementary keywords and prioritise matching categories
-    const keywords = getComplementaryKeywords(category.name);
+    const keywords = getComplementaryKeywords(category?.name ?? "");
 
     // Split into "smart" matches and "generic" fallback
     const smartCategories = keywords.length > 0
@@ -224,7 +225,7 @@ export const getFrequentlyBoughtTogether = query({
         const s = await ctx.db.get(sid);
         if (!s || !s.isActive) return null;
 
-        const cat = await ctx.db.get(s.categoryId);
+        const cat = s.categoryId ? await ctx.db.get(s.categoryId) : null;
         const brand = cat ? await ctx.db.get(cat.brandId) : null;
 
         // Primary image

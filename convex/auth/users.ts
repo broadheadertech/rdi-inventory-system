@@ -447,3 +447,113 @@ export const assignBranch = action({
     }
   },
 });
+
+// ─── Sync All Clerk Users ──────────────────────────────────────────────────
+
+const VALID_ROLES = new Set([
+  "admin", "manager", "cashier", "warehouseStaff",
+  "hqStaff", "viewer", "driver", "supplier",
+]);
+
+// Internal query to check if users table is empty (for bootstrap)
+export const countUsers = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const users = await ctx.db.query("users").collect();
+    return users.length;
+  },
+});
+
+export const syncClerkUsers = action({
+  args: {},
+  handler: async (ctx) => {
+    // Allow unauthenticated access ONLY when there are zero users (bootstrap mode)
+    const userCount = await ctx.runQuery(internal.auth.users.countUsers);
+    const isBootstrap = userCount === 0;
+
+    if (!isBootstrap) {
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) throw new ConvexError({ code: "UNAUTHORIZED", message: "Not authenticated" });
+
+      const caller = await ctx.runQuery(internal.auth.users.getByClerkId, {
+        clerkId: identity.subject,
+      });
+      if (!caller || caller.role !== "admin") {
+        throw new ConvexError({ code: "FORBIDDEN", message: "Admin access required" });
+      }
+    }
+
+    const clerkSecret = process.env.CLERK_SECRET_KEY;
+    if (!clerkSecret) throw new ConvexError({ code: "CONFIG_ERROR", message: "CLERK_SECRET_KEY not set" });
+
+    let synced = 0;
+    let skipped = 0;
+    let updated = 0;
+    let offset = 0;
+    const limit = 100;
+
+    // Paginate through all Clerk users
+    while (true) {
+      const res = await fetch(
+        `https://api.clerk.com/v1/users?limit=${limit}&offset=${offset}&order_by=-created_at`,
+        { headers: { Authorization: `Bearer ${clerkSecret}` } }
+      );
+      if (!res.ok) {
+        throw new ConvexError({ code: "CLERK_API_ERROR", message: `Clerk API error: ${res.status}` });
+      }
+
+      const users = await res.json();
+      if (!Array.isArray(users) || users.length === 0) break;
+
+      for (const clerkUser of users) {
+        const clerkId = clerkUser.id;
+        const email =
+          clerkUser.email_addresses?.find(
+            (e: any) => e.id === clerkUser.primary_email_address_id
+          )?.email_address ?? clerkUser.email_addresses?.[0]?.email_address ?? "";
+        const name = [clerkUser.first_name, clerkUser.last_name]
+          .filter(Boolean)
+          .join(" ") || email;
+        const metaRole = clerkUser.public_metadata?.role;
+        const role = (typeof metaRole === "string" && VALID_ROLES.has(metaRole))
+          ? metaRole
+          : "viewer";
+
+        // Check if already exists
+        const existing = await ctx.runQuery(internal.auth.users.getByClerkId, { clerkId });
+
+        if (existing) {
+          // Update if name or email changed
+          if (existing.email !== email || existing.name !== name) {
+            await ctx.runMutation(internal.auth.users.updateFromWebhook, {
+              id: existing._id,
+              email,
+              name,
+              role: role as any,
+              updatedAt: Date.now(),
+            });
+            updated++;
+          } else {
+            skipped++;
+          }
+        } else {
+          await ctx.runMutation(internal.auth.users.createFromWebhook, {
+            clerkId,
+            email,
+            name,
+            role: role as any,
+            isActive: true,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          });
+          synced++;
+        }
+      }
+
+      if (users.length < limit) break;
+      offset += limit;
+    }
+
+    return { synced, updated, skipped, total: synced + updated + skipped };
+  },
+});

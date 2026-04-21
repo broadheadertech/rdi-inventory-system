@@ -30,7 +30,17 @@ export default defineSchema({
     name: v.string(),
     address: v.string(),
     isActive: v.boolean(),
-    type: v.optional(v.union(v.literal("retail"), v.literal("warehouse"))),
+    channel: v.optional(
+      v.union(
+        v.literal("inline"),
+        v.literal("online"),
+        v.literal("outlet"),
+        v.literal("popup"),
+        v.literal("dtc"),
+        v.literal("warehouse"),
+        v.literal("outright")
+      )
+    ),
     classification: v.optional(
       v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
     ),
@@ -54,15 +64,40 @@ export default defineSchema({
 
   brands: defineTable({
     name: v.string(),
+    code: v.optional(v.string()),
     logo: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
     bannerStorageId: v.optional(v.id("_storage")),
     tags: v.optional(v.array(v.string())),
+    parLevel: v.optional(v.number()), // SOH target; below = red, at/above = green on dashboard
     isActive: v.boolean(),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }),
+  }).index("by_code", ["code"]),
 
+  productCodes: defineTable({
+    type: v.union(
+      v.literal("department"),
+      v.literal("division"),
+      v.literal("category"),
+      v.literal("subCategory"),
+      v.literal("season"),
+      v.literal("year"),
+      v.literal("production"),
+      v.literal("outlier"),
+      v.literal("fit")
+    ),
+    description: v.string(),
+    code: v.optional(v.string()),
+    parentId: v.optional(v.id("productCodes")),
+    isActive: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_type", ["type"])
+    .index("by_type_code", ["type", "code"]),
+
+  // Legacy: kept for data migration reference — new styles use productCodes
   categories: defineTable({
     brandId: v.id("brands"),
     name: v.string(),
@@ -74,9 +109,28 @@ export default defineSchema({
   }).index("by_brand", ["brandId"]),
 
   styles: defineTable({
-    categoryId: v.id("categories"),
+    // Legacy: old styles reference categories table directly
+    categoryId: v.optional(v.id("categories")),
+    // New product code references
+    brandId: v.optional(v.id("brands")),
+    departmentId: v.optional(v.id("productCodes")),
+    divisionId: v.optional(v.id("productCodes")),
+    productCategoryId: v.optional(v.id("productCodes")),
+    subCategoryId: v.optional(v.id("productCodes")),
+    seasonId: v.optional(v.id("productCodes")),
+    yearId: v.optional(v.id("productCodes")),
+    productionId: v.optional(v.id("productCodes")),
+    outlierId: v.optional(v.id("productCodes")),
+    fitId: v.optional(v.id("productCodes")),
+    styleCode: v.optional(v.string()),
+    sequenceNumber: v.optional(v.number()),
     name: v.string(),
     description: v.optional(v.string()),
+    sku: v.optional(v.string()),
+    barcode: v.optional(v.string()),
+    color: v.optional(v.string()),
+    srp: v.optional(v.number()),
+    costPrice: v.optional(v.number()),
     basePriceCentavos: v.number(),
     isActive: v.boolean(),
     isExclusive: v.optional(v.boolean()),
@@ -84,7 +138,10 @@ export default defineSchema({
     dropDate: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }).index("by_category", ["categoryId"]),
+  })
+    .index("by_category", ["categoryId"])
+    .index("by_brand", ["brandId"])
+    .index("by_styleCode", ["styleCode"]),
 
   variants: defineTable({
     styleId: v.id("styles"),
@@ -105,6 +162,7 @@ export default defineSchema({
     ),
     priceCentavos: v.number(),
     costPriceCentavos: v.optional(v.number()),
+    colorCode: v.optional(v.string()), // Auto-assigned letter: A, B, C... per unique color within a style
     storageId: v.optional(v.id("_storage")),
     isActive: v.boolean(),
     createdAt: v.number(),

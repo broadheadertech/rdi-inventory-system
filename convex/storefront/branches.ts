@@ -9,7 +9,7 @@ export const getRetailBranches = query({
   handler: async (ctx) => {
     const all = await ctx.db.query("branches").collect();
     return all
-      .filter((b) => b.isActive && b.type !== "warehouse")
+      .filter((b) => b.isActive && b.channel !== "warehouse")
       .map((b) => ({
         _id: b._id,
         name: b.name,

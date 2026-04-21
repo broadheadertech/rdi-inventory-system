@@ -1011,7 +1011,7 @@ export default function PromotionsPage() {
                       <p className="text-xs text-muted-foreground">No styles</p>
                     ) : (
                       styles
-                        .filter((s) => form.rewardCategoryIds.length === 0 || form.rewardCategoryIds.includes(s.categoryId))
+                        .filter((s) => form.rewardCategoryIds.length === 0 || form.rewardCategoryIds.includes(s.categoryId!))
                         .map((style) => (
                           <label key={style._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
                             <input
@@ -1508,7 +1508,7 @@ export default function PromotionsPage() {
                         <p className="text-xs text-muted-foreground">No styles</p>
                       ) : (
                         styles
-                          .filter((s) => form.categoryIds.length === 0 || form.categoryIds.includes(s.categoryId))
+                          .filter((s) => form.categoryIds.length === 0 || form.categoryIds.includes(s.categoryId!))
                           .map((style) => (
                             <label key={style._id} className="flex items-center gap-2 text-sm cursor-pointer py-0.5">
                               <input

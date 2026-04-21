@@ -17,7 +17,7 @@ export const getFulfillmentOptions = query({
     for (const inv of inStockRecords) {
       const branch = await ctx.db.get(inv.branchId);
       if (!branch || !branch.isActive) continue;
-      if (branch.type === "warehouse") continue; // Skip warehouse branches
+      if (branch.channel === "warehouse") continue; // Skip warehouse branches
 
       options.push({
         type: "pickup" as const,

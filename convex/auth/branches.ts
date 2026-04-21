@@ -3,6 +3,18 @@ import { query, mutation } from "../_generated/server";
 import { requireRole, ADMIN_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 
+const channelValidator = v.optional(
+  v.union(
+    v.literal("inline"),
+    v.literal("online"),
+    v.literal("outlet"),
+    v.literal("popup"),
+    v.literal("dtc"),
+    v.literal("warehouse"),
+    v.literal("outright")
+  )
+);
+
 // ─── Queries ────────────────────────────────────────────────────────────────
 
 export const listBranches = query({
@@ -18,7 +30,7 @@ export const getWarehouseBranch = query({
   handler: async (ctx) => {
     await requireRole(ctx, ADMIN_ROLES);
     const all = await ctx.db.query("branches").collect();
-    return all.find((b) => b.type === "warehouse" && b.isActive) ?? null;
+    return all.find((b) => b.channel === "warehouse" && b.isActive) ?? null;
   },
 });
 
@@ -39,7 +51,7 @@ export const createBranch = mutation({
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
-    type: v.optional(v.union(v.literal("retail"), v.literal("warehouse"))),
+    channel: channelValidator,
     classification: v.optional(
       v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
     ),
@@ -59,7 +71,7 @@ export const createBranch = mutation({
     const user = await requireRole(ctx, ADMIN_ROLES);
     const branchId = await ctx.db.insert("branches", {
       ...args,
-      type: args.type ?? "retail",
+      channel: args.channel ?? "inline",
       isActive: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -77,6 +89,7 @@ export const createBranch = mutation({
         phone: args.phone,
         latitude: args.latitude,
         longitude: args.longitude,
+        channel: args.channel,
         classification: args.classification,
         configuration: args.configuration,
       },
@@ -94,7 +107,7 @@ export const updateBranch = mutation({
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
-    type: v.optional(v.union(v.literal("retail"), v.literal("warehouse"))),
+    channel: channelValidator,
     classification: v.optional(
       v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
     ),

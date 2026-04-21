@@ -255,7 +255,7 @@ export const getBranchContext = query({
     return {
       branchId: branchId as string,
       branchName: branch.name,
-      branchType: (branch.type ?? "retail") as "retail" | "warehouse",
+      branchType: branch.channel === "warehouse" ? "warehouse" : "retail",
     };
   },
 });

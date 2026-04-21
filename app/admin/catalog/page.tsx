@@ -47,6 +47,7 @@ import {
   Trash2,
   Loader2,
   X,
+  Settings,
 } from "lucide-react";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
@@ -82,7 +83,7 @@ export default function CatalogPage() {
 
   // Create dialog state
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [createForm, setCreateForm] = useState({ name: "", tags: [] as string[] });
+  const [createForm, setCreateForm] = useState({ name: "", code: "", tags: [] as string[] });
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
   const [createPendingFile, setCreatePendingFile] = useState<File | null>(null);
   const [createPreviewUrl, setCreatePreviewUrl] = useState<string | null>(null);
@@ -90,7 +91,12 @@ export default function CatalogPage() {
 
   // Edit dialog state
   const [editingBrand, setEditingBrand] = useState<BrandListItem | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", tags: [] as string[] });
+  const [editForm, setEditForm] = useState({
+    name: "",
+    code: "",
+    tags: [] as string[],
+    parLevel: "",
+  });
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
   const [isUploadingEditImage, setIsUploadingEditImage] = useState(false);
   const [isUploadingBanner, setIsUploadingBanner] = useState(false);
@@ -114,7 +120,7 @@ export default function CatalogPage() {
   // ─── Create dialog helpers ──────────────────────────────────────────────────
 
   const resetCreateForm = () => {
-    setCreateForm({ name: "", tags: [] });
+    setCreateForm({ name: "", code: "", tags: [] });
     setCreateErrors({});
     setCreatePendingFile(null);
     if (createPreviewUrl) URL.revokeObjectURL(createPreviewUrl);
@@ -151,6 +157,7 @@ export default function CatalogPage() {
     try {
       const brandId = await createBrand({
         name: createForm.name.trim(),
+        code: createForm.code.trim() || undefined,
         tags: createForm.tags.length > 0 ? createForm.tags : undefined,
       });
 
@@ -180,7 +187,12 @@ export default function CatalogPage() {
 
   const openEditDialog = (brand: BrandListItem) => {
     setEditingBrand(brand);
-    setEditForm({ name: brand.name, tags: brand.tags ?? [] });
+    setEditForm({
+      name: brand.name,
+      code: (brand as any).code ?? "",
+      tags: brand.tags ?? [],
+      parLevel: (brand as any).parLevel != null ? String((brand as any).parLevel) : "",
+    });
     setEditErrors({});
   };
 
@@ -196,10 +208,15 @@ export default function CatalogPage() {
 
     setIsSubmitting(true);
     try {
+      const parLevelNum = editForm.parLevel.trim() === ""
+        ? 0
+        : Math.max(0, Math.floor(Number(editForm.parLevel)));
       await updateBrand({
         brandId: editingBrand._id,
         name: editForm.name.trim(),
+        code: editForm.code.trim() || undefined,
         tags: editForm.tags,
+        parLevel: parLevelNum,
       });
       toast.success("Brand updated successfully");
       setEditingBrand(null);
@@ -346,6 +363,12 @@ export default function CatalogPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link href="/admin/settings/product-codes">
+            <Button variant="outline">
+              <Settings className="mr-2 h-4 w-4" />
+              Product Codes
+            </Button>
+          </Link>
           <Link href="/admin/catalog/import">
             <Button variant="outline">
               <Upload className="mr-2 h-4 w-4" />
@@ -388,6 +411,7 @@ export default function CatalogPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Brand</TableHead>
+              <TableHead>Code</TableHead>
               <TableHead>Image</TableHead>
               <TableHead>Tags</TableHead>
               <TableHead>Status</TableHead>
@@ -415,6 +439,13 @@ export default function CatalogPage() {
                       {brand.name}
                       <ChevronRight className="h-3 w-3 text-muted-foreground" />
                     </Link>
+                  </TableCell>
+                  <TableCell>
+                    {(brand as any).code ? (
+                      <span className="font-mono font-semibold text-sm">{(brand as any).code}</span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">-</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     {brand.imageUrl ? (
@@ -483,7 +514,7 @@ export default function CatalogPage() {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={5}
+                  colSpan={6}
                   className="text-center text-muted-foreground py-8"
                 >
                   {searchQuery || statusFilter !== "all"
@@ -544,6 +575,19 @@ export default function CatalogPage() {
               {createErrors.name && (
                 <p className="text-sm text-destructive">{createErrors.name}</p>
               )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="create-code">Brand Code</Label>
+              <Input
+                id="create-code"
+                placeholder="e.g. NK, AD"
+                value={createForm.code}
+                onChange={(e) => setCreateForm((f) => ({ ...f, code: e.target.value }))}
+                className="uppercase w-32"
+              />
+              <p className="text-xs text-muted-foreground">
+                Short code used in auto-generated style codes
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Brand Image</Label>
@@ -691,6 +735,35 @@ export default function CatalogPage() {
               {editErrors.name && (
                 <p className="text-sm text-destructive">{editErrors.name}</p>
               )}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-code">Brand Code</Label>
+              <Input
+                id="edit-code"
+                placeholder="e.g. NK, AD"
+                value={editForm.code}
+                onChange={(e) => setEditForm((f) => ({ ...f, code: e.target.value }))}
+                className="uppercase w-32"
+              />
+              <p className="text-xs text-muted-foreground">
+                Short code used in auto-generated style codes
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-par-level">PAR Level (pcs)</Label>
+              <Input
+                id="edit-par-level"
+                type="number"
+                min={0}
+                step={1}
+                placeholder="0"
+                value={editForm.parLevel}
+                onChange={(e) => setEditForm((f) => ({ ...f, parLevel: e.target.value }))}
+                className="w-32"
+              />
+              <p className="text-xs text-muted-foreground">
+                Target stock-on-hand. Dashboard shows SOH in green at/above PAR, red below.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Brand Image</Label>

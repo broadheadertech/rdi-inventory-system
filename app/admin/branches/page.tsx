@@ -72,6 +72,37 @@ const CLASSIFICATION_COLORS: Record<string, string> = {
   outlet: "bg-amber-100 text-amber-800",
 };
 
+const CHANNEL_OPTIONS = [
+  { value: "none", label: "No Channel" },
+  { value: "inline", label: "Inline" },
+  { value: "online", label: "Online" },
+  { value: "outlet", label: "Outlet" },
+  { value: "popup", label: "Popup" },
+  { value: "dtc", label: "Direct To Consumer (DTC)" },
+  { value: "warehouse", label: "Warehouse" },
+  { value: "outright", label: "Outright" },
+] as const;
+
+const CHANNEL_LABELS: Record<string, string> = {
+  inline: "Inline",
+  online: "Online",
+  outlet: "Outlet",
+  popup: "Popup",
+  dtc: "DTC",
+  warehouse: "Warehouse",
+  outright: "Outright",
+};
+
+const CHANNEL_COLORS: Record<string, string> = {
+  inline: "bg-cyan-100 text-cyan-800",
+  online: "bg-indigo-100 text-indigo-800",
+  outlet: "bg-amber-100 text-amber-800",
+  popup: "bg-pink-100 text-pink-800",
+  dtc: "bg-teal-100 text-teal-800",
+  warehouse: "bg-slate-100 text-slate-800",
+  outright: "bg-orange-100 text-orange-800",
+};
+
 export default function BranchesPage() {
   const branches = useQuery(api.auth.branches.listBranches);
   const createBranch = useMutation(api.auth.branches.createBranch);
@@ -89,8 +120,8 @@ export default function BranchesPage() {
     name: "",
     address: "",
     phone: "",
-    type: "retail" as "retail" | "warehouse",
     classification: "none",
+    channel: "none",
     latitude: "",
     longitude: "",
     timezone: "none",
@@ -105,8 +136,8 @@ export default function BranchesPage() {
     name: "",
     address: "",
     phone: "",
-    type: "retail" as "retail" | "warehouse",
     classification: "none",
+    channel: "none",
     latitude: "",
     longitude: "",
     timezone: "none",
@@ -131,7 +162,7 @@ export default function BranchesPage() {
   const pagination = usePagination(filteredBranches);
 
   const resetCreateForm = () => {
-    setCreateForm({ name: "", address: "", phone: "", type: "retail", classification: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
+    setCreateForm({ name: "", address: "", phone: "", classification: "none", channel: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
     setCreateErrors({});
   };
 
@@ -171,9 +202,11 @@ export default function BranchesPage() {
       await createBranch({
         name: createForm.name.trim(),
         address: createForm.address.trim(),
-        type: createForm.type,
         classification: createForm.classification !== "none"
           ? (createForm.classification as "premium" | "aclass" | "bnc" | "outlet")
+          : undefined,
+        channel: createForm.channel !== "none"
+          ? (createForm.channel as "inline" | "online" | "outlet" | "popup" | "dtc" | "warehouse" | "outright")
           : undefined,
         phone: createForm.phone.trim() ? createForm.phone.trim() : undefined,
         latitude: createForm.latitude ? parseFloat(createForm.latitude) : undefined,
@@ -196,8 +229,8 @@ export default function BranchesPage() {
       name: branch.name,
       address: branch.address,
       phone: branch.phone ?? "",
-      type: branch.type ?? "retail",
       classification: branch.classification ?? "none",
+      channel: (branch as any).channel ?? "none",
       latitude: branch.latitude?.toString() ?? "",
       longitude: branch.longitude?.toString() ?? "",
       timezone: branch.configuration?.timezone ?? "none",
@@ -244,9 +277,11 @@ export default function BranchesPage() {
         branchId: editingBranch._id,
         name: editForm.name.trim(),
         address: editForm.address.trim(),
-        type: editForm.type,
         classification: editForm.classification !== "none"
           ? (editForm.classification as "premium" | "aclass" | "bnc" | "outlet")
+          : undefined,
+        channel: editForm.channel !== "none"
+          ? (editForm.channel as "inline" | "online" | "outlet" | "popup" | "dtc" | "warehouse" | "outright")
           : undefined,
         phone: editForm.phone.trim(),
         latitude: editForm.latitude ? parseFloat(editForm.latitude) : undefined,
@@ -339,7 +374,7 @@ export default function BranchesPage() {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Type</TableHead>
+              <TableHead>Channel</TableHead>
               <TableHead>Class</TableHead>
               <TableHead>Address</TableHead>
               <TableHead>Phone</TableHead>
@@ -359,9 +394,13 @@ export default function BranchesPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={branch.type === "warehouse" ? "secondary" : "outline"}>
-                      {branch.type === "warehouse" ? "Warehouse" : "Retail"}
-                    </Badge>
+                    {(branch as any).channel ? (
+                      <Badge variant="secondary" className={CHANNEL_COLORS[(branch as any).channel] ?? ""}>
+                        {CHANNEL_LABELS[(branch as any).channel] ?? (branch as any).channel}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     {branch.classification ? (
@@ -500,43 +539,44 @@ export default function BranchesPage() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="create-type">Branch Type</Label>
+              <Label htmlFor="create-channel">Channel</Label>
               <Select
-                value={createForm.type}
-                onValueChange={(value) => updateCreateField("type", value)}
+                value={createForm.channel}
+                onValueChange={(value) => updateCreateField("channel", value)}
               >
-                <SelectTrigger id="create-type">
+                <SelectTrigger id="create-channel">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="retail">Retail Branch</SelectItem>
-                  <SelectItem value="warehouse">Warehouse</SelectItem>
+                  {CHANNEL_OPTIONS.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            {createForm.type === "retail" && (
-              <div className="space-y-2">
-                <Label htmlFor="create-classification">Branch Classification</Label>
-                <Select
-                  value={createForm.classification}
-                  onValueChange={(value) => updateCreateField("classification", value)}
-                >
-                  <SelectTrigger id="create-classification">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CLASSIFICATION_OPTIONS.map((c) => (
-                      <SelectItem key={c.value} value={c.value}>
-                        {c.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Determines pricing tier and promotion eligibility
-                </p>
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="create-classification">Branch Classification</Label>
+              <Select
+                value={createForm.classification}
+                onValueChange={(value) => updateCreateField("classification", value)}
+              >
+                <SelectTrigger id="create-classification">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLASSIFICATION_OPTIONS.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Determines pricing tier and promotion eligibility
+              </p>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="create-phone">Phone</Label>
               <Input
@@ -669,43 +709,44 @@ export default function BranchesPage() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="edit-type">Branch Type</Label>
+              <Label htmlFor="edit-channel">Channel</Label>
               <Select
-                value={editForm.type}
-                onValueChange={(value) => updateEditField("type", value)}
+                value={editForm.channel}
+                onValueChange={(value) => updateEditField("channel", value)}
               >
-                <SelectTrigger id="edit-type">
+                <SelectTrigger id="edit-channel">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="retail">Retail Branch</SelectItem>
-                  <SelectItem value="warehouse">Warehouse</SelectItem>
+                  {CHANNEL_OPTIONS.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            {editForm.type === "retail" && (
-              <div className="space-y-2">
-                <Label htmlFor="edit-classification">Branch Classification</Label>
-                <Select
-                  value={editForm.classification}
-                  onValueChange={(value) => updateEditField("classification", value)}
-                >
-                  <SelectTrigger id="edit-classification">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CLASSIFICATION_OPTIONS.map((c) => (
-                      <SelectItem key={c.value} value={c.value}>
-                        {c.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Determines pricing tier and promotion eligibility
-                </p>
-              </div>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="edit-classification">Branch Classification</Label>
+              <Select
+                value={editForm.classification}
+                onValueChange={(value) => updateEditField("classification", value)}
+              >
+                <SelectTrigger id="edit-classification">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {CLASSIFICATION_OPTIONS.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Determines pricing tier and promotion eligibility
+              </p>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="edit-phone">Phone</Label>
               <Input

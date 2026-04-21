@@ -78,6 +78,37 @@ const CLASSIFICATION_COLORS: Record<string, string> = {
   outlet: "bg-amber-100 text-amber-800",
 };
 
+const CHANNEL_OPTIONS = [
+  { value: "none", label: "No Channel" },
+  { value: "inline", label: "Inline" },
+  { value: "online", label: "Online" },
+  { value: "outlet", label: "Outlet" },
+  { value: "popup", label: "Popup" },
+  { value: "dtc", label: "Direct To Consumer (DTC)" },
+  { value: "warehouse", label: "Warehouse" },
+  { value: "outright", label: "Outright" },
+] as const;
+
+const CHANNEL_LABELS: Record<string, string> = {
+  inline: "Inline",
+  online: "Online",
+  outlet: "Outlet",
+  popup: "Popup",
+  dtc: "DTC",
+  warehouse: "Warehouse",
+  outright: "Outright",
+};
+
+const CHANNEL_COLORS: Record<string, string> = {
+  inline: "bg-cyan-100 text-cyan-800",
+  online: "bg-indigo-100 text-indigo-800",
+  outlet: "bg-amber-100 text-amber-800",
+  popup: "bg-pink-100 text-pink-800",
+  dtc: "bg-teal-100 text-teal-800",
+  warehouse: "bg-slate-100 text-slate-800",
+  outright: "bg-orange-100 text-orange-800",
+};
+
 type Tab = "details" | "cashiers";
 
 // ─── CashiersTab ─────────────────────────────────────────────────────────────
@@ -568,7 +599,7 @@ function DetailsTab({ branchId }: { branchId: Id<"branches"> }) {
     name: "",
     address: "",
     phone: "",
-    type: "retail" as "retail" | "warehouse",
+    channel: "none",
     classification: "none",
     latitude: "",
     longitude: "",
@@ -585,7 +616,7 @@ function DetailsTab({ branchId }: { branchId: Id<"branches"> }) {
       name: branch.name,
       address: branch.address,
       phone: branch.phone ?? "",
-      type: branch.type ?? "retail",
+      channel: (branch as any).channel ?? "none",
       classification: branch.classification ?? "none",
       latitude: branch.latitude?.toString() ?? "",
       longitude: branch.longitude?.toString() ?? "",
@@ -618,7 +649,9 @@ function DetailsTab({ branchId }: { branchId: Id<"branches"> }) {
         name: form.name.trim(),
         address: form.address.trim(),
         phone: form.phone.trim() || undefined,
-        type: form.type,
+        channel: form.channel !== "none"
+          ? (form.channel as "inline" | "online" | "outlet" | "popup" | "dtc" | "warehouse" | "outright")
+          : undefined,
         classification:
           form.classification !== "none"
             ? (form.classification as "premium" | "aclass" | "bnc" | "outlet")
@@ -691,14 +724,17 @@ function DetailsTab({ branchId }: { branchId: Id<"branches"> }) {
           />
         </div>
         <div className="space-y-1">
-          <Label>Type</Label>
-          <Select value={form.type} onValueChange={(v) => updateField("type", v)}>
+          <Label>Channel</Label>
+          <Select value={form.channel} onValueChange={(v) => updateField("channel", v)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="retail">Retail</SelectItem>
-              <SelectItem value="warehouse">Warehouse</SelectItem>
+              {CHANNEL_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

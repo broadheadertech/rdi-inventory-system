@@ -74,7 +74,7 @@ export const getReplenishmentSuggestions = query({
     // 5. Caches for branch/variant/style/category/brand lookups
     const branchCache = new Map<string, string>();
     const variantCache = new Map<string, { sku: string; size: string; color: string; styleId: Id<"styles"> } | null>();
-    const styleCache = new Map<string, { name: string; categoryId: Id<"categories"> } | null>();
+    const styleCache = new Map<string, { name: string; categoryId: Id<"categories"> | undefined; brandId: Id<"brands"> | undefined } | null>();
     const categoryCache = new Map<string, { brandId: Id<"brands"> } | null>();
     const brandCache = new Map<string, string>();
 
@@ -107,26 +107,30 @@ export const getReplenishmentSuggestions = query({
         if (style === undefined) {
           const s = await ctx.db.get(variant.styleId);
           style = s && s.isActive
-            ? { name: s.name, categoryId: s.categoryId }
+            ? { name: s.name, categoryId: s.categoryId, brandId: s.brandId }
             : null;
           styleCache.set(variant.styleId as string, style);
         }
         if (!style) return null;
 
-        // Resolve category -> brand
-        let category = categoryCache.get(style.categoryId as string);
-        if (category === undefined) {
-          const c = await ctx.db.get(style.categoryId);
-          category = c ? { brandId: c.brandId } : null;
-          categoryCache.set(style.categoryId as string, category);
+        // Resolve brand: prefer style.brandId, fall back to category chain
+        let resolvedBrandId = style.brandId;
+        if (!resolvedBrandId) {
+          let category = style.categoryId ? categoryCache.get(style.categoryId as string) : undefined;
+          if (category === undefined && style.categoryId) {
+            const c = await ctx.db.get(style.categoryId);
+            category = c ? { brandId: c.brandId } : null;
+            categoryCache.set(style.categoryId as string, category);
+          }
+          if (!category) return null;
+          resolvedBrandId = category.brandId;
         }
-        if (!category) return null;
 
-        let brandName = brandCache.get(category.brandId as string);
+        let brandName = brandCache.get(resolvedBrandId as string);
         if (brandName === undefined) {
-          const b = await ctx.db.get(category.brandId);
+          const b = await ctx.db.get(resolvedBrandId);
           brandName = b?.name ?? "Unknown";
-          brandCache.set(category.brandId as string, brandName);
+          brandCache.set(resolvedBrandId as string, brandName);
         }
 
         // Resolve branch name

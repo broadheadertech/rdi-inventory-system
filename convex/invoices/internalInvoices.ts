@@ -207,7 +207,7 @@ export const listBranchInvoices = query({
     if (!branchId) return null;
 
     const branch = await ctx.db.get(branchId);
-    const isWarehouse = branch?.type === "warehouse";
+    const isWarehouse = branch?.channel === "warehouse";
     const limit = Math.min(Math.max(args.limit ?? 10, 1), 200);
 
     let baseQuery;

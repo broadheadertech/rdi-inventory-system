@@ -29,7 +29,7 @@ export const getWarehouseBranch = query({
   handler: async (ctx) => {
     await withBranchScope(ctx);
     const all = await ctx.db.query("branches").collect();
-    const warehouse = all.find((b) => b.type === "warehouse" && b.isActive);
+    const warehouse = all.find((b) => b.channel === "warehouse" && b.isActive);
     return warehouse ? { _id: warehouse._id, name: warehouse.name } : null;
   },
 });
@@ -99,7 +99,7 @@ export const createTransferRequest = mutation({
     if (!isHQ) {
       if (transferType === "stockRequest") {
         // Stock requests: must be FROM warehouse TO retail branch
-        if (fromBranch.type !== "warehouse") {
+        if (fromBranch.channel !== "warehouse") {
           throw new ConvexError({
             code: "INVALID_ARGUMENT",
             message: "Stock requests must come from the central warehouse.",
@@ -107,7 +107,7 @@ export const createTransferRequest = mutation({
         }
       } else if (transferType === "return") {
         // Returns: must be FROM retail branch TO warehouse
-        if (toBranch.type !== "warehouse") {
+        if (toBranch.channel !== "warehouse") {
           throw new ConvexError({
             code: "INVALID_ARGUMENT",
             message: "Returns must be sent to the central warehouse.",
@@ -122,7 +122,7 @@ export const createTransferRequest = mutation({
         }
       } else if (transferType === "interBranch") {
         // Inter-branch: must be FROM user's own retail branch TO another retail branch
-        if (fromBranch.type === "warehouse" || toBranch.type === "warehouse") {
+        if (fromBranch.channel === "warehouse" || toBranch.channel === "warehouse") {
           throw new ConvexError({
             code: "INVALID_ARGUMENT",
             message: "Inter-branch transfers must be between retail branches.",

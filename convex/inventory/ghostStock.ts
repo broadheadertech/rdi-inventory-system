@@ -48,7 +48,7 @@ export const getGhostStock = query({
     const getBranchName = makeBranchNameResolver((id) => ctx.db.get(id));
 
     // Style/category/brand caches
-    const styleCache = new Map<string, { name: string; categoryId: Id<"categories"> } | null>();
+    const styleCache = new Map<string, { name: string; categoryId: Id<"categories"> | undefined; brandId: Id<"brands"> | undefined } | null>();
     const categoryCache = new Map<string, { brandId: Id<"brands"> } | null>();
     const brandCache = new Map<string, string>();
 
@@ -103,26 +103,31 @@ export const getGhostStock = query({
       if (styleData === undefined) {
         const style = await ctx.db.get(variant.styleId);
         styleData = style && style.isActive
-          ? { name: style.name, categoryId: style.categoryId }
+          ? { name: style.name, categoryId: style.categoryId, brandId: style.brandId }
           : null;
         styleCache.set(variant.styleId, styleData);
       }
       if (!styleData) continue;
 
-      // Resolve brand via category
-      let catData = categoryCache.get(styleData.categoryId);
-      if (catData === undefined) {
-        const category = await ctx.db.get(styleData.categoryId);
-        catData = category && category.isActive ? { brandId: category.brandId } : null;
-        categoryCache.set(styleData.categoryId, catData);
+      // Resolve brand via style.brandId first, then category chain
+      let resolvedBrandId = styleData.brandId;
+      if (!resolvedBrandId) {
+        if (!styleData.categoryId) continue;
+        let catData = categoryCache.get(styleData.categoryId);
+        if (catData === undefined) {
+          const category = await ctx.db.get(styleData.categoryId);
+          catData = category && category.isActive ? { brandId: category.brandId } : null;
+          categoryCache.set(styleData.categoryId, catData);
+        }
+        if (!catData) continue;
+        resolvedBrandId = catData.brandId;
       }
-      if (!catData) continue;
 
-      let brandName = brandCache.get(catData.brandId);
+      let brandName = brandCache.get(resolvedBrandId);
       if (brandName === undefined) {
-        const brand = await ctx.db.get(catData.brandId);
+        const brand = await ctx.db.get(resolvedBrandId);
         brandName = brand?.name ?? "Unknown";
-        brandCache.set(catData.brandId, brandName);
+        brandCache.set(resolvedBrandId, brandName);
       }
 
       const branchName = await getBranchName(inv.branchId);

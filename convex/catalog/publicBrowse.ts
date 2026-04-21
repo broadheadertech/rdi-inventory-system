@@ -90,7 +90,7 @@ export const getStylesByCategoryPublic = query({
         // Build set of warehouse branch IDs to exclude
         const allBranches = await ctx.db.query("branches").collect();
         const warehouseIds = new Set(
-          allBranches.filter((b) => b.type === "warehouse").map((b) => b._id as string)
+          allBranches.filter((b) => b.channel === "warehouse").map((b) => b._id as string)
         );
         const branchSet = new Set<string>();
         const sizeSet = new Set<string>();
@@ -113,7 +113,7 @@ export const getStylesByCategoryPublic = query({
         }
 
         // Resolve brand logo for fallback
-        const cat = await ctx.db.get(style.categoryId);
+        const cat = style.categoryId ? await ctx.db.get(style.categoryId) : null;
         const brandDoc = cat ? await ctx.db.get(cat.brandId) : null;
         const brandLogoUrl = brandDoc?.storageId
           ? await ctx.storage.getUrl(brandDoc.storageId)
@@ -151,7 +151,7 @@ export const getStylesByTagPublic = query({
     // Pre-fetch warehouse IDs once
     const allBranches = await ctx.db.query("branches").collect();
     const warehouseIds = new Set(
-      allBranches.filter((b) => b.type === "warehouse").map((b) => b._id as string)
+      allBranches.filter((b) => b.channel === "warehouse").map((b) => b._id as string)
     );
 
     // Pre-fetch brands for brand name resolution
@@ -212,7 +212,7 @@ export const getStylesByTagPublic = query({
         }
 
         // Brand logo
-        const cat = await ctx.db.get(style.categoryId);
+        const cat = style.categoryId ? await ctx.db.get(style.categoryId) : null;
         const brandDoc = cat ? brandMap.get(String(cat.brandId)) : null;
         const brandLogoUrl = brandDoc?.storageId
           ? await ctx.storage.getUrl(brandDoc.storageId)
@@ -281,7 +281,7 @@ export const getAllStylesForBrandPublic = query({
     // Pre-fetch warehouse IDs once
     const allBranches = await ctx.db.query("branches").collect();
     const warehouseIds = new Set(
-      allBranches.filter((b) => b.type === "warehouse").map((b) => b._id as string)
+      allBranches.filter((b) => b.channel === "warehouse").map((b) => b._id as string)
     );
 
     // Gather all styles across all categories
@@ -380,8 +380,10 @@ export const getStyleDetailPublic = query({
     if (!style || !style.isActive) return null;
 
     // Get category for brand chain
-    const category = await ctx.db.get(style.categoryId);
-    const brand = category ? await ctx.db.get(category.brandId) : null;
+    const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+    const brand = style.brandId
+      ? await ctx.db.get(style.brandId)
+      : category ? await ctx.db.get(category.brandId) : null;
 
     // Get all images sorted by sortOrder
     const images = await ctx.db
@@ -462,7 +464,7 @@ export const getAllBranchStockForStylePublic = query({
 
     // Get all active retail branches (exclude warehouse)
     const branches = await ctx.db.query("branches").collect();
-    const activeBranches = branches.filter((b) => b.isActive && b.type !== "warehouse");
+    const activeBranches = branches.filter((b) => b.isActive && b.channel !== "warehouse");
 
     // Build per-branch stock data
     const result = await Promise.all(
@@ -507,7 +509,7 @@ export const listActiveBranchesPublic = query({
   handler: async (ctx) => {
     const branches = await ctx.db.query("branches").collect();
     return branches
-      .filter((b) => b.isActive && b.type !== "warehouse")
+      .filter((b) => b.isActive && b.channel !== "warehouse")
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((b) => ({
         _id: b._id,
@@ -579,8 +581,10 @@ export const searchStylesPublic = query({
 
     const enriched = await Promise.all(
       limited.map(async (style) => {
-        const category = catMap.get(String(style.categoryId));
-        const brand = category ? brandMap.get(String(category.brandId)) : null;
+        const category = style.categoryId ? catMap.get(String(style.categoryId)) : null;
+        const brand = style.brandId
+          ? brandMap.get(String(style.brandId))
+          : category ? brandMap.get(String(category.brandId)) : null;
 
         const images = await ctx.db
           .query("productImages")
@@ -656,7 +660,7 @@ export const getStylesByTagsPublic = query({
     // Pre-fetch warehouse IDs once
     const allBranches = await ctx.db.query("branches").collect();
     const warehouseIds = new Set(
-      allBranches.filter((b) => b.type === "warehouse").map((b) => b._id as string)
+      allBranches.filter((b) => b.channel === "warehouse").map((b) => b._id as string)
     );
 
     // Gather all styles across matching categories
@@ -721,7 +725,7 @@ export const getStylesByTagsPublic = query({
           }
         }
 
-        const cat = await ctx.db.get(style.categoryId);
+        const cat = style.categoryId ? await ctx.db.get(style.categoryId) : null;
         const brandDoc = cat ? brandMap.get(String(cat.brandId)) : null;
         const brandLogoUrl = brandDoc?.storageId
           ? await ctx.storage.getUrl(brandDoc.storageId)

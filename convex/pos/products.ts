@@ -3,6 +3,26 @@ import { query } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireRole, POS_ROLES } from "../_helpers/permissions";
 
+// Helper: resolve brandId from a style (new: style.brandId, legacy: category.brandId)
+async function resolveBrandId(
+  ctx: any,
+  style: any,
+  categoryById?: Record<string, any>
+): Promise<string | null> {
+  // New styles have brandId directly
+  if (style.brandId) return style.brandId;
+  // Legacy: walk through category
+  if (style.categoryId) {
+    if (categoryById) {
+      const cat = categoryById[style.categoryId];
+      return cat?.brandId ?? null;
+    }
+    const cat = await ctx.db.get(style.categoryId);
+    return cat?.brandId ?? null;
+  }
+  return null;
+}
+
 // ─── POS Product Search Queries ─────────────────────────────────────────────
 
 export const searchPOSProducts = query({
@@ -13,8 +33,6 @@ export const searchPOSProducts = query({
   },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
-
-    // Enforce POS role at API level (defense-in-depth)
     if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
       throw new ConvexError({ code: "UNAUTHORIZED" });
     }
@@ -64,24 +82,38 @@ export const searchPOSProducts = query({
 
     // 5. Determine which styleIds match filters
     const matchingStyleIds = new Set<string>();
+    const styleBrandId: Record<string, string> = {};
     const searchLower = args.searchText?.toLowerCase();
 
     for (const variant of activeVariants) {
       const style = styleById[variant.styleId];
       if (!style) continue;
-      const category = categoryById[style.categoryId];
-      if (!category) continue;
-      const brand = brandById[category.brandId];
+
+      // Resolve brand (new: style.brandId, legacy: category.brandId)
+      let bId = styleBrandId[style._id];
+      if (!bId) {
+        const resolved = style.brandId
+          ? String(style.brandId)
+          : style.categoryId
+            ? categoryById[style.categoryId]?.brandId
+            : null;
+        if (!resolved) continue;
+        bId = String(resolved);
+        styleBrandId[style._id] = bId;
+      }
+
+      const brand = brandById[bId];
       if (!brand) continue;
 
-      if (args.brandId && category.brandId !== args.brandId) continue;
+      if (args.brandId && bId !== args.brandId) continue;
       if (args.categoryId && style.categoryId !== args.categoryId) continue;
 
       if (searchLower) {
         const matchesStyle = style.name.toLowerCase().includes(searchLower);
         const matchesBrand = brand.name.toLowerCase().includes(searchLower);
         const matchesSku = variant.sku.toLowerCase().includes(searchLower);
-        if (!matchesStyle && !matchesBrand && !matchesSku) continue;
+        const matchesStyleCode = (style.styleCode ?? "").toLowerCase().includes(searchLower);
+        if (!matchesStyle && !matchesBrand && !matchesSku && !matchesStyleCode) continue;
       }
 
       matchingStyleIds.add(variant.styleId);
@@ -117,8 +149,9 @@ export const searchPOSProducts = query({
       if (!variants || variants.length === 0) continue;
 
       const style = styleById[styleId];
-      const category = categoryById[style.categoryId];
-      const brand = brandById[category.brandId];
+      const bId = styleBrandId[styleId];
+      const brand = bId ? brandById[bId] : undefined;
+      const category = style.categoryId ? categoryById[style.categoryId] : undefined;
 
       const sizes = variants.map((v) => ({
         variantId: v._id,
@@ -132,8 +165,8 @@ export const searchPOSProducts = query({
       results.push({
         styleId: style._id,
         styleName: style.name,
-        brandName: brand.name,
-        categoryName: category.name,
+        brandName: brand?.name ?? "",
+        categoryName: category?.name ?? "",
         basePriceCentavos: style.basePriceCentavos,
         imageUrl: imageUrlByStyle[styleId],
         sizes,
@@ -160,23 +193,29 @@ export const listPOSBrands = query({
     const allStyles = await ctx.db.query("styles").collect();
     const allVariants = await ctx.db.query("variants").collect();
 
-    // Build sets bottom-up: active variants → styles → categories → brands
+    const categoryById: Record<string, (typeof allCategories)[number]> = {};
+    for (const c of allCategories) if (c.isActive) categoryById[c._id] = c;
+
+    // Build set bottom-up: active variants → styles → brands
     const activeVariantStyleIds = new Set(
       allVariants.filter((v) => v.isActive).map((v) => v.styleId as string)
     );
-    const activeStyleCategoryIds = new Set(
-      allStyles
-        .filter((s) => s.isActive && activeVariantStyleIds.has(s._id as string))
-        .map((s) => s.categoryId as string)
-    );
-    const activeCategoryBrandIds = new Set(
-      allCategories
-        .filter((c) => c.isActive && activeStyleCategoryIds.has(c._id as string))
-        .map((c) => c.brandId as string)
-    );
+
+    const activeBrandIds = new Set<string>();
+    for (const s of allStyles) {
+      if (!s.isActive || !activeVariantStyleIds.has(s._id as string)) continue;
+      // New: style.brandId directly
+      if (s.brandId) {
+        activeBrandIds.add(s.brandId as string);
+      } else if (s.categoryId) {
+        // Legacy: category.brandId
+        const cat = categoryById[s.categoryId];
+        if (cat) activeBrandIds.add(cat.brandId as string);
+      }
+    }
 
     return allBrands
-      .filter((b) => b.isActive && activeCategoryBrandIds.has(b._id as string))
+      .filter((b) => b.isActive && activeBrandIds.has(b._id as string))
       .map((b) => ({ _id: b._id, name: b.name }))
       .sort((a, b) => a.name.localeCompare(b.name));
   },
@@ -209,7 +248,7 @@ export const listPOSCategories = query({
     const stylesByCategoryId: Record<string, boolean> = {};
     for (const style of allStyles) {
       if (style.isActive && activeVariantStyleIds.has(style._id as string)) {
-        stylesByCategoryId[style.categoryId] = true;
+        if (style.categoryId) stylesByCategoryId[style.categoryId] = true;
       }
     }
 
@@ -220,67 +259,76 @@ export const listPOSCategories = query({
   },
 });
 
-// ─── Barcode Lookup ──────────────────────────────────────────────────────────
+// ─── Barcode / SKU Lookup ───────────────────────────────────────────────────
+
+async function resolveVariantForPOS(
+  ctx: any,
+  variant: any,
+  branchId: any,
+): Promise<any> {
+  const style = await ctx.db.get(variant.styleId);
+  if (!style || !style.isActive) return null;
+
+  // Resolve brand: new path (style.brandId) or legacy (category.brandId)
+  let brand = null;
+  let categoryName = "";
+
+  if (style.brandId) {
+    brand = await ctx.db.get(style.brandId);
+  }
+  if (style.categoryId) {
+    const category = await ctx.db.get(style.categoryId);
+    if (category) {
+      categoryName = category.name;
+      if (!brand) brand = await ctx.db.get(category.brandId);
+    }
+  }
+
+  if (!brand || !brand.isActive) return null;
+
+  // Inventory lookup
+  let stock = 0;
+  if (branchId) {
+    const inv = await ctx.db
+      .query("inventory")
+      .withIndex("by_branch_variant", (q: any) =>
+        q.eq("branchId", branchId).eq("variantId", variant._id)
+      )
+      .first();
+    stock = inv?.quantity ?? 0;
+  }
+
+  return {
+    variantId: variant._id,
+    sku: variant.sku,
+    barcode: variant.barcode ?? "",
+    size: variant.size,
+    color: variant.color,
+    priceCentavos: variant.priceCentavos,
+    styleName: style.name,
+    brandName: brand.name,
+    categoryName,
+    stock,
+  };
+}
 
 export const getVariantByBarcode = query({
   args: { barcode: v.string() },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
-
-    // Enforce POS role at API level (defense-in-depth)
     if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
       throw new ConvexError({ code: "UNAUTHORIZED" });
     }
 
-    // Index lookup — O(1)
     const variant = await ctx.db
       .query("variants")
       .withIndex("by_barcode", (q) => q.eq("barcode", args.barcode))
       .first();
 
     if (!variant || !variant.isActive) return null;
-
-    // Resolve parent hierarchy — all must be active
-    const style = await ctx.db.get(variant.styleId);
-    if (!style || !style.isActive) return null;
-
-    const category = await ctx.db.get(style.categoryId);
-    if (!category || !category.isActive) return null;
-
-    const brand = await ctx.db.get(category.brandId);
-    if (!brand || !brand.isActive) return null;
-
-    // Inventory lookup for branch
-    const branchId = scope.branchId;
-    let stock = 0;
-    if (branchId) {
-      const inv = await ctx.db
-        .query("inventory")
-        .withIndex("by_branch_variant", (q) =>
-          q.eq("branchId", branchId).eq("variantId", variant._id)
-        )
-        .first();
-      stock = inv?.quantity ?? 0;
-    }
-
-    return {
-      variantId: variant._id,
-      sku: variant.sku,
-      barcode: variant.barcode!,
-      size: variant.size,
-      color: variant.color,
-      priceCentavos: variant.priceCentavos,
-      styleName: style.name,
-      brandName: brand.name,
-      categoryName: category.name,
-      stock,
-    };
+    return resolveVariantForPOS(ctx, variant, scope.branchId);
   },
 });
-
-// ─── getVariantByCode ────────────────────────────────────────────────────────
-// Lookup a variant by scanning input — tries barcode first, then SKU.
-// Used by USB barcode guns and RFID readers that output text + Enter.
 
 export const getVariantByCode = query({
   args: { code: v.string() },
@@ -293,7 +341,7 @@ export const getVariantByCode = query({
     const code = args.code.trim();
     if (!code) return null;
 
-    // Try barcode index first (most scanners output barcodes)
+    // Try barcode index first
     let variant = await ctx.db
       .query("variants")
       .withIndex("by_barcode", (q) => q.eq("barcode", code))
@@ -308,39 +356,6 @@ export const getVariantByCode = query({
     }
 
     if (!variant || !variant.isActive) return null;
-
-    const style = await ctx.db.get(variant.styleId);
-    if (!style || !style.isActive) return null;
-
-    const category = await ctx.db.get(style.categoryId);
-    if (!category || !category.isActive) return null;
-
-    const brand = await ctx.db.get(category.brandId);
-    if (!brand || !brand.isActive) return null;
-
-    const branchId = scope.branchId;
-    let stock = 0;
-    if (branchId) {
-      const inv = await ctx.db
-        .query("inventory")
-        .withIndex("by_branch_variant", (q) =>
-          q.eq("branchId", branchId).eq("variantId", variant!._id)
-        )
-        .first();
-      stock = inv?.quantity ?? 0;
-    }
-
-    return {
-      variantId: variant._id,
-      sku: variant.sku,
-      barcode: variant.barcode ?? "",
-      size: variant.size,
-      color: variant.color,
-      priceCentavos: variant.priceCentavos,
-      styleName: style.name,
-      brandName: brand.name,
-      categoryName: category.name,
-      stock,
-    };
+    return resolveVariantForPOS(ctx, variant, scope.branchId);
   },
 });

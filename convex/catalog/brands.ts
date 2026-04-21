@@ -38,8 +38,10 @@ export const getBrandById = query({
 export const createBrand = mutation({
   args: {
     name: v.string(),
+    code: v.optional(v.string()),
     logo: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
+    parLevel: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, HQ_ROLES);
@@ -56,10 +58,25 @@ export const createBrand = mutation({
       });
     }
 
+    // Check for duplicate code if provided
+    if (args.code) {
+      const codeConflict = allBrands.find(
+        (b) => b.code?.toUpperCase() === args.code!.toUpperCase()
+      );
+      if (codeConflict) {
+        throw new ConvexError({
+          code: "DUPLICATE_CODE",
+          message: `Brand code "${args.code}" is already used by "${codeConflict.name}"`,
+        });
+      }
+    }
+
     const brandId = await ctx.db.insert("brands", {
       name: args.name,
+      code: args.code?.toUpperCase(),
       logo: args.logo,
       tags: args.tags,
+      parLevel: args.parLevel,
       isActive: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -81,8 +98,10 @@ export const updateBrand = mutation({
   args: {
     brandId: v.id("brands"),
     name: v.optional(v.string()),
+    code: v.optional(v.string()),
     logo: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
+    parLevel: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, HQ_ROLES);
@@ -116,10 +135,38 @@ export const updateBrand = mutation({
       patch.name = args.name;
     }
 
+    if (args.code !== undefined) {
+      const newCode = args.code ? args.code.toUpperCase() : undefined;
+      if (newCode !== existing.code) {
+        // Check for duplicate code
+        if (newCode) {
+          const allBrands = await ctx.db.query("brands").collect();
+          const codeConflict = allBrands.find(
+            (b) => b._id !== args.brandId && b.code?.toUpperCase() === newCode
+          );
+          if (codeConflict) {
+            throw new ConvexError({
+              code: "DUPLICATE_CODE",
+              message: `Brand code "${newCode}" is already used by "${codeConflict.name}"`,
+            });
+          }
+        }
+        before.code = existing.code;
+        after.code = newCode;
+        patch.code = newCode;
+      }
+    }
+
     if (args.tags !== undefined) {
       before.tags = existing.tags;
       after.tags = args.tags;
       patch.tags = args.tags;
+    }
+
+    if (args.parLevel !== undefined && args.parLevel !== existing.parLevel) {
+      before.parLevel = existing.parLevel;
+      after.parLevel = args.parLevel;
+      patch.parLevel = args.parLevel;
     }
 
     // Empty string means "clear logo", undefined means "no change"

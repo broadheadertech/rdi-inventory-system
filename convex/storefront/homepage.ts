@@ -29,7 +29,7 @@ export const getHomepageData = query({
     const allStyles = await ctx.db.query("styles").collect();
     // Only include styles whose parent category (and thus brand) is active
     const activeStyles = allStyles.filter(
-      (s) => s.isActive && activeCategoryIds.has(String(s.categoryId))
+      (s) => s.isActive && s.categoryId !== undefined && activeCategoryIds.has(String(s.categoryId))
     );
     const activeStyleIds = new Set(activeStyles.map((s) => String(s._id)));
     const allVariants = await ctx.db.query("variants").collect();
@@ -39,7 +39,7 @@ export const getHomepageData = query({
 
     // Build style → categoryId lookup
     const styleCatMap = new Map(
-      activeStyles.map((s) => [String(s._id), String(s.categoryId)])
+      activeStyles.map((s) => [String(s._id), String(s.categoryId ?? "")])
     );
 
     // Build categoryId → genders set
@@ -131,7 +131,7 @@ export const getHomepageData = query({
     // catId → gender → count of styles that have at least one variant of that gender
     const catGenderStyleCount = new Map<string, Map<string, number>>();
     for (const style of activeStyles) {
-      const key = String(style.categoryId);
+      const key = String(style.categoryId ?? "");
       catStyleCount.set(key, (catStyleCount.get(key) ?? 0) + 1);
 
       const genders = styleGenders.get(String(style._id));
@@ -190,11 +190,11 @@ export const getHomepageData = query({
     const featuredProducts = await Promise.all(
       newestStyles.map(async (style) => {
         const category = allCategories.find(
-          (c) => String(c._id) === String(style.categoryId)
+          (c) => String(c._id) === String(style.categoryId ?? "")
         );
-        const brand = category
-          ? brandMap.get(String(category.brandId))
-          : null;
+        const brand = style.brandId
+          ? brandMap.get(String(style.brandId))
+          : category ? brandMap.get(String(category.brandId)) : null;
 
         const images = await ctx.db
           .query("productImages")
@@ -360,7 +360,7 @@ export const getTrendingProducts = query({
     const allStyles = await ctx.db.query("styles").collect();
     const activeStyleMap = new Map(
       allStyles
-        .filter((s) => s.isActive && activeCategoryIds.has(String(s.categoryId)))
+        .filter((s) => s.isActive && s.categoryId !== undefined && activeCategoryIds.has(String(s.categoryId)))
         .map((s) => [String(s._id), s])
     );
 
@@ -386,8 +386,10 @@ export const getTrendingProducts = query({
     return Promise.all(
       sorted.map(async ([styleId, soldCount]) => {
         const style = activeStyleMap.get(styleId)!;
-        const category = categoryMap.get(String(style.categoryId));
-        const brand = category ? brandMap.get(String(category.brandId)) : null;
+        const category = style.categoryId ? categoryMap.get(String(style.categoryId)) : null;
+        const brand = style.brandId
+          ? brandMap.get(String(style.brandId))
+          : category ? brandMap.get(String(category.brandId)) : null;
 
         // Primary image
         const images = await ctx.db

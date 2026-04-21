@@ -167,7 +167,7 @@ export const getSizeCurveAnalysis = query({
     // Cache style → category → brand lookups
     const styleCache = new Map<
       Id<"styles">,
-      { name: string; categoryId: Id<"categories"> } | null
+      { name: string; categoryId: Id<"categories"> | undefined } | null
     >();
     const categoryBrandCache = new Map<Id<"categories">, string>();
 
@@ -202,21 +202,19 @@ export const getSizeCurveAnalysis = query({
           const styleInfo = styleCache.get(styleId);
           if (!styleInfo) continue;
 
-          if (!categoryBrandCache.has(styleInfo.categoryId)) {
-            const cat = await ctx.db.get(styleInfo.categoryId);
+          const catId = styleInfo.categoryId;
+          if (catId && !categoryBrandCache.has(catId)) {
+            const cat = await ctx.db.get(catId);
             if (cat) {
               const brand = await ctx.db.get(cat.brandId);
-              categoryBrandCache.set(
-                styleInfo.categoryId,
-                brand?.name ?? "Unknown"
-              );
+              categoryBrandCache.set(catId, brand?.name ?? "Unknown");
             } else {
-              categoryBrandCache.set(styleInfo.categoryId, "Unknown");
+              categoryBrandCache.set(catId, "Unknown");
             }
           }
 
           const brandName =
-            categoryBrandCache.get(styleInfo.categoryId) ?? "Unknown";
+            (catId ? categoryBrandCache.get(catId) : undefined) ?? "Unknown";
           const imbalanceScore = salesPercent - stockPercent;
 
           rawAlerts.push({

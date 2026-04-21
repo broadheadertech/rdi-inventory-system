@@ -234,8 +234,8 @@ export const richReseed = action({
 
     // ── 2. Fetch reference data ───────────────────────────────────────────────
     const allBranches = await ctx.runQuery(internalReset._getAllBranches);
-    const warehouse = allBranches.find((b: { type?: string }) => b.type === "warehouse");
-    const retailBranches = allBranches.filter((b: { type?: string; isActive: boolean }) => b.type === "retail" && b.isActive);
+    const warehouse = allBranches.find((b: { channel?: string }) => b.channel === "warehouse");
+    const retailBranches = allBranches.filter((b: { channel?: string; isActive: boolean }) => b.channel !== "warehouse" && b.isActive);
     if (retailBranches.length === 0) throw new Error("No retail branches. Run seedDatabase first.");
 
     const catalog = await ctx.runQuery(internalSeed._getCatalogIds);

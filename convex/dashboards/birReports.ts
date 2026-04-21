@@ -74,7 +74,7 @@ export const getSalesReport = query({
         let txnCount = txns.length;
 
         // Warehouse branches: also credit internal invoice revenue from transfers
-        if (branch.type === "warehouse") {
+        if (branch.channel === "warehouse") {
           const invoices = await ctx.db
             .query("internalInvoices")
             .withIndex("by_createdAt", (q) => q.gte("createdAt", startMs))
@@ -90,7 +90,7 @@ export const getSalesReport = query({
 
         return {
           branchId: branch._id as string,
-          branchName: branch.name + (branch.type === "warehouse" ? " (Warehouse)" : ""),
+          branchName: branch.name + (branch.channel === "warehouse" ? " (Warehouse)" : ""),
           revenueCentavos,
           txnCount,
           avgTxnValueCentavos,
@@ -171,16 +171,16 @@ export const getBrandBreakdown = query({
       ...new Set(Array.from(variantMap.values()).map((entry) => entry.styleId)),
     ];
     const styleDocs = await Promise.all(uniqueStyleIds.map((id) => ctx.db.get(id)));
-    const styleMap = new Map<string, { categoryId: Id<"categories"> }>();
+    const styleMap = new Map<string, { categoryId: Id<"categories"> | undefined; brandId: Id<"brands"> | undefined }>();
     uniqueStyleIds.forEach((id, i) => {
       const doc = styleDocs[i];
-      if (doc) styleMap.set(id as string, { categoryId: doc.categoryId });
+      if (doc) styleMap.set(id as string, { categoryId: doc.categoryId, brandId: doc.brandId });
     });
 
     // Wave 3: unique categoryIds from styleMap → batch fetch categories
     const uniqueCategoryIds = [
-      ...new Set(Array.from(styleMap.values()).map((entry) => entry.categoryId)),
-    ];
+      ...new Set(Array.from(styleMap.values()).map((entry) => entry.categoryId).filter(Boolean)),
+    ] as Id<"categories">[];
     const categoryDocs = await Promise.all(uniqueCategoryIds.map((id) => ctx.db.get(id)));
     const categoryMap = new Map<string, { brandId: Id<"brands"> }>();
     uniqueCategoryIds.forEach((id, i) => {
@@ -188,9 +188,12 @@ export const getBrandBreakdown = query({
       if (doc) categoryMap.set(id as string, { brandId: doc.brandId });
     });
 
-    // Wave 4: unique brandIds from categoryMap → batch fetch brands
+    // Wave 4: unique brandIds from categoryMap + styleMap → batch fetch brands
     const uniqueBrandIds = [
-      ...new Set(Array.from(categoryMap.values()).map((entry) => entry.brandId)),
+      ...new Set([
+        ...Array.from(categoryMap.values()).map((entry) => entry.brandId),
+        ...Array.from(styleMap.values()).map((entry) => entry.brandId).filter(Boolean) as Id<"brands">[],
+      ]),
     ];
     const brandDocs = await Promise.all(uniqueBrandIds.map((id) => ctx.db.get(id)));
     const brandNameMap = new Map<string, string>();
@@ -215,9 +218,9 @@ export const getBrandBreakdown = query({
         if (!variantData) continue;
         const styleData = styleMap.get(variantData.styleId as string);
         if (!styleData) continue;
-        const categoryData = categoryMap.get(styleData.categoryId as string);
-        if (!categoryData) continue;
-        const brandKey = categoryData.brandId as string;
+        const categoryData = styleData.categoryId ? categoryMap.get(styleData.categoryId as string) : null;
+        const brandKey = (styleData.brandId ?? categoryData?.brandId) as string;
+        if (!brandKey) continue;
         const brandName = brandNameMap.get(brandKey);
         if (!brandName) continue;
 

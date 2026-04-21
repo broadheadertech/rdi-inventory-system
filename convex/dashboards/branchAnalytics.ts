@@ -50,7 +50,7 @@ export const getWeeklySalesSummary = query({
 
     // Detect warehouse
     const branch = await ctx.db.get(branchId);
-    const isWarehouse = branch?.type === "warehouse";
+    const isWarehouse = branch?.channel === "warehouse";
 
     if (isWarehouse) {
       const allInvoices = await ctx.db
@@ -452,9 +452,11 @@ export const getDemandGapAnalysis = query({
       if (!variant) continue;
       const style = await ctx.db.get(variant.styleId);
       if (!style) continue;
-      const category = await ctx.db.get(style.categoryId);
-      if (!category) continue;
-      const brand = await ctx.db.get(category.brandId);
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+      if (!category && !style.brandId) continue;
+      const brand = style.brandId
+        ? await ctx.db.get(style.brandId)
+        : category ? await ctx.db.get(category.brandId) : null;
       if (!brand) continue;
       variantBrands.set(inv.variantId as string, {
         brand: brand.name,
@@ -499,7 +501,7 @@ export const getTransferEfficiency = query({
     if (!branchId) return null;
 
     const branch = await ctx.db.get(branchId);
-    const isWarehouse = branch?.type === "warehouse";
+    const isWarehouse = branch?.channel === "warehouse";
 
     const transfers = isWarehouse
       ? await ctx.db
@@ -615,7 +617,7 @@ export const getProjectedWeeklyRevenue = query({
     const lastMondayStart = mondayStart - 7 * DAY_MS;
 
     const branch = await ctx.db.get(branchId);
-    const isWarehouse = branch?.type === "warehouse";
+    const isWarehouse = branch?.channel === "warehouse";
 
     if (isWarehouse) {
       const invoices = await ctx.db
@@ -680,7 +682,7 @@ export const getSalesForecast = query({
     if (!branchId) return null;
 
     const branch = await ctx.db.get(branchId);
-    const isWarehouse = branch?.type === "warehouse";
+    const isWarehouse = branch?.channel === "warehouse";
 
     const nowUtc = Date.now();
     const nowPht = nowUtc + PHT_OFFSET_MS;
@@ -813,9 +815,11 @@ export const getDemandForecast = query({
       if (!variant) continue;
       const style = await ctx.db.get(variant.styleId);
       if (!style) continue;
-      const category = await ctx.db.get(style.categoryId);
-      if (!category) continue;
-      const brand = await ctx.db.get(category.brandId);
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+      if (!category && !style.brandId) continue;
+      const brand = style.brandId
+        ? await ctx.db.get(style.brandId)
+        : category ? await ctx.db.get(category.brandId) : null;
       if (!brand) continue;
       brandStock.set(
         brand.name.toLowerCase(),
@@ -856,7 +860,7 @@ export const getDailyRevenueTrend = query({
     const prevStartMs = startMs - durationMs;
 
     const branch = await ctx.db.get(branchId);
-    const isWarehouse = branch?.type === "warehouse";
+    const isWarehouse = branch?.channel === "warehouse";
 
     // Build day buckets for current + prior period
     function buildDayBuckets(start: number, end: number): number[] {

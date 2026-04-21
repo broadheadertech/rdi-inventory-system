@@ -52,6 +52,7 @@ import type * as catalog_bulkImport from "../catalog/bulkImport.js";
 import type * as catalog_categories from "../catalog/categories.js";
 import type * as catalog_drops from "../catalog/drops.js";
 import type * as catalog_images from "../catalog/images.js";
+import type * as catalog_productCodes from "../catalog/productCodes.js";
 import type * as catalog_publicBrowse from "../catalog/publicBrowse.js";
 import type * as catalog_smartSearch from "../catalog/smartSearch.js";
 import type * as catalog_styles from "../catalog/styles.js";
@@ -68,6 +69,7 @@ import type * as dashboards_hqDdpAnalytics from "../dashboards/hqDdpAnalytics.js
 import type * as dashboards_hqIntelligence from "../dashboards/hqIntelligence.js";
 import type * as dashboards_inventoryAging from "../dashboards/inventoryAging.js";
 import type * as dashboards_productMovers from "../dashboards/productMovers.js";
+import type * as dashboards_reportsV2 from "../dashboards/reportsV2.js";
 import type * as demand_entries from "../demand/entries.js";
 import type * as demand_summaries from "../demand/summaries.js";
 import type * as http from "../http.js";
@@ -194,6 +196,7 @@ declare const fullApi: ApiFromModules<{
   "catalog/categories": typeof catalog_categories;
   "catalog/drops": typeof catalog_drops;
   "catalog/images": typeof catalog_images;
+  "catalog/productCodes": typeof catalog_productCodes;
   "catalog/publicBrowse": typeof catalog_publicBrowse;
   "catalog/smartSearch": typeof catalog_smartSearch;
   "catalog/styles": typeof catalog_styles;
@@ -210,6 +213,7 @@ declare const fullApi: ApiFromModules<{
   "dashboards/hqIntelligence": typeof dashboards_hqIntelligence;
   "dashboards/inventoryAging": typeof dashboards_inventoryAging;
   "dashboards/productMovers": typeof dashboards_productMovers;
+  "dashboards/reportsV2": typeof dashboards_reportsV2;
   "demand/entries": typeof demand_entries;
   "demand/summaries": typeof demand_summaries;
   http: typeof http;

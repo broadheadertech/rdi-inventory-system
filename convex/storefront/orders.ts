@@ -101,7 +101,9 @@ export const getBuyAgainProducts = query({
       if (!activeCategoryIds.has(String(style.categoryId))) continue;
 
       const category = categoryMap.get(String(style.categoryId));
-      const brand = category ? brandMap.get(String(category.brandId)) : null;
+      const brand = style.brandId
+        ? brandMap.get(String(style.brandId))
+        : category ? brandMap.get(String(category.brandId)) : null;
 
       const images = await ctx.db
         .query("productImages")
@@ -281,7 +283,7 @@ export const createOrder = mutation({
         throw new ConvexError("Please select a pickup branch");
       }
       const branch = await ctx.db.get(args.pickupBranchId);
-      if (!branch || !branch.isActive || branch.type === "warehouse") {
+      if (!branch || !branch.isActive || branch.channel === "warehouse") {
         throw new ConvexError("Selected pickup branch is not available");
       }
     }

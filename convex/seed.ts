@@ -16,7 +16,7 @@ const SEED_BRANCHES = [
     phone: "+63 49 888 0001",
     latitude: 14.2714,
     longitude: 121.1254,
-    type: "warehouse" as const,
+    channel: "warehouse" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "08:00", closeTime: "17:00" },
@@ -28,7 +28,7 @@ const SEED_BRANCHES = [
     phone: "+63 2 8888 1001",
     latitude: 14.6042,
     longitude: 120.9822,
-    type: "retail" as const,
+    channel: "inline" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "21:00" },
@@ -40,7 +40,7 @@ const SEED_BRANCHES = [
     phone: "+63 32 888 2002",
     latitude: 10.3157,
     longitude: 123.8854,
-    type: "retail" as const,
+    channel: "inline" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "20:00" },
@@ -52,7 +52,7 @@ const SEED_BRANCHES = [
     phone: "+63 82 888 3003",
     latitude: 7.0731,
     longitude: 125.6128,
-    type: "retail" as const,
+    channel: "inline" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "20:00" },
@@ -1472,7 +1472,7 @@ export const _getRetailBranches = internalQuery({
   args: {},
   handler: async (ctx) => {
     const all = await ctx.db.query("branches").collect();
-    return all.filter((b) => b.type === "retail" && b.isActive);
+    return all.filter((b) => b.channel !== "warehouse" && b.isActive);
   },
 });
 
@@ -1547,11 +1547,11 @@ export const _getVariantsWithHierarchy = internalQuery({
       if (!hierarchy) {
         const style = await ctx.db.get(v.styleId);
         if (!style) continue;
-        const category = await ctx.db.get(style.categoryId);
-        if (!category) continue;
+        const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+        if (!category && !style.brandId) continue;
         hierarchy = {
-          categoryId: String(style.categoryId),
-          brandId: String(category.brandId),
+          categoryId: String(style.categoryId ?? ""),
+          brandId: String(style.brandId ?? category?.brandId ?? ""),
         };
         styleCache.set(sKey, hierarchy);
       }
@@ -1589,7 +1589,7 @@ export const _getCatalogIds = internalQuery({
       styles: styles.map((s) => ({
         _id: String(s._id),
         name: s.name,
-        categoryId: String(s.categoryId),
+        categoryId: String(s.categoryId ?? ""),
       })),
     };
   },

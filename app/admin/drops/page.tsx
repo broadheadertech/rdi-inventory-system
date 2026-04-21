@@ -27,7 +27,7 @@ export default function DropsAdminPage() {
   );
 
   const retailBranches = branches?.filter(
-    (b) => b.type !== "warehouse" && b.isActive
+    (b) => b.channel !== "warehouse" && b.isActive
   );
 
   const handleMarkExclusive = async (styleId: Id<"styles">) => {

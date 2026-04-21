@@ -27,7 +27,7 @@ export const getSuggestedLocations = query({
     const style = await ctx.db.get(variant.styleId);
     if (!style) return { suggestions: [] };
 
-    const category = await ctx.db.get(style.categoryId);
+    const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
     const categoryName = category?.name ?? "General";
 
     // Generate suggested locations based on category and size

@@ -47,7 +47,7 @@ export const getHQSalesSummary = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
 
-    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b) => b.channel !== "warehouse");
 
     // Fetch all transactions across retail branches for both periods
     const allTxns = (
@@ -121,7 +121,7 @@ export const getHQTopSellingProducts = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
 
-    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b) => b.channel !== "warehouse");
 
     const allTxns = (
       await Promise.all(
@@ -191,7 +191,7 @@ export const getHQPaymentMethodBreakdown = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
 
-    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b) => b.channel !== "warehouse");
 
     const allTxns = (
       await Promise.all(
@@ -253,7 +253,7 @@ export const getHQProductVelocity = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
 
-    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b) => b.channel !== "warehouse");
 
     const allTxns = (
       await Promise.all(
@@ -422,9 +422,11 @@ export const getHQDemandGapAnalysis = query({
       if (!variant) continue;
       const style = await ctx.db.get(variant.styleId);
       if (!style) continue;
-      const category = await ctx.db.get(style.categoryId);
-      if (!category) continue;
-      const brand = await ctx.db.get(category.brandId);
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+      if (!category && !style.brandId) continue;
+      const brand = style.brandId
+        ? await ctx.db.get(style.brandId)
+        : category ? await ctx.db.get(category.brandId) : null;
       if (!brand) continue;
       brandStock.set(
         brand.name.toLowerCase(),
@@ -515,7 +517,7 @@ export const getHQProjectedRevenue = query({
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
 
-    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b) => b.channel !== "warehouse");
 
     const allTxns = (
       await Promise.all(
@@ -649,9 +651,11 @@ export const getHQDemandForecast = query({
       if (!variant) continue;
       const style = await ctx.db.get(variant.styleId);
       if (!style) continue;
-      const category = await ctx.db.get(style.categoryId);
-      if (!category) continue;
-      const brand = await ctx.db.get(category.brandId);
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+      if (!category && !style.brandId) continue;
+      const brand = style.brandId
+        ? await ctx.db.get(style.brandId)
+        : category ? await ctx.db.get(category.brandId) : null;
       if (!brand) continue;
       brandStock.set(
         brand.name.toLowerCase(),
@@ -713,7 +717,7 @@ export const getHQSalesForecast = query({
       .query("branches")
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b) => b.channel !== "warehouse");
 
     // Fetch all transactions from last year start to now
     const allTxns = (
@@ -790,7 +794,7 @@ export const getHQDailyRevenueTrend = query({
       .query("branches")
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b) => b.channel !== "warehouse");
 
     const allTxns = (
       await Promise.all(

@@ -97,20 +97,23 @@ export const getMyWrapped = query({
       if (!style) continue;
 
       // Category
-      let category = categoryCache.get(style.categoryId);
-      if (!category) {
-        category = await ctx.db.get(style.categoryId);
+      let category = style.categoryId ? categoryCache.get(style.categoryId) : undefined;
+      if (!category && style.categoryId) {
+        category = await ctx.db.get(style.categoryId) ?? undefined;
         if (category) categoryCache.set(style.categoryId, category);
       }
-      if (!category) continue;
+      if (!category && !style.brandId) continue;
 
-      categoryCounts[category.name] = (categoryCounts[category.name] ?? 0) + qty;
+      if (category) {
+        categoryCounts[category.name] = (categoryCounts[category.name] ?? 0) + qty;
+      }
 
       // Brand
-      let brand = brandCache.get(category.brandId);
+      const resolvedBrandId = style.brandId ?? category?.brandId;
+      let brand = brandCache.get(resolvedBrandId);
       if (!brand) {
-        brand = await ctx.db.get(category.brandId);
-        if (brand) brandCache.set(category.brandId, brand);
+        brand = await ctx.db.get(resolvedBrandId);
+        if (brand) brandCache.set(resolvedBrandId, brand);
       }
       if (!brand) continue;
 

@@ -113,11 +113,11 @@ export default function BranchTransfersPage() {
   const userBranchId = currentUser?.branchId as Id<"branches"> | undefined;
   const userBranch = branches?.find((b) => b._id === userBranchId);
   const userBranchName = userBranch?.name ?? "Your branch";
-  const isWarehouseUser = userBranch?.type === "warehouse";
+  const isWarehouseUser = userBranch?.channel === "warehouse";
 
   // Other branches for "Send to Branch" dropdown (warehouse or inter-branch)
   const retailBranches = branches?.filter(
-    (b) => b.type !== "warehouse" && b.isActive && b._id !== userBranchId
+    (b) => b.channel !== "warehouse" && b.isActive && b._id !== userBranchId
   );
 
   // State for acknowledge/decline

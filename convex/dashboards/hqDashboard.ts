@@ -1,10 +1,32 @@
 import { query } from "../_generated/server";
-import type { Id } from "../_generated/dataModel";
+import { v } from "convex/values";
+import type { Doc, Id } from "../_generated/dataModel";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
 import {
   getAllBranchSnapshots,
   getPHTDate,
 } from "../snapshots/readers";
+
+const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+const periodArg = v.optional(
+  v.union(v.literal("daily"), v.literal("monthly"), v.literal("yearly"))
+);
+
+/** Start-of-period in UTC ms for PHT-local day/month/year boundaries. */
+function getPeriodStartMs(period: "daily" | "monthly" | "yearly"): number {
+  const phtNow = new Date(Date.now() + PHT_OFFSET_MS);
+  const y = phtNow.getUTCFullYear();
+  const m = phtNow.getUTCMonth();
+  const d = phtNow.getUTCDate();
+  const phtMidnight =
+    period === "daily"
+      ? Date.UTC(y, m, d)
+      : period === "monthly"
+        ? Date.UTC(y, m, 1)
+        : Date.UTC(y, 0, 1);
+  return phtMidnight - PHT_OFFSET_MS;
+}
 
 // NOTE: HQ_ROLES = ["admin", "hqStaff"]
 // HQ staff bypass branch scoping — they see ALL branches' data.
@@ -216,5 +238,368 @@ export const getAttentionItems = query({
     return items.sort(
       (a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]
     );
+  },
+});
+
+// ─── getHqSalesBreakdown ──────────────────────────────────────────────────────
+// Overall sales + top-2 brand sales + gross profit for today's POS transactions.
+// Scans today's transactions per active branch (index-bounded), resolves each
+// item's brand via style.brandId with legacy category.brandId fallback.
+
+export const getHqSalesBreakdown = query({
+  args: { period: periodArg },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const period = args.period ?? "monthly";
+    const startMs = getPeriodStartMs(period);
+
+    const branches = await ctx.db.query("branches").collect();
+    const activeBranches = branches.filter((b) => b.isActive);
+
+    const allTxns: Doc<"transactions">[] = [];
+    for (const branch of activeBranches) {
+      const txns = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branch._id).gte("createdAt", startMs)
+        )
+        .collect();
+      allTxns.push(...txns);
+    }
+
+    const completedTxns = allTxns.filter((t) => t.status !== "voided");
+    const totalSalesCentavos = completedTxns.reduce((s, t) => s + t.totalCentavos, 0);
+
+    const items: Doc<"transactionItems">[] = [];
+    for (const txn of completedTxns) {
+      const txItems = await ctx.db
+        .query("transactionItems")
+        .withIndex("by_transaction", (q) => q.eq("transactionId", txn._id))
+        .collect();
+      items.push(...txItems);
+    }
+
+    const variantCache = new Map<
+      string,
+      { styleId: Id<"styles">; costPriceCentavos: number } | null
+    >();
+    const styleBrandCache = new Map<string, Id<"brands"> | null>();
+    const categoryBrandCache = new Map<string, Id<"brands"> | null>();
+    const brandRevenue = new Map<string, number>();
+    let grossProfitCentavos = 0;
+
+    for (const item of items) {
+      let variant = variantCache.get(item.variantId as string);
+      if (variant === undefined) {
+        const v = await ctx.db.get(item.variantId);
+        variant = v
+          ? { styleId: v.styleId, costPriceCentavos: v.costPriceCentavos ?? 0 }
+          : null;
+        variantCache.set(item.variantId as string, variant);
+      }
+      if (!variant) continue;
+
+      const costThisLine = variant.costPriceCentavos * item.quantity;
+      grossProfitCentavos += item.lineTotalCentavos - costThisLine;
+
+      let brandId = styleBrandCache.get(variant.styleId as string);
+      if (brandId === undefined) {
+        const style = await ctx.db.get(variant.styleId);
+        if (!style) {
+          styleBrandCache.set(variant.styleId as string, null);
+          continue;
+        }
+        let resolved: Id<"brands"> | null = style.brandId ?? null;
+        if (!resolved && style.categoryId) {
+          let catBrand = categoryBrandCache.get(style.categoryId as string);
+          if (catBrand === undefined) {
+            const cat = await ctx.db.get(style.categoryId);
+            catBrand = cat?.brandId ?? null;
+            categoryBrandCache.set(style.categoryId as string, catBrand);
+          }
+          resolved = catBrand;
+        }
+        brandId = resolved;
+        styleBrandCache.set(variant.styleId as string, brandId);
+      }
+      if (!brandId) continue;
+
+      brandRevenue.set(
+        brandId as string,
+        (brandRevenue.get(brandId as string) ?? 0) + item.lineTotalCentavos
+      );
+    }
+
+    // Every active brand gets a card, ordered by name — zero sales if none today
+    const allBrands = await ctx.db.query("brands").collect();
+    const brandSales = allBrands
+      .filter((b) => b.isActive)
+      .map((b) => ({
+        brandId: b._id as string,
+        brandName: b.name,
+        salesCentavos: brandRevenue.get(b._id as string) ?? 0,
+      }))
+      .sort((a, b) => a.brandName.localeCompare(b.brandName));
+
+    return {
+      totalSalesCentavos,
+      brands: brandSales,
+      grossProfitCentavos,
+    };
+  },
+});
+
+// ─── getHqInventoryBreakdown ──────────────────────────────────────────────────
+// Overall stock-on-hand + per-brand SOH + liquidation rate (outlet-channel sales
+// today as a % of total POS sales today). SOH scans the inventory table and
+// resolves each variant's brand via style.brandId with legacy fallback.
+
+export const getHqInventoryBreakdown = query({
+  args: { period: periodArg },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const period = args.period ?? "monthly";
+    const inventoryRows = await ctx.db.query("inventory").collect();
+
+    const variantStyleCache = new Map<string, Id<"styles"> | null>();
+    const styleBrandCache = new Map<string, Id<"brands"> | null>();
+    const categoryBrandCache = new Map<string, Id<"brands"> | null>();
+    const brandSoh = new Map<string, number>();
+    let totalSohUnits = 0;
+
+    for (const inv of inventoryRows) {
+      totalSohUnits += inv.quantity;
+
+      let styleId = variantStyleCache.get(inv.variantId as string);
+      if (styleId === undefined) {
+        const v = await ctx.db.get(inv.variantId);
+        styleId = v ? v.styleId : null;
+        variantStyleCache.set(inv.variantId as string, styleId);
+      }
+      if (!styleId) continue;
+
+      let brandId = styleBrandCache.get(styleId as string);
+      if (brandId === undefined) {
+        const style = await ctx.db.get(styleId);
+        if (!style) {
+          styleBrandCache.set(styleId as string, null);
+          continue;
+        }
+        let resolved: Id<"brands"> | null = style.brandId ?? null;
+        if (!resolved && style.categoryId) {
+          let catBrand = categoryBrandCache.get(style.categoryId as string);
+          if (catBrand === undefined) {
+            const cat = await ctx.db.get(style.categoryId);
+            catBrand = cat?.brandId ?? null;
+            categoryBrandCache.set(style.categoryId as string, catBrand);
+          }
+          resolved = catBrand;
+        }
+        brandId = resolved;
+        styleBrandCache.set(styleId as string, brandId);
+      }
+      if (!brandId) continue;
+
+      brandSoh.set(
+        brandId as string,
+        (brandSoh.get(brandId as string) ?? 0) + inv.quantity
+      );
+    }
+
+    const allBrands = await ctx.db.query("brands").collect();
+    const brands = allBrands
+      .filter((b) => b.isActive)
+      .map((b) => ({
+        brandId: b._id as string,
+        brandName: b.name,
+        sohUnits: brandSoh.get(b._id as string) ?? 0,
+        parLevel: b.parLevel ?? 0,
+      }))
+      .sort((a, b) => a.brandName.localeCompare(b.brandName));
+
+    // Liquidation rate = outlet-channel sales / total POS sales for the period
+    const startMs = getPeriodStartMs(period);
+    const branches = await ctx.db.query("branches").collect();
+    const activeBranches = branches.filter((b) => b.isActive);
+
+    let totalSalesCentavos = 0;
+    let outletSalesCentavos = 0;
+    for (const branch of activeBranches) {
+      const txns = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branch._id).gte("createdAt", startMs)
+        )
+        .collect();
+      for (const t of txns) {
+        if (t.status === "voided") continue;
+        totalSalesCentavos += t.totalCentavos;
+        if (branch.channel === "outlet") {
+          outletSalesCentavos += t.totalCentavos;
+        }
+      }
+    }
+
+    const liquidationRatePercent =
+      totalSalesCentavos > 0
+        ? (outletSalesCentavos / totalSalesCentavos) * 100
+        : 0;
+
+    return {
+      totalSohUnits,
+      brands,
+      liquidationRatePercent,
+    };
+  },
+});
+
+// ─── getHqSalesTimeSeries ─────────────────────────────────────────────────────
+// Revenue time-series for the dashboard graph, bucketed by the active period.
+//   daily   → 24 hourly buckets (00:00–23:00 PHT)
+//   monthly → one bucket per day-of-month in the current month
+//   yearly  → 12 monthly buckets (Jan–Dec) of the current year
+
+export const getHqSalesTimeSeries = query({
+  args: { period: periodArg },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const period = args.period ?? "monthly";
+    const phtNow = new Date(Date.now() + PHT_OFFSET_MS);
+    const startMs = getPeriodStartMs(period);
+
+    // Pull transactions for the period across all active branches
+    const branches = await ctx.db.query("branches").collect();
+    const activeBranches = branches.filter((b) => b.isActive);
+
+    const allTxns: Doc<"transactions">[] = [];
+    for (const branch of activeBranches) {
+      const txns = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branch._id).gte("createdAt", startMs)
+        )
+        .collect();
+      allTxns.push(...txns);
+    }
+    const completed = allTxns.filter((t) => t.status !== "voided");
+
+    // Build buckets
+    type Bucket = { label: string; totalCentavos: number };
+    let buckets: Bucket[] = [];
+    const getBucketIndex = (createdAt: number): number => {
+      const phtDate = new Date(createdAt + PHT_OFFSET_MS);
+      if (period === "daily") return phtDate.getUTCHours();
+      if (period === "monthly") return phtDate.getUTCDate() - 1;
+      return phtDate.getUTCMonth();
+    };
+
+    if (period === "daily") {
+      buckets = Array.from({ length: 24 }, (_, h) => ({
+        label: `${String(h).padStart(2, "0")}:00`,
+        totalCentavos: 0,
+      }));
+    } else if (period === "monthly") {
+      const y = phtNow.getUTCFullYear();
+      const m = phtNow.getUTCMonth();
+      const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+      buckets = Array.from({ length: daysInMonth }, (_, i) => ({
+        label: String(i + 1),
+        totalCentavos: 0,
+      }));
+    } else {
+      const MONTH_LABELS = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      ];
+      buckets = MONTH_LABELS.map((label) => ({ label, totalCentavos: 0 }));
+    }
+
+    for (const t of completed) {
+      const idx = getBucketIndex(t.createdAt);
+      if (idx >= 0 && idx < buckets.length) {
+        buckets[idx].totalCentavos += t.totalCentavos;
+      }
+    }
+
+    return { period, buckets };
+  },
+});
+
+// ─── getStoreRanking ──────────────────────────────────────────────────────────
+// Returns branches ranked by total sales (POS + invoice) for a specific PHT date.
+// Used by the Dashboard "Store Ranking" section. Default date = yesterday.
+
+export const getStoreRanking = query({
+  args: {
+    date: v.string(), // "YYYY-MM-DD" in PHT
+    limit: v.optional(v.number()), // 10 or 20; if omitted, returns all
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const snaps = await getAllBranchSnapshots(ctx, args.date);
+    if (snaps.length === 0) {
+      return {
+        date: args.date,
+        items: [] as Array<{
+          rank: number;
+          branchId: Id<"branches">;
+          branchName: string;
+          channel: string | null;
+          salesCentavos: number;
+          transactionCount: number;
+          itemsSold: number;
+          sharePercent: number;
+        }>,
+        totalSalesCentavos: 0,
+      };
+    }
+
+    // Enrich with branch metadata (name + channel)
+    const branchIds = snaps.map((s) => s.branchId);
+    const branchDocs = await Promise.all(branchIds.map((id) => ctx.db.get(id)));
+    const branchMap = new Map<string, Doc<"branches">>();
+    for (const b of branchDocs) {
+      if (b) branchMap.set(b._id as string, b);
+    }
+
+    const combined = snaps
+      .map((s) => {
+        const branch = branchMap.get(s.branchId as string);
+        const salesCentavos = s.salesTotalCentavos + s.invoiceTotalCentavos;
+        return {
+          branchId: s.branchId,
+          branchName: branch?.name ?? "Unknown",
+          channel: branch?.channel ?? null,
+          salesCentavos,
+          transactionCount: s.salesTransactionCount + s.invoiceCount,
+          itemsSold: s.salesItemsSold,
+        };
+      })
+      .filter((r) => r.salesCentavos > 0)
+      .sort((a, b) => b.salesCentavos - a.salesCentavos);
+
+    const totalSalesCentavos = combined.reduce((s, r) => s + r.salesCentavos, 0);
+
+    const limited = typeof args.limit === "number" ? combined.slice(0, args.limit) : combined;
+
+    return {
+      date: args.date,
+      totalSalesCentavos,
+      items: limited.map((r, i) => ({
+        rank: i + 1,
+        branchId: r.branchId,
+        branchName: r.branchName,
+        channel: r.channel,
+        salesCentavos: r.salesCentavos,
+        transactionCount: r.transactionCount,
+        itemsSold: r.itemsSold,
+        sharePercent:
+          totalSalesCentavos > 0 ? (r.salesCentavos / totalSalesCentavos) * 100 : 0,
+      })),
+    };
   },
 });

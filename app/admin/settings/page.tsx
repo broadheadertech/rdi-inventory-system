@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import {
   Upload, Trash2, Palette, Pencil, Plus, ToggleLeft, ToggleRight,
 } from "lucide-react";
+import Link from "next/link";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -542,6 +543,38 @@ export default function AdminSettingsPage() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingFavicon, setUploadingFavicon] = useState(false);
 
+  // Sales target local state (stored as peso strings in the input; centavos on the server)
+  const serverMonthlyCentavos = Number(settings?.orgMonthlyTargetCentavos ?? 0);
+  const [monthlyTargetPesos, setMonthlyTargetPesos] = useState<string | null>(null);
+  const [savingTargets, setSavingTargets] = useState(false);
+
+  const displayMonthly =
+    monthlyTargetPesos ?? (serverMonthlyCentavos > 0 ? String(serverMonthlyCentavos / 100) : "");
+
+  const monthlyPesosNumber = Number(displayMonthly);
+  const impliedYearlyPesos =
+    Number.isFinite(monthlyPesosNumber) && monthlyPesosNumber > 0 ? monthlyPesosNumber * 12 : 0;
+
+  const targetsHaveChanges =
+    monthlyTargetPesos !== null &&
+    monthlyTargetPesos !== (serverMonthlyCentavos > 0 ? String(serverMonthlyCentavos / 100) : "");
+
+  async function handleSaveTargets() {
+    if (monthlyTargetPesos === null) return;
+    setSavingTargets(true);
+    try {
+      const pesos = Number(monthlyTargetPesos);
+      const centavos = Number.isFinite(pesos) && pesos > 0 ? Math.round(pesos * 100) : 0;
+      await updateSetting({ key: "orgMonthlyTargetCentavos", value: String(centavos) });
+      setMonthlyTargetPesos(null);
+      toast.success("Monthly sales target saved");
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setSavingTargets(false);
+    }
+  }
+
   // Resolve display values (local edits take priority over server)
   const displayName = brandName ?? settings?.brandName ?? "RedBox Apparel";
   const displayPrimary = brandPrimary ?? settings?.brandPrimary ?? "#dc2626";
@@ -615,6 +648,64 @@ export default function AdminSettingsPage() {
           Manage branding, colors, and size groups
         </p>
       </div>
+
+      {/* ── Product Code Configuration ──────────────────────────────────── */}
+      <SectionCard
+        title="Product Code Configuration"
+        description="Configure the codes that form auto-generated style codes (Brand, Department, Division, Category, etc.)"
+        action={
+          <Link href="/admin/settings/product-codes">
+            <Button size="sm" variant="outline">
+              Configure Codes
+            </Button>
+          </Link>
+        }
+      >
+        <p className="text-xs text-muted-foreground">
+          Style codes are auto-generated from configured attribute codes: Brand + Department + Division + Category + Sub-Category + Season + Year + Production + Outlier + Sequence
+        </p>
+      </SectionCard>
+
+      {/* ── Sales Target ───────────────────────────────────────────────────── */}
+      <SectionCard
+        title="Sales Target"
+        description="Company-wide monthly sales target used by reports (Against Target KPI) and People Performance tiers"
+        action={
+          <Button
+            size="sm"
+            onClick={handleSaveTargets}
+            disabled={savingTargets || !targetsHaveChanges}
+          >
+            {savingTargets ? "Saving..." : "Save Target"}
+          </Button>
+        }
+      >
+        <div className="max-w-md space-y-2">
+          <Label htmlFor="org-monthly-target">Monthly Target (₱)</Label>
+          <Input
+            id="org-monthly-target"
+            type="number"
+            min={0}
+            step={1}
+            placeholder="0"
+            value={displayMonthly}
+            onChange={(e) => setMonthlyTargetPesos(e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            Prorated to any report date range: target = monthly × (days ÷ 30). For a full Jan–Dec year, this is
+            multiplied by 12.
+            {impliedYearlyPesos > 0 && (
+              <>
+                {" "}Implied annual target:{" "}
+                <span className="font-medium text-foreground">
+                  ₱{impliedYearlyPesos.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                .
+              </>
+            )}
+          </p>
+        </div>
+      </SectionCard>
 
       {/* ── Site Logo ──────────────────────────────────────────────────────── */}
       <SectionCard

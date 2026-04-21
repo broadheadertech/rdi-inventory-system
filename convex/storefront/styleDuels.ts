@@ -68,8 +68,10 @@ export const getCurrentDuel = query({
         ? await ctx.storage.getUrl(primary.storageId)
         : null;
 
-      const category = await ctx.db.get(style.categoryId);
-      const brand = category ? await ctx.db.get(category.brandId) : null;
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+      const brand = style.brandId
+        ? await ctx.db.get(style.brandId)
+        : category ? await ctx.db.get(category.brandId) : null;
 
       return {
         _id: style._id,

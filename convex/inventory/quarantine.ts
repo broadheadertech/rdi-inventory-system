@@ -53,8 +53,10 @@ export const getQuarantinedItems = query({
       items.map(async (item) => {
         const variant = await ctx.db.get(item.variantId);
         const style = variant ? await ctx.db.get(variant.styleId) : null;
-        const category = style ? await ctx.db.get(style.categoryId) : null;
-        const brand = category ? await ctx.db.get(category.brandId) : null;
+        const category = style && style.categoryId ? await ctx.db.get(style.categoryId) : null;
+        const brand = style?.brandId
+          ? await ctx.db.get(style.brandId)
+          : category ? await ctx.db.get(category.brandId) : null;
         const branch = await ctx.db.get(item.branchId);
 
         return {

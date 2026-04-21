@@ -52,7 +52,7 @@ export const getBestsellers = query({
     const activeStyleMap = new Map(
       allStyles
         .filter(
-          (s) => s.isActive && activeCategoryIds.has(String(s.categoryId))
+          (s) => s.isActive && s.categoryId !== undefined && activeCategoryIds.has(String(s.categoryId))
         )
         .map((s) => [String(s._id), s])
     );
@@ -81,7 +81,7 @@ export const getBestsellers = query({
     const allBranches = await ctx.db.query("branches").collect();
     const warehouseIds = new Set(
       allBranches
-        .filter((b) => b.type === "warehouse")
+        .filter((b) => b.channel === "warehouse")
         .map((b) => b._id as string)
     );
 
@@ -89,10 +89,10 @@ export const getBestsellers = query({
     return Promise.all(
       sorted.map(async ([styleId, soldCount]) => {
         const style = activeStyleMap.get(styleId)!;
-        const category = categoryMap.get(String(style.categoryId));
-        const brand = category
-          ? brandMap.get(String(category.brandId))
-          : null;
+        const category = style.categoryId ? categoryMap.get(String(style.categoryId)) : null;
+        const brand = style.brandId
+          ? brandMap.get(String(style.brandId))
+          : category ? brandMap.get(String(category.brandId)) : null;
 
         // Primary image
         const images = await ctx.db

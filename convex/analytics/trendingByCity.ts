@@ -97,10 +97,11 @@ export const getTrendingInCity = query({
       const style = await ctx.db.get(styleIdStr as Id<"styles">);
       if (!style || !style.isActive) continue;
 
-      const category = await ctx.db.get(style.categoryId);
+      const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
       let brandName = "Unknown Brand";
-      if (category) {
-        const brand = await ctx.db.get(category.brandId);
+      const brandId = style.brandId ?? (category ? category.brandId : null);
+      if (brandId) {
+        const brand = await ctx.db.get(brandId);
         if (brand) brandName = brand.name;
       }
 

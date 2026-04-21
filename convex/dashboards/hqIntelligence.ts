@@ -58,7 +58,7 @@ export const getSmartAlerts = query({
       .query("branches")
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = allBranches.filter((b) => b.type !== "warehouse");
+    const retailBranches = allBranches.filter((b) => b.channel !== "warehouse");
     const branchNameMap = new Map(allBranches.map((b) => [b._id as string, b.name]));
 
     const alerts: SmartAlert[] = [];
@@ -381,7 +381,7 @@ export const getBranchPerformanceRanking = query({
       .query("branches")
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = branches.filter((b) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b) => b.channel !== "warehouse");
 
     const results = await Promise.all(
       retailBranches.map(async (branch) => {
@@ -431,7 +431,7 @@ export const getStockDistributionMatrix = query({
       .query("branches")
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = allBranches.filter((b) => b.type !== "warehouse");
+    const retailBranches = allBranches.filter((b) => b.channel !== "warehouse");
 
     // Top 10 selling products in period
     const allTxns = (
@@ -537,7 +537,7 @@ export const getTransferOpportunities = query({
       .query("branches")
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = allBranches.filter((b) => b.type !== "warehouse");
+    const retailBranches = allBranches.filter((b) => b.channel !== "warehouse");
     const branchNameMap = new Map(allBranches.map((b) => [b._id as string, b.name]));
 
     // Active restock suggestions = branches that NEED stock
@@ -653,7 +653,7 @@ export const getFulfillmentSpeedComparison = query({
       .query("branches")
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = allBranches.filter((b) => b.type !== "warehouse");
+    const retailBranches = allBranches.filter((b) => b.channel !== "warehouse");
     const branchNameMap = new Map(allBranches.map((b) => [b._id as string, b.name]));
 
     const thirtyDaysAgo = Date.now() - 30 * DAY_MS;

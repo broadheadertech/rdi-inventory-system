@@ -125,6 +125,34 @@ export const createVariant = mutation({
       }
     }
 
+    // Auto-assign color code letter (A, B, C...) per unique color within this style
+    const siblings = await ctx.db
+      .query("variants")
+      .withIndex("by_style", (q) => q.eq("styleId", args.styleId))
+      .collect();
+
+    const colorNorm = args.color.trim().toLowerCase();
+    const colorMap = new Map<string, string>(); // normalized color → letter
+    for (const v of siblings) {
+      const cn = v.color.trim().toLowerCase();
+      if (!colorMap.has(cn) && v.colorCode) {
+        colorMap.set(cn, v.colorCode);
+      }
+    }
+
+    let colorCode = colorMap.get(colorNorm);
+    if (!colorCode) {
+      // Assign next letter
+      const usedLetters = new Set(colorMap.values());
+      for (let i = 0; i < 26; i++) {
+        const letter = String.fromCharCode(65 + i); // A, B, C...
+        if (!usedLetters.has(letter)) {
+          colorCode = letter;
+          break;
+        }
+      }
+    }
+
     const variantId = await ctx.db.insert("variants", {
       styleId: args.styleId,
       sku: args.sku,
@@ -135,6 +163,7 @@ export const createVariant = mutation({
       gender: args.gender,
       priceCentavos: args.priceCentavos,
       costPriceCentavos: args.costPriceCentavos,
+      colorCode,
       isActive: true,
       createdAt: Date.now(),
       updatedAt: Date.now(),

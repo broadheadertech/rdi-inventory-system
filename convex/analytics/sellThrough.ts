@@ -277,7 +277,7 @@ async function enrichStyles(
   }
 
   const catIds = [...new Set(
-    [...styleMap.values()].map((s) => String(s.categoryId))
+    [...styleMap.values()].map((s) => String(s.categoryId ?? ""))
   )];
   const catDocs = await Promise.all(
     catIds.map((id) => ctx.db.get(id as Id<"categories">))
@@ -329,7 +329,7 @@ export const getSellThroughAnalysis = query({
       const allStyles: Doc<"styles">[] = await ctx.db.query("styles").collect();
       brandStyleIds = new Set(
         allStyles
-          .filter((s: Doc<"styles">) => catIds.has(String(s.categoryId)))
+          .filter((s: Doc<"styles">) => s.categoryId ? catIds.has(String(s.categoryId)) : false)
           .map((s: Doc<"styles">) => String(s._id))
       );
     }
@@ -364,7 +364,7 @@ export const getSellThroughAnalysis = query({
 
     const items = filtered.map((entry) => {
       const style = styleMap.get(entry.styleId);
-      const cat = style ? catMap.get(String(style.categoryId)) : null;
+      const cat = style && style.categoryId ? catMap.get(String(style.categoryId)) : null;
       const brandName = cat ? brandMap.get(String(cat.brandId)) ?? "" : "";
 
       return {
@@ -434,7 +434,7 @@ export const getBranchSellThrough = query({
 
     const items = filtered.map((entry) => {
       const style = styleMap.get(entry.styleId);
-      const cat = style ? catMap.get(String(style.categoryId)) : null;
+      const cat = style && style.categoryId ? catMap.get(String(style.categoryId)) : null;
       const brandName = cat ? brandMap.get(String(cat.brandId)) ?? "" : "";
 
       return {
@@ -493,8 +493,10 @@ export const lookupByBarcode = query({
     const style = await ctx.db.get(variant.styleId);
     if (!style) return null;
 
-    const category = await ctx.db.get(style.categoryId);
-    const brand = category ? await ctx.db.get(category.brandId) : null;
+    const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+    const brand = style.brandId
+      ? await ctx.db.get(style.brandId)
+      : category ? await ctx.db.get(category.brandId) : null;
 
     // Get sell-through data for this style
     const { styles, branches } = await computeSellThrough(ctx, {

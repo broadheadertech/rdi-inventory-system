@@ -59,16 +59,20 @@ async function buildVariantHierarchy(
     const style = styleCache.get(styleKey)!;
     if (!style) continue;
 
-    const catKey = style.categoryId as string;
-    if (!categoryCache.has(catKey)) {
-      categoryCache.set(catKey, await ctx.db.get(style.categoryId) ?? null);
+    const catKey = style.categoryId ? (style.categoryId as string) : "";
+    let category: Doc<"categories"> | null = null;
+    if (catKey) {
+      if (!categoryCache.has(catKey)) {
+        categoryCache.set(catKey, await ctx.db.get(style.categoryId!) ?? null);
+      }
+      category = categoryCache.get(catKey)!;
     }
-    const category = categoryCache.get(catKey)!;
-    if (!category) continue;
+    if (!style.brandId && !category) continue;
 
-    const brandKey = category.brandId as string;
+    const brandKey = (style.brandId ?? category?.brandId) as string;
+    if (!brandKey) continue;
     if (!brandCache.has(brandKey)) {
-      brandCache.set(brandKey, await ctx.db.get(category.brandId) ?? null);
+      brandCache.set(brandKey, await ctx.db.get(brandKey as Id<"brands">) ?? null);
     }
     const brand = brandCache.get(brandKey)!;
     if (!brand) continue;
@@ -76,8 +80,8 @@ async function buildVariantHierarchy(
     map.set(vid, {
       brandId: brand._id as string,
       brandName: brand.name,
-      categoryId: category._id as string,
-      categoryName: category.name,
+      categoryId: (category?._id ?? "") as string,
+      categoryName: category?.name ?? "",
       styleName: style.name,
       size: variant.size,
       color: variant.color,
@@ -137,7 +141,7 @@ async function fetchAllRetailTransactions(
     .query("branches")
     .filter((q: any) => q.eq(q.field("isActive"), true))
     .collect();
-  const retailBranches = branches.filter((b: any) => b.type !== "warehouse");
+  const retailBranches = branches.filter((b: any) => b.channel !== "warehouse");
   const allTxns = (
     await Promise.all(
       retailBranches.map((branch: any) =>
@@ -689,7 +693,7 @@ export const getHQRestockVsLayLow = query({
       .query("branches")
       .filter((q: any) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = branches.filter((b: any) => b.type !== "warehouse");
+    const retailBranches = branches.filter((b: any) => b.channel !== "warehouse");
 
     const allInventory = (
       await Promise.all(

@@ -55,7 +55,7 @@ export const createTryOnReservation = mutation({
     if (!branch || !branch.isActive) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Branch not found." });
     }
-    if (branch.type === "warehouse") {
+    if (branch.channel === "warehouse") {
       throw new ConvexError({ code: "INVALID_INPUT", message: "Try-on is only available at retail branches." });
     }
 

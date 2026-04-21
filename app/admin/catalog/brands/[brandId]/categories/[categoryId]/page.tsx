@@ -102,8 +102,8 @@ export default function StylesPage() {
   const category = useQuery(api.catalog.categories.getCategoryById, {
     categoryId,
   });
-  const styles = useQuery(api.catalog.styles.listStyles, { categoryId });
-  const createStyle = useMutation(api.catalog.styles.createStyle);
+  const styles = useQuery(api.catalog.styles.listStylesByLegacyCategory, { categoryId }) ?? [];
+  const createStyle = useMutation(api.catalog.styles.createStyleLegacy);
   const updateStyle = useMutation(api.catalog.styles.updateStyle);
   const deactivateStyle = useMutation(api.catalog.styles.deactivateStyle);
   const reactivateStyle = useMutation(api.catalog.styles.reactivateStyle);
@@ -263,7 +263,7 @@ export default function StylesPage() {
         styleId: editingStyle._id,
         name: editForm.name.trim(),
         description: editForm.description.trim(),
-        basePriceCentavos: Math.round(parseFloat(editForm.basePrice) * 100),
+        srp: parseFloat(editForm.basePrice),
       });
       toast.success("Style updated successfully");
       setEditingStyle(null);

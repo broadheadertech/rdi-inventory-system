@@ -190,7 +190,7 @@ export const listBranchesForFilter = query({
     await requireRole(ctx, ["admin"] as const);
     const branches = await ctx.db
       .query("branches")
-      .filter((q) => q.eq(q.field("type"), "retail"))
+      .filter((q) => q.neq(q.field("channel"), "warehouse"))
       .collect();
     return branches.map((b) => ({ _id: b._id, name: b.name }));
   },

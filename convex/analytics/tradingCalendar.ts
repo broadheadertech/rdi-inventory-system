@@ -68,7 +68,7 @@ export const getCalendarMonth = query({
       .query("branches")
       .filter((q) => q.eq(q.field("isActive"), true))
       .collect();
-    const retailBranches = allBranches.filter((b) => b.type !== "warehouse");
+    const retailBranches = allBranches.filter((b) => b.channel !== "warehouse");
 
     const allTxns = (
       await Promise.all(

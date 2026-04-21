@@ -45,7 +45,7 @@ export const getHQInventoryHealth = query({
         return {
           branchId: branch._id as string,
           branchName: branch.name,
-          branchType: branch.type ?? "retail",
+          branchType: branch.channel === "warehouse" ? "warehouse" : "retail",
           totalSkus,
           healthy,
           lowStock,
@@ -129,7 +129,7 @@ export const getHQSlowMovers = query({
           return inv.map((i) => ({
             ...i,
             branchName: branch.name,
-            branchType: branch.type ?? "retail",
+            branchType: branch.channel === "warehouse" ? "warehouse" : "retail",
           }));
         })
       )

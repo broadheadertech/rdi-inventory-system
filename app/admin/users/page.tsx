@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Pencil, UserX, UserCheck, Search } from "lucide-react";
+import { Pencil, UserX, UserCheck, Search, RefreshCw } from "lucide-react";
 
 const ROLE_OPTIONS = [
   { value: "admin", label: "Admin" },
@@ -62,8 +62,10 @@ export default function UsersPage() {
   const deactivateUser = useMutation(api.auth.users.deactivateUser);
   const reactivateUser = useMutation(api.auth.users.reactivateUser);
   const updateUser = useMutation(api.auth.users.updateUser);
+  const syncClerkUsers = useAction(api.auth.users.syncClerkUsers);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [isSyncing, setIsSyncing] = useState(false);
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({
@@ -197,11 +199,34 @@ export default function UsersPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">User Management</h1>
-        <p className="text-sm text-muted-foreground">
-          {filteredUsers?.length ?? 0} user
-          {(filteredUsers?.length ?? 0) !== 1 ? "s" : ""}
-        </p>
+        <div>
+          <h1 className="text-2xl font-bold">User Management</h1>
+          <p className="text-sm text-muted-foreground">
+            {filteredUsers?.length ?? 0} user
+            {(filteredUsers?.length ?? 0) !== 1 ? "s" : ""}
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isSyncing}
+          onClick={async () => {
+            setIsSyncing(true);
+            try {
+              const result = await syncClerkUsers();
+              toast.success(
+                `Sync complete: ${result.synced} added, ${result.updated} updated, ${result.skipped} unchanged`
+              );
+            } catch (err: any) {
+              toast.error(`Sync failed: ${err.message ?? "Unknown error"}`);
+            } finally {
+              setIsSyncing(false);
+            }
+          }}
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />
+          {isSyncing ? "Syncing..." : "Sync from Clerk"}
+        </Button>
       </div>
 
       {/* Filters */}

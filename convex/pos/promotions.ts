@@ -109,10 +109,11 @@ export const getVariantHierarchy = query({
       const style = await ctx.db.get(variant.styleId);
       if (!style) continue;
 
-      const categoryId = String(style.categoryId);
-      let brandId = categoryBrandCache.get(categoryId);
+      const categoryId = String(style.categoryId ?? "");
+      // Resolve brandId: new path (style.brandId) or legacy (category.brandId)
+      let brandId = style.brandId ? String(style.brandId) : categoryBrandCache.get(categoryId);
 
-      if (!brandId) {
+      if (!brandId && style.categoryId) {
         const category = await ctx.db.get(style.categoryId);
         if (category) {
           brandId = String(category.brandId);

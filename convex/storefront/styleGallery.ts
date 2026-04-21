@@ -56,9 +56,10 @@ export const getGalleryPhotos = query({
         let brandName = "Unknown Brand";
         if (style) {
           styleName = style.name;
-          const category = await ctx.db.get(style.categoryId);
-          if (category) {
-            const brand = await ctx.db.get(category.brandId);
+          const category = style.categoryId ? await ctx.db.get(style.categoryId) : null;
+          const resolvedBrandId = style.brandId ?? (category ? category.brandId : null);
+          if (resolvedBrandId) {
+            const brand = await ctx.db.get(resolvedBrandId);
             if (brand) brandName = brand.name;
           }
         }
