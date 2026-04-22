@@ -94,7 +94,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   online: "Online",
   outlet: "Outlet",
   popup: "Popup",
-  dtc: "DTC",
+  dtc: "Direct To Consumer (DTC)",
   warehouse: "Warehouse",
   outright: "Outright",
 };
@@ -616,7 +616,7 @@ function DetailsTab({ branchId }: { branchId: Id<"branches"> }) {
       name: branch.name,
       address: branch.address,
       phone: branch.phone ?? "",
-      channel: (branch as any).channel ?? "none",
+      channel: branch.channel ?? "none",
       classification: branch.classification ?? "none",
       latitude: branch.latitude?.toString() ?? "",
       longitude: branch.longitude?.toString() ?? "",

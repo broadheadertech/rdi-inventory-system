@@ -13,6 +13,8 @@ import {
   Package,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePagination } from "@/lib/hooks/usePagination";
+import { TablePagination } from "@/components/shared/TablePagination";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -72,7 +74,7 @@ const CHANNEL_LABELS: Record<Channel, string> = {
   online: "Online",
   outlet: "Outlet",
   popup: "Popup",
-  dtc: "DTC",
+  dtc: "Direct To Consumer (DTC)",
   warehouse: "Warehouse",
   outright: "Outright",
 };
@@ -230,6 +232,13 @@ export default function HqReportsPage() {
         }[];
       }
     | undefined;
+
+  // Total revenue across the full performance dataset (used for "% of Total")
+  const totalPerformanceRevenue = useMemo(
+    () => (performance ?? []).reduce((s, r) => s + r.revenueCentavos, 0),
+    [performance],
+  );
+  const performancePagination = usePagination(performance ?? [], 10);
 
   const presets: { key: Exclude<Preset, "custom">; label: string }[] = [
     { key: "daily", label: "Daily" },
@@ -524,30 +533,25 @@ export default function HqReportsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(() => {
-                    const totalRevenue = performance.reduce(
-                      (s, r) => s + r.revenueCentavos,
-                      0,
-                    );
-                    return performance.map((row) => {
-                      const perf = row.performancePercent ?? 0;
-                      const tier = classifyPerformance(perf);
-                      const tierCfg = PERF_TIER_MAP[tier];
-                      const hasTarget = (row.targetCentavos ?? 0) > 0;
-                      return (
-                        <tr key={row.key} className="border-b last:border-0">
-                          <td className="py-2 font-medium">{row.label}</td>
-                          <td className="py-2 text-right tabular-nums">
-                            {formatCentavos(row.revenueCentavos)}
-                          </td>
-                          <td className="py-2 text-right tabular-nums">
-                            {row.unitsSold.toLocaleString("en-PH")}
-                          </td>
-                          <td className="py-2 text-right tabular-nums text-muted-foreground">
-                            {totalRevenue > 0
-                              ? `${((row.revenueCentavos / totalRevenue) * 100).toFixed(1)}%`
-                              : "—"}
-                          </td>
+                  {performancePagination.paginatedData.map((row) => {
+                    const perf = row.performancePercent ?? 0;
+                    const tier = classifyPerformance(perf);
+                    const tierCfg = PERF_TIER_MAP[tier];
+                    const hasTarget = (row.targetCentavos ?? 0) > 0;
+                    return (
+                      <tr key={row.key} className="border-b last:border-0">
+                        <td className="py-2 font-medium">{row.label}</td>
+                        <td className="py-2 text-right tabular-nums">
+                          {formatCentavos(row.revenueCentavos)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {row.unitsSold.toLocaleString("en-PH")}
+                        </td>
+                        <td className="py-2 text-right tabular-nums text-muted-foreground">
+                          {totalPerformanceRevenue > 0
+                            ? `${((row.revenueCentavos / totalPerformanceRevenue) * 100).toFixed(1)}%`
+                            : "—"}
+                        </td>
                           {dimension === "people" && (
                             <>
                               <td className="py-2 text-right tabular-nums text-muted-foreground">
@@ -588,17 +592,28 @@ export default function HqReportsPage() {
                               <td className="py-2 text-xs text-muted-foreground">
                                 {hasTarget ? tierCfg.action : "—"}
                               </td>
-                            </>
-                          )}
-                        </tr>
-                      );
-                    });
-                  })()}
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
           )}
         </div>
+
+        {performance && performance.length > 10 && (
+          <TablePagination
+            currentPage={performancePagination.currentPage}
+            totalPages={performancePagination.totalPages}
+            totalItems={performancePagination.totalItems}
+            hasNextPage={performancePagination.hasNextPage}
+            hasPrevPage={performancePagination.hasPrevPage}
+            onNextPage={performancePagination.nextPage}
+            onPrevPage={performancePagination.prevPage}
+          />
+        )}
 
         {dimension === "people" && (
           <div className="rounded-lg border bg-muted/20 p-4 space-y-3">

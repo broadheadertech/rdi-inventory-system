@@ -162,7 +162,7 @@ export default function SellThroughPage() {
     );
   });
 
-  const pagination = usePagination(filteredItems, 20);
+  const pagination = usePagination(filteredItems, 10);
 
   // Lifecycle filtering / sorting
   const filteredLcItems = useMemo(() => {
@@ -195,7 +195,7 @@ export default function SellThroughPage() {
     });
   }, [lifecycleData, lcClassFilter, lcSortCol, lcSortDir, searchQuery]);
 
-  const lcPagination = usePagination(filteredLcItems, 20);
+  const lcPagination = usePagination(filteredLcItems, 10);
 
   const lcCounts = useMemo(() => {
     if (!lifecycleData?.items) return null;

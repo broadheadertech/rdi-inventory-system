@@ -85,7 +85,7 @@ export default function WarehouseFulfillmentSpeedPage() {
     periodDays: parseInt(periodDays),
   });
 
-  const pagination = usePagination(data?.details ?? [], 15);
+  const pagination = usePagination(data?.details ?? [], 10);
 
   return (
     <div className="space-y-6">

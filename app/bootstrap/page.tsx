@@ -19,8 +19,9 @@ export default function BootstrapPage() {
       const res = await syncClerkUsers();
       setResult(res);
       setStatus("done");
-    } catch (err: any) {
-      setError(err?.data?.message ?? err?.message ?? "Sync failed");
+    } catch (err) {
+      const e = err as { data?: { message?: string }; message?: string };
+      setError(e?.data?.message ?? e?.message ?? "Sync failed");
       setStatus("error");
     }
   };

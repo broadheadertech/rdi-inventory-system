@@ -59,7 +59,7 @@ export default function InventoryAgingPage() {
     return true;
   });
 
-  const pagination = usePagination(filteredItems, 20);
+  const pagination = usePagination(filteredItems, 10);
 
   return (
     <div className="space-y-6">

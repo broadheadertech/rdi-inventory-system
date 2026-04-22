@@ -189,9 +189,9 @@ export default function CatalogPage() {
     setEditingBrand(brand);
     setEditForm({
       name: brand.name,
-      code: (brand as any).code ?? "",
+      code: brand.code ?? "",
       tags: brand.tags ?? [],
-      parLevel: (brand as any).parLevel != null ? String((brand as any).parLevel) : "",
+      parLevel: brand.parLevel != null ? String(brand.parLevel) : "",
     });
     setEditErrors({});
   };
@@ -441,8 +441,8 @@ export default function CatalogPage() {
                     </Link>
                   </TableCell>
                   <TableCell>
-                    {(brand as any).code ? (
-                      <span className="font-mono font-semibold text-sm">{(brand as any).code}</span>
+                    {brand.code ? (
+                      <span className="font-mono font-semibold text-sm">{brand.code}</span>
                     ) : (
                       <span className="text-xs text-muted-foreground">-</span>
                     )}

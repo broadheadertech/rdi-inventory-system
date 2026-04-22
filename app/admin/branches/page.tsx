@@ -88,7 +88,7 @@ const CHANNEL_LABELS: Record<string, string> = {
   online: "Online",
   outlet: "Outlet",
   popup: "Popup",
-  dtc: "DTC",
+  dtc: "Direct To Consumer (DTC)",
   warehouse: "Warehouse",
   outright: "Outright",
 };
@@ -230,7 +230,7 @@ export default function BranchesPage() {
       address: branch.address,
       phone: branch.phone ?? "",
       classification: branch.classification ?? "none",
-      channel: (branch as any).channel ?? "none",
+      channel: branch.channel ?? "none",
       latitude: branch.latitude?.toString() ?? "",
       longitude: branch.longitude?.toString() ?? "",
       timezone: branch.configuration?.timezone ?? "none",
@@ -394,9 +394,9 @@ export default function BranchesPage() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    {(branch as any).channel ? (
-                      <Badge variant="secondary" className={CHANNEL_COLORS[(branch as any).channel] ?? ""}>
-                        {CHANNEL_LABELS[(branch as any).channel] ?? (branch as any).channel}
+                    {branch.channel ? (
+                      <Badge variant="secondary" className={CHANNEL_COLORS[branch.channel] ?? ""}>
+                        {CHANNEL_LABELS[branch.channel] ?? branch.channel}
                       </Badge>
                     ) : (
                       <span className="text-muted-foreground">—</span>

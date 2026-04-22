@@ -88,7 +88,7 @@ export default function FulfillmentSpeedPage() {
     branchId: branchFilter !== "all" ? (branchFilter as Id<"branches">) : undefined,
   });
 
-  const pagination = usePagination(data?.details ?? [], 15);
+  const pagination = usePagination(data?.details ?? [], 10);
 
   return (
     <div className="space-y-6">

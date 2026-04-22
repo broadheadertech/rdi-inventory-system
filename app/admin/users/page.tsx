@@ -217,8 +217,9 @@ export default function UsersPage() {
               toast.success(
                 `Sync complete: ${result.synced} added, ${result.updated} updated, ${result.skipped} unchanged`
               );
-            } catch (err: any) {
-              toast.error(`Sync failed: ${err.message ?? "Unknown error"}`);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : "Unknown error";
+              toast.error(`Sync failed: ${message}`);
             } finally {
               setIsSyncing(false);
             }

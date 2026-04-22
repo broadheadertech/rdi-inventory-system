@@ -41,7 +41,7 @@ function StockBadge({ quantity, threshold }: { quantity: number; threshold: numb
 // Page
 // ═══════════════════════════════════════════════════════════════════════════════
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 export default function BranchAlertsPage() {
   const alerts = useQuery(api.inventory.alerts.getLowStockAlerts);
