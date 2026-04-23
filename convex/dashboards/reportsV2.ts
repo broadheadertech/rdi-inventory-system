@@ -309,6 +309,7 @@ export const getPerformanceByDimension = query({
     ...filterArgs,
     dimension: v.union(
       v.literal("people"),
+      v.literal("department"),
       v.literal("category"),
       v.literal("sku"),
       v.literal("size"),
@@ -467,6 +468,13 @@ export const getPerformanceByDimension = query({
           } else {
             const label = await getPC(catPcId);
             bump(catPcId as string, label, item.lineTotalCentavos, item.quantity);
+          }
+        } else if (args.dimension === "department") {
+          if (!style.departmentId) {
+            bump("(none)", "(none)", item.lineTotalCentavos, item.quantity);
+          } else {
+            const label = await getPC(style.departmentId);
+            bump(style.departmentId as string, label, item.lineTotalCentavos, item.quantity);
           }
         } else if (args.dimension === "fit") {
           if (!style.fitId) {
