@@ -210,6 +210,7 @@ export default function HqReportsPage() {
         label: string;
         revenueCentavos: number;
         unitsSold: number;
+        currentSohUnits?: number;
         targetCentavos?: number;
         performancePercent?: number;
       }[]
@@ -523,6 +524,9 @@ export default function HqReportsPage() {
                     <th className="pb-2 text-right font-medium">Revenue</th>
                     <th className="pb-2 text-right font-medium">Units</th>
                     <th className="pb-2 text-right font-medium">% of Total</th>
+                    {dimension !== "people" && (
+                      <th className="pb-2 text-right font-medium">SOH %</th>
+                    )}
                     {dimension === "people" && (
                       <>
                         <th className="pb-2 text-right font-medium">Target</th>
@@ -553,6 +557,16 @@ export default function HqReportsPage() {
                             ? `${((row.revenueCentavos / totalPerformanceRevenue) * 100).toFixed(1)}%`
                             : "—"}
                         </td>
+                        {dimension !== "people" && (() => {
+                          const soh = row.currentSohUnits ?? 0;
+                          const flow = soh + row.unitsSold;
+                          const sohPct = flow > 0 ? (soh / flow) * 100 : 0;
+                          return (
+                            <td className="py-2 text-right tabular-nums text-muted-foreground">
+                              {flow > 0 ? `${sohPct.toFixed(1)}%` : "—"}
+                            </td>
+                          );
+                        })()}
                           {dimension === "people" && (
                             <>
                               <td className="py-2 text-right tabular-nums text-muted-foreground">

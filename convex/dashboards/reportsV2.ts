@@ -336,6 +336,7 @@ export const getPerformanceByDimension = query({
       label: string;
       revenueCentavos: number;
       unitsSold: number;
+      currentSohUnits?: number;
       targetCentavos?: number;
       performancePercent?: number;
     };
@@ -347,6 +348,20 @@ export const getPerformanceByDimension = query({
         cur.unitsSold += units;
       } else {
         agg.set(key, { key, label, revenueCentavos: revenue, unitsSold: units });
+      }
+    };
+    const bumpSoh = (key: string, label: string, units: number) => {
+      const cur = agg.get(key);
+      if (cur) {
+        cur.currentSohUnits = (cur.currentSohUnits ?? 0) + units;
+      } else {
+        agg.set(key, {
+          key,
+          label,
+          revenueCentavos: 0,
+          unitsSold: 0,
+          currentSohUnits: units,
+        });
       }
     };
 
@@ -499,6 +514,79 @@ export const getPerformanceByDimension = query({
             const label = await getPC(style.fitId);
             bump(style.fitId as string, label, item.lineTotalCentavos, item.quantity);
           }
+        }
+      }
+    }
+
+    // ── Current SOH per row — scoped to allowed branches & brand filter ──
+    const allInventory = await ctx.db.query("inventory").collect();
+    const inventoryRows = allInventory.filter((inv) =>
+      allowedIds.includes(inv.branchId),
+    );
+    for (const inv of inventoryRows) {
+      if (inv.quantity <= 0) continue;
+
+      let variant = variantCache.get(inv.variantId as string);
+      if (variant === undefined) {
+        variant = await ctx.db.get(inv.variantId);
+        variantCache.set(inv.variantId as string, variant);
+      }
+      if (!variant) continue;
+
+      let style = styleCache.get(variant.styleId as string);
+      if (style === undefined) {
+        style = await ctx.db.get(variant.styleId);
+        styleCache.set(variant.styleId as string, style);
+      }
+      if (!style) continue;
+
+      if (args.brandId) {
+        const bId = await resolveStyleBrandId(ctx as any, style, categoryBrandCache);
+        if (bId !== args.brandId) continue;
+      }
+
+      if (args.dimension === "sku") {
+        const label = variant.sku || "(no SKU)";
+        bumpSoh(variant._id as string, label, inv.quantity);
+      } else if (args.dimension === "size") {
+        const label = variant.size || "(none)";
+        bumpSoh(label, label, inv.quantity);
+      } else if (args.dimension === "color") {
+        const label = variant.color || "(none)";
+        bumpSoh(label, label, inv.quantity);
+      } else if (args.dimension === "category") {
+        const catPcId = style.productCategoryId ?? style.categoryId;
+        if (!catPcId) {
+          bumpSoh("(none)", "(none)", inv.quantity);
+        } else {
+          const label = await getPC(catPcId);
+          bumpSoh(catPcId as string, label, inv.quantity);
+        }
+      } else if (args.dimension === "department") {
+        let dept: "MENS" | "LADIES" | "UNISEX" | "(none)";
+        switch (variant.gender) {
+          case "mens":
+            dept = "MENS";
+            break;
+          case "womens":
+            dept = "LADIES";
+            break;
+          case "unisex":
+          case "kids":
+          case "boys":
+          case "girls":
+            dept = "UNISEX";
+            break;
+          default:
+            dept = "(none)";
+        }
+        bumpSoh(dept, dept, inv.quantity);
+      } else if (args.dimension === "fit") {
+        if (!style.fitId) {
+          bumpSoh("(none)", "(none)", inv.quantity);
+        } else {
+          const label = await getPC(style.fitId);
+          bumpSoh(style.fitId as string, label, inv.quantity);
         }
       }
     }
