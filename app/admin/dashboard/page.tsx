@@ -337,7 +337,7 @@ export default function HqDashboardPage() {
                           ? "text-amber-600"
                           : "text-red-600"
                   }
-                  footer={`Profit: ${formatCentavos(profit)}`}
+                  footer={`Gross Profit: ${formatCentavos(profit)}`}
                 />
               );
             })()}
@@ -397,7 +397,7 @@ export default function HqDashboardPage() {
                           ? "text-amber-600"
                           : "text-red-600"
                   }
-                  footer={`Retail: ${formatCentavos(retail)}`}
+                  footer={`Retail Value: ${formatCentavos(retail)}`}
                 />
               );
             })()}
