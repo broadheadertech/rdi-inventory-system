@@ -597,14 +597,18 @@ export const getPerformanceByDimension = query({
 
 // ─── getMovementsSummary ──────────────────────────────────────────────────────
 // Inventory flow within the selected filters & date range.
+//   bom            → SOH at the start of the period per branch
+//                    (currentSOH − receivedInPeriod + soldInPeriod + transferredOutInPeriod)
 //   received       → sum of inventoryBatches.quantity (branchId ∈ allowed, receivedAt in range)
+//                    (kept for the Net calculation; not surfaced as its own column)
 //   sold           → sum of transactionItems.quantity (branchId ∈ allowed, txn.createdAt in range)
 //   transferredOut → sum of transferItems.packedQuantity (fromBranchId ∈ allowed,
 //                    transfer.packedAt in range, status ∈ packed/inTransit/delivered)
 //   outgoing       = sold + transferredOut
-//   netChange      = received − outgoing
-//   liquidationRatePercent = outlet-channel sales / total sales × 100
-// Also returns a per-branch breakdown with the same columns.
+//   netChange      = received − outgoing  (period stock change; equals currentSOH − BOM)
+//   currentSohUnits = sum(inventory.quantity) for allowed branches (with brand filter)
+//   liquidationRatePercent = bom / currentSohUnits × 100
+// Also returns a per-branch breakdown with bom in place of received.
 
 const OUTGOING_TRANSFER_STATUSES = ["packed", "inTransit", "delivered"] as const;
 
@@ -649,17 +653,19 @@ export const getMovementsSummary = query({
 
     if (allowedIds.length === 0) {
       return {
+        bom: 0,
         received: 0,
         sold: 0,
         transferredOut: 0,
         outgoing: 0,
         netChange: 0,
+        currentSohUnits: 0,
         liquidationRatePercent: 0,
         byBranch: [] as Array<{
           branchId: string;
           branchName: string;
           channel: string | null;
-          received: number;
+          bom: number;
           sold: number;
           transferredOut: number;
           netChange: number;
@@ -776,46 +782,80 @@ export const getMovementsSummary = query({
         }
       }
     }
-    const liquidationRatePercent =
-      totalSalesCentavos > 0 ? (outletSalesCentavos / totalSalesCentavos) * 100 : 0;
+    // (legacy outlet/total ratio retained but no longer surfaced — replaced by BOM/MTD)
+    void totalSalesCentavos;
+    void outletSalesCentavos;
 
-    // Totals
+    // 5. Current SOH per allowed branch (with brand filter)
+    const currentSohByBranch = new Map<string, number>();
+    const inventoryRows = await ctx.db.query("inventory").collect();
+    for (const inv of inventoryRows) {
+      if (!allowedSet.has(inv.branchId as string)) continue;
+      if (inv.quantity <= 0) continue;
+      if (!(await matchesBrandFilter(inv.variantId))) continue;
+      currentSohByBranch.set(
+        inv.branchId as string,
+        (currentSohByBranch.get(inv.branchId as string) ?? 0) + inv.quantity,
+      );
+    }
+
+    // Totals — also derive BOM per branch:
+    //   BOM = currentSOH − received(period) + sold(period) + transferredOut(period)
+    let bomTotal = 0;
     let received = 0;
     let sold = 0;
     let transferredOut = 0;
+    let currentSohUnits = 0;
     const byBranch: Array<{
       branchId: string;
       branchName: string;
       channel: string | null;
-      received: number;
+      bom: number;
       sold: number;
       transferredOut: number;
       netChange: number;
     }> = [];
-    for (const [bId, agg] of perBranch.entries()) {
+
+    // Include branches that have current SOH but no period activity, so BOM still appears.
+    const allBranchKeys = new Set<string>([
+      ...perBranch.keys(),
+      ...currentSohByBranch.keys(),
+    ]);
+
+    for (const bId of allBranchKeys) {
+      const agg = perBranch.get(bId) ?? { received: 0, sold: 0, transferredOut: 0 };
+      const currentSoh = currentSohByBranch.get(bId) ?? 0;
+      const bom = currentSoh - agg.received + agg.sold + agg.transferredOut;
       received += agg.received;
       sold += agg.sold;
       transferredOut += agg.transferredOut;
+      bomTotal += bom;
+      currentSohUnits += currentSoh;
       const branch = byId.get(bId);
       if (!branch) continue;
       byBranch.push({
         branchId: bId,
         branchName: branch.name,
         channel: branch.channel ?? null,
-        received: agg.received,
+        bom,
         sold: agg.sold,
         transferredOut: agg.transferredOut,
         netChange: agg.received - agg.sold - agg.transferredOut,
       });
     }
-    byBranch.sort((a, b) => b.received + b.sold + b.transferredOut - (a.received + a.sold + a.transferredOut));
+    byBranch.sort((a, b) => b.bom + b.sold + b.transferredOut - (a.bom + a.sold + a.transferredOut));
+
+    const liquidationRatePercent =
+      currentSohUnits > 0 ? (bomTotal / currentSohUnits) * 100 : 0;
 
     return {
+      bom: bomTotal,
       received,
       sold,
       transferredOut,
       outgoing: sold + transferredOut,
       netChange: received - sold - transferredOut,
+      currentSohUnits,
       liquidationRatePercent,
       byBranch,
     };

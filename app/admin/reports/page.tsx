@@ -217,17 +217,19 @@ export default function HqReportsPage() {
     | undefined;
   const movements = useQuery(api.dashboards.reportsV2.getMovementsSummary, filterArgs) as
     | {
+        bom: number;
         received: number;
         sold: number;
         transferredOut: number;
         outgoing: number;
         netChange: number;
+        currentSohUnits: number;
         liquidationRatePercent: number;
         byBranch: {
           branchId: string;
           branchName: string;
           channel: string | null;
-          received: number;
+          bom: number;
           sold: number;
           transferredOut: number;
           netChange: number;
@@ -682,9 +684,9 @@ export default function HqReportsPage() {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <KpiCard
-            title="Received"
-            value={movements ? `${movements.received.toLocaleString("en-PH")} pcs` : undefined}
-            footer="Stock-in across allowed branches"
+            title="BOM"
+            value={movements ? `${movements.bom.toLocaleString("en-PH")} pcs` : undefined}
+            footer="Beginning of the Month Stocks"
           />
           <KpiCard
             title="Outgoing"
@@ -714,7 +716,7 @@ export default function HqReportsPage() {
           <KpiCard
             title="Liquidation Rate"
             value={movements ? formatPercent(movements.liquidationRatePercent) : undefined}
-            footer="Outlet-channel sales ÷ total sales"
+            footer="BOM ÷ MTD Stock"
           />
         </div>
 
@@ -736,7 +738,7 @@ export default function HqReportsPage() {
                   <tr className="border-b text-left text-muted-foreground">
                     <th className="pb-2 font-medium">Branch</th>
                     <th className="pb-2 font-medium">Channel</th>
-                    <th className="pb-2 text-right font-medium">Received</th>
+                    <th className="pb-2 text-right font-medium">BOM</th>
                     <th className="pb-2 text-right font-medium">Sold</th>
                     <th className="pb-2 text-right font-medium">Transferred Out</th>
                     <th className="pb-2 text-right font-medium">Net</th>
@@ -750,7 +752,7 @@ export default function HqReportsPage() {
                         {row.channel ?? "—"}
                       </td>
                       <td className="py-2 text-right tabular-nums">
-                        {row.received.toLocaleString("en-PH")}
+                        {row.bom.toLocaleString("en-PH")}
                       </td>
                       <td className="py-2 text-right tabular-nums">
                         {row.sold.toLocaleString("en-PH")}
@@ -780,7 +782,7 @@ export default function HqReportsPage() {
                       Total
                     </td>
                     <td className="pt-2 text-right tabular-nums">
-                      {movements.received.toLocaleString("en-PH")}
+                      {movements.bom.toLocaleString("en-PH")}
                     </td>
                     <td className="pt-2 text-right tabular-nums">
                       {movements.sold.toLocaleString("en-PH")}
