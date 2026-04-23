@@ -470,12 +470,28 @@ export const getPerformanceByDimension = query({
             bump(catPcId as string, label, item.lineTotalCentavos, item.quantity);
           }
         } else if (args.dimension === "department") {
-          if (!style.departmentId) {
-            bump("(none)", "(none)", item.lineTotalCentavos, item.quantity);
-          } else {
-            const label = await getPC(style.departmentId);
-            bump(style.departmentId as string, label, item.lineTotalCentavos, item.quantity);
+          // Department = variant.gender rolled up to existing department labels.
+          //   mens                 → MENS
+          //   womens               → LADIES
+          //   unisex/kids/boys/... → UNISEX
+          let dept: "MENS" | "LADIES" | "UNISEX" | "(none)";
+          switch (variant.gender) {
+            case "mens":
+              dept = "MENS";
+              break;
+            case "womens":
+              dept = "LADIES";
+              break;
+            case "unisex":
+            case "kids":
+            case "boys":
+            case "girls":
+              dept = "UNISEX";
+              break;
+            default:
+              dept = "(none)";
           }
+          bump(dept, dept, item.lineTotalCentavos, item.quantity);
         } else if (args.dimension === "fit") {
           if (!style.fitId) {
             bump("(none)", "(none)", item.lineTotalCentavos, item.quantity);
