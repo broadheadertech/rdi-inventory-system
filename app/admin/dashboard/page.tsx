@@ -5,6 +5,8 @@ import { api } from "@/convex/_generated/api";
 import Link from "next/link";
 import { useState, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { usePagination } from "@/lib/hooks/usePagination";
+import { TablePagination } from "@/components/shared/TablePagination";
 import {
   ResponsiveContainer,
   LineChart,
@@ -208,6 +210,7 @@ export default function HqDashboardPage() {
         }[];
       }
     | undefined;
+  const bucketDetailPagination = usePagination(bucketDetail?.items, 5);
   const branchCards = useQuery(api.dashboards.hqDashboard.getBranchStatusCards);
   const attentionItems = useQuery(api.dashboards.hqDashboard.getAttentionItems);
   const branchScores = useQuery(api.ai.branchScoring.getLatestBranchScores);
@@ -423,20 +426,18 @@ export default function HqDashboardPage() {
                         const s = state as
                           | { activeTooltipIndex?: number; activeLabel?: string | number }
                           | null;
-                        const idx = s?.activeTooltipIndex;
-                        if (typeof idx === "number") {
-                          setSelectedBucketIndex((prev) => (prev === idx ? null : idx));
-                          return;
-                        }
-                        // Fallback — match by activeLabel if provided
-                        const lbl = s?.activeLabel;
-                        if (lbl !== undefined && lbl !== null) {
-                          const found = salesTimeSeries.buckets.findIndex(
-                            (b) => b.label === String(lbl),
-                          );
-                          if (found >= 0) {
-                            setSelectedBucketIndex((prev) => (prev === found ? null : found));
+                        let idx = s?.activeTooltipIndex;
+                        if (typeof idx !== "number") {
+                          const lbl = s?.activeLabel;
+                          if (lbl !== undefined && lbl !== null) {
+                            const found = salesTimeSeries.buckets.findIndex(
+                              (b) => b.label === String(lbl),
+                            );
+                            if (found >= 0) idx = found;
                           }
+                        }
+                        if (typeof idx === "number") {
+                          setSelectedBucketIndex(idx);
                         }
                       }}
                     >
@@ -459,24 +460,7 @@ export default function HqDashboardPage() {
                         stroke="#2563eb"
                         strokeWidth={2}
                         dot={{ r: 3, cursor: "pointer" }}
-                        activeDot={{
-                          r: 6,
-                          cursor: "pointer",
-                          onClick: (_e: unknown, payload: unknown) => {
-                            const p = payload as { payload?: { idx?: number } } | undefined;
-                            const idx = p?.payload?.idx;
-                            if (typeof idx === "number") {
-                              setSelectedBucketIndex((prev) => (prev === idx ? null : idx));
-                            }
-                          },
-                        }}
-                        onClick={(data: unknown) => {
-                          const d = data as { payload?: { idx?: number } } | undefined;
-                          const idx = d?.payload?.idx;
-                          if (typeof idx === "number") {
-                            setSelectedBucketIndex((prev) => (prev === idx ? null : idx));
-                          }
-                        }}
+                        activeDot={{ r: 6, cursor: "pointer" }}
                       />
                       {selectedBucketIndex !== null && salesTimeSeries.buckets[selectedBucketIndex] && (
                         <ReferenceLine
@@ -584,44 +568,58 @@ export default function HqDashboardPage() {
                 No sales recorded in this {period === "daily" ? "hour" : period === "monthly" ? "day" : "month"}.
               </div>
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
-                    <th className="px-3 py-2 font-medium">Branch</th>
-                    <th className="px-3 py-2 font-medium">Channel</th>
-                    <th className="px-3 py-2 font-medium text-right">Sales</th>
-                    <th className="px-3 py-2 font-medium text-right">Txns</th>
-                    <th className="px-3 py-2 font-medium text-right">Units</th>
-                    <th className="px-3 py-2 font-medium text-right">Share</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {bucketDetail.items.map((r) => {
-                    const share =
-                      bucketDetail.totalSalesCentavos > 0
-                        ? (r.salesCentavos / bucketDetail.totalSalesCentavos) * 100
-                        : 0;
-                    return (
-                      <tr key={r.branchId} className="hover:bg-muted/30">
-                        <td className="px-3 py-2 font-medium">{r.branchName}</td>
-                        <td className="px-3 py-2 text-muted-foreground capitalize">{r.channel ?? "—"}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {formatCentavos(r.salesCentavos)}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {r.transactionCount.toLocaleString("en-PH")}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">
-                          {r.itemsSold.toLocaleString("en-PH")}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                          {share.toFixed(1)}%
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
+                      <th className="px-3 py-2 font-medium">Branch</th>
+                      <th className="px-3 py-2 font-medium">Channel</th>
+                      <th className="px-3 py-2 font-medium text-right">Sales</th>
+                      <th className="px-3 py-2 font-medium text-right">Txns</th>
+                      <th className="px-3 py-2 font-medium text-right">Units</th>
+                      <th className="px-3 py-2 font-medium text-right">Share</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {bucketDetailPagination.paginatedData.map((r) => {
+                      const share =
+                        bucketDetail.totalSalesCentavos > 0
+                          ? (r.salesCentavos / bucketDetail.totalSalesCentavos) * 100
+                          : 0;
+                      return (
+                        <tr key={r.branchId} className="hover:bg-muted/30">
+                          <td className="px-3 py-2 font-medium">{r.branchName}</td>
+                          <td className="px-3 py-2 text-muted-foreground capitalize">{r.channel ?? "—"}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {formatCentavos(r.salesCentavos)}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {r.transactionCount.toLocaleString("en-PH")}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {r.itemsSold.toLocaleString("en-PH")}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                            {share.toFixed(1)}%
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                <div className="border-t">
+                  <TablePagination
+                    currentPage={bucketDetailPagination.currentPage}
+                    totalPages={bucketDetailPagination.totalPages}
+                    totalItems={bucketDetailPagination.totalItems}
+                    hasNextPage={bucketDetailPagination.hasNextPage}
+                    hasPrevPage={bucketDetailPagination.hasPrevPage}
+                    onNextPage={bucketDetailPagination.nextPage}
+                    onPrevPage={bucketDetailPagination.prevPage}
+                    noun="branch"
+                  />
+                </div>
+              </>
             )}
           </div>
         )}
