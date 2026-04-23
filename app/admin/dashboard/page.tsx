@@ -3,7 +3,7 @@
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import Link from "next/link";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import {
   ResponsiveContainer,
@@ -150,6 +150,11 @@ const PERIOD_SECTION_LABEL: Record<Period, string> = {
 export default function HqDashboardPage() {
   const [period, setPeriod] = useState<Period>("monthly");
   const [graphTab, setGraphTab] = useState<"sales" | "soh">("sales");
+  const [selectedBucketIndex, setSelectedBucketIndex] = useState<number | null>(null);
+  // Clear bucket drill-down when period or graph tab changes
+  useEffect(() => {
+    setSelectedBucketIndex(null);
+  }, [period, graphTab]);
 
   // Store Ranking — independent filter (default: yesterday, PHT)
   const [rankingDate, setRankingDate] = useState<string>(() => {
@@ -182,6 +187,27 @@ export default function HqDashboardPage() {
   const salesBreakdown = useQuery(api.dashboards.hqDashboard.getHqSalesBreakdown, { period });
   const inventoryBreakdown = useQuery(api.dashboards.hqDashboard.getHqInventoryBreakdown, { period });
   const salesTimeSeries = useQuery(api.dashboards.hqDashboard.getHqSalesTimeSeries, { period });
+  const bucketDetail = useQuery(
+    api.dashboards.hqDashboard.getHqSalesBucketDetail,
+    selectedBucketIndex !== null ? { period, bucketIndex: selectedBucketIndex } : "skip",
+  ) as
+    | {
+        period: string;
+        bucketIndex: number;
+        label: string;
+        totalSalesCentavos: number;
+        totalTxns: number;
+        totalUnits: number;
+        items: {
+          branchId: string;
+          branchName: string;
+          channel: string | null;
+          salesCentavos: number;
+          transactionCount: number;
+          itemsSold: number;
+        }[];
+      }
+    | undefined;
   const branchCards = useQuery(api.dashboards.hqDashboard.getBranchStatusCards);
   const attentionItems = useQuery(api.dashboards.hqDashboard.getAttentionItems);
   const branchScores = useQuery(api.ai.branchScoring.getLatestBranchScores);
@@ -379,38 +405,61 @@ export default function HqDashboardPage() {
             salesTimeSeries === undefined ? (
               <div className="h-72 animate-pulse rounded bg-muted" />
             ) : (
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={salesTimeSeries.buckets.map((b) => ({
-                      label: b.label,
-                      sales: b.totalCentavos / 100,
-                    }))}
-                    margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="label" tick={{ fontSize: 12 }} />
-                    <YAxis
-                      tick={{ fontSize: 12 }}
-                      tickFormatter={(v: number) =>
-                        v >= 1000 ? `₱${(v / 1000).toFixed(0)}k` : `₱${v}`
-                      }
-                    />
-                    <Tooltip
-                      formatter={(v: number | undefined) =>
-                        `₱${(v ?? 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      }
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="sales"
-                      stroke="#2563eb"
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
+              <>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Click any point to see per-branch breakdown for that{" "}
+                  {period === "daily" ? "hour" : period === "monthly" ? "day" : "month"}.
+                </p>
+                <div className="h-72">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={salesTimeSeries.buckets.map((b) => ({
+                        label: b.label,
+                        sales: b.totalCentavos / 100,
+                      }))}
+                      margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                      onClick={(state) => {
+                        // Recharts click event — read activeTooltipIndex
+                        const idx = (state as { activeTooltipIndex?: number })?.activeTooltipIndex;
+                        if (typeof idx === "number") {
+                          setSelectedBucketIndex(
+                            selectedBucketIndex === idx ? null : idx,
+                          );
+                        }
+                      }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} />
+                      <YAxis
+                        tick={{ fontSize: 12 }}
+                        tickFormatter={(v: number) =>
+                          v >= 1000 ? `₱${(v / 1000).toFixed(0)}k` : `₱${v}`
+                        }
+                      />
+                      <Tooltip
+                        formatter={(v: number | undefined) =>
+                          `₱${(v ?? 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        }
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="sales"
+                        stroke="#2563eb"
+                        strokeWidth={2}
+                        dot={{ r: 3, cursor: "pointer" }}
+                        activeDot={{ r: 6, cursor: "pointer" }}
+                      />
+                      {selectedBucketIndex !== null && salesTimeSeries.buckets[selectedBucketIndex] && (
+                        <ReferenceLine
+                          x={salesTimeSeries.buckets[selectedBucketIndex].label}
+                          stroke="#2563eb"
+                          strokeDasharray="3 3"
+                        />
+                      )}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </>
             )
           ) : inventoryBreakdown === undefined ? (
             <div className="h-72 animate-pulse rounded bg-muted" />
@@ -469,6 +518,84 @@ export default function HqDashboardPage() {
             </>
           )}
         </div>
+
+        {/* Bucket drill-down — only on Sales chart, when a point is clicked */}
+        {graphTab === "sales" && selectedBucketIndex !== null && (
+          <div className="rounded-lg border bg-card overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/20">
+              <div>
+                <p className="text-sm font-semibold">
+                  {bucketDetail?.label ?? "Loading..."}
+                </p>
+                {bucketDetail && (
+                  <p className="text-xs text-muted-foreground">
+                    {formatCentavos(bucketDetail.totalSalesCentavos)}
+                    {" · "}
+                    {bucketDetail.totalTxns.toLocaleString("en-PH")} txns
+                    {" · "}
+                    {bucketDetail.totalUnits.toLocaleString("en-PH")} units
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={() => setSelectedBucketIndex(null)}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Close ✕
+              </button>
+            </div>
+            {bucketDetail === undefined ? (
+              <div className="p-6 space-y-2">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-8 animate-pulse rounded bg-muted" />
+                ))}
+              </div>
+            ) : bucketDetail.items.length === 0 ? (
+              <div className="p-6 text-center text-sm text-muted-foreground">
+                No sales recorded in this {period === "daily" ? "hour" : period === "monthly" ? "day" : "month"}.
+              </div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Branch</th>
+                    <th className="px-3 py-2 font-medium">Channel</th>
+                    <th className="px-3 py-2 font-medium text-right">Sales</th>
+                    <th className="px-3 py-2 font-medium text-right">Txns</th>
+                    <th className="px-3 py-2 font-medium text-right">Units</th>
+                    <th className="px-3 py-2 font-medium text-right">Share</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {bucketDetail.items.map((r) => {
+                    const share =
+                      bucketDetail.totalSalesCentavos > 0
+                        ? (r.salesCentavos / bucketDetail.totalSalesCentavos) * 100
+                        : 0;
+                    return (
+                      <tr key={r.branchId} className="hover:bg-muted/30">
+                        <td className="px-3 py-2 font-medium">{r.branchName}</td>
+                        <td className="px-3 py-2 text-muted-foreground capitalize">{r.channel ?? "—"}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {formatCentavos(r.salesCentavos)}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {r.transactionCount.toLocaleString("en-PH")}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {r.itemsSold.toLocaleString("en-PH")}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                          {share.toFixed(1)}%
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </section>
 
       {/* ── Store Ranking ── */}

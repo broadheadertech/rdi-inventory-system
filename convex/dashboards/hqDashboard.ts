@@ -528,6 +528,114 @@ export const getHqSalesTimeSeries = query({
   },
 });
 
+// ─── getHqSalesBucketDetail ──────────────────────────────────────────────────
+// Returns per-branch breakdown for a single bucket of getHqSalesTimeSeries.
+//   period: "daily"   → bucketIndex 0..23 maps to PHT hour of today
+//   period: "monthly" → bucketIndex 0..N maps to day-of-month (1-indexed N)
+//   period: "yearly"  → bucketIndex 0..11 maps to PHT month of this year
+
+export const getHqSalesBucketDetail = query({
+  args: {
+    period: periodArg,
+    bucketIndex: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const period = args.period ?? "monthly";
+    const phtNow = new Date(Date.now() + PHT_OFFSET_MS);
+    const y = phtNow.getUTCFullYear();
+    const m = phtNow.getUTCMonth();
+    const d = phtNow.getUTCDate();
+
+    let startMs: number;
+    let endMs: number;
+    let label: string;
+
+    if (period === "daily") {
+      const phtMidnight = Date.UTC(y, m, d);
+      startMs = phtMidnight + args.bucketIndex * 60 * 60 * 1000 - PHT_OFFSET_MS;
+      endMs = startMs + 60 * 60 * 1000 - 1;
+      label = `${String(args.bucketIndex).padStart(2, "0")}:00`;
+    } else if (period === "monthly") {
+      const day = args.bucketIndex + 1;
+      startMs = Date.UTC(y, m, day) - PHT_OFFSET_MS;
+      endMs = startMs + 24 * 60 * 60 * 1000 - 1;
+      label = `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m]} ${day}`;
+    } else {
+      // yearly — bucketIndex = month
+      const monthStart = Date.UTC(y, args.bucketIndex, 1) - PHT_OFFSET_MS;
+      const monthEnd = Date.UTC(y, args.bucketIndex + 1, 1) - PHT_OFFSET_MS - 1;
+      startMs = monthStart;
+      endMs = monthEnd;
+      label = `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][args.bucketIndex]} ${y}`;
+    }
+
+    // Fetch transactions in the bucket window across all active branches
+    const branches = await ctx.db.query("branches").collect();
+    const activeBranches = branches.filter((b) => b.isActive);
+
+    type BranchAgg = {
+      branchId: Id<"branches">;
+      branchName: string;
+      channel: string | null;
+      salesCentavos: number;
+      transactionCount: number;
+      itemsSold: number;
+    };
+    const perBranch = new Map<string, BranchAgg>();
+
+    for (const branch of activeBranches) {
+      const txns = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branch._id).gte("createdAt", startMs).lte("createdAt", endMs)
+        )
+        .collect();
+      let sales = 0;
+      let txnCount = 0;
+      let units = 0;
+      for (const t of txns) {
+        if (t.status === "voided") continue;
+        sales += t.totalCentavos;
+        txnCount++;
+        const items = await ctx.db
+          .query("transactionItems")
+          .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
+          .collect();
+        for (const it of items) units += it.quantity;
+      }
+      if (sales > 0) {
+        perBranch.set(branch._id as string, {
+          branchId: branch._id,
+          branchName: branch.name,
+          channel: branch.channel ?? null,
+          salesCentavos: sales,
+          transactionCount: txnCount,
+          itemsSold: units,
+        });
+      }
+    }
+
+    const items = [...perBranch.values()].sort((a, b) => b.salesCentavos - a.salesCentavos);
+    const totalSalesCentavos = items.reduce((s, r) => s + r.salesCentavos, 0);
+    const totalTxns = items.reduce((s, r) => s + r.transactionCount, 0);
+    const totalUnits = items.reduce((s, r) => s + r.itemsSold, 0);
+
+    return {
+      period,
+      bucketIndex: args.bucketIndex,
+      label,
+      startMs,
+      endMs,
+      totalSalesCentavos,
+      totalTxns,
+      totalUnits,
+      items,
+    };
+  },
+});
+
 // ─── getStoreRanking ──────────────────────────────────────────────────────────
 // Returns branches ranked by total sales (POS + invoice) for a specific PHT date.
 // Used by the Dashboard "Store Ranking" section. Default date = yesterday.

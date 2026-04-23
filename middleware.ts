@@ -111,17 +111,22 @@ export default function middleware(req: NextRequest) {
 
     const role = payload.metadata?.role;
 
-    // Role-based route access check
-    for (const [prefix, allowedRoles] of Object.entries(ROLE_ROUTE_ACCESS)) {
-      if (pathname === prefix || pathname.startsWith(prefix + "/")) {
-        if (!role || !allowedRoles.includes(role)) {
-          const defaultRoute = role ? (ROLE_DEFAULT_ROUTES[role] ?? "/") : "/";
-          const url = req.nextUrl.clone();
-          url.pathname = defaultRoute;
-          url.search = "";
-          return NextResponse.redirect(url);
+    // Role-based route access check — only enforce when role claim is present.
+    // If the session token has no `metadata.role` claim (e.g. Clerk session token
+    // customization isn't configured), fall through and let the per-layout guard
+    // read the role from Convex. Avoids a redirect loop when the JWT is claim-less.
+    if (role) {
+      for (const [prefix, allowedRoles] of Object.entries(ROLE_ROUTE_ACCESS)) {
+        if (pathname === prefix || pathname.startsWith(prefix + "/")) {
+          if (!allowedRoles.includes(role)) {
+            const defaultRoute = ROLE_DEFAULT_ROUTES[role] ?? "/";
+            const url = req.nextUrl.clone();
+            url.pathname = defaultRoute;
+            url.search = "";
+            return NextResponse.redirect(url);
+          }
+          break;
         }
-        break;
       }
     }
 
