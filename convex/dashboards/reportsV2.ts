@@ -607,7 +607,7 @@ export const getPerformanceByDimension = query({
 //   outgoing       = sold + transferredOut
 //   netChange      = received − outgoing  (period stock change; equals currentSOH − BOM)
 //   currentSohUnits = sum(inventory.quantity) for allowed branches (with brand filter)
-//   liquidationRatePercent = bom / currentSohUnits × 100
+//   liquidationRatePercent = (bom − currentSohUnits) / bom × 100  (sell-through of BOM, 0–100%)
 // Also returns a per-branch breakdown with bom in place of received.
 
 const OUTGOING_TRANSFER_STATUSES = ["packed", "inTransit", "delivered"] as const;
@@ -845,8 +845,11 @@ export const getMovementsSummary = query({
     }
     byBranch.sort((a, b) => b.bom + b.sold + b.transferredOut - (a.bom + a.sold + a.transferredOut));
 
+    // Sell-through of opening stock, clamped to [0, 100].
     const liquidationRatePercent =
-      currentSohUnits > 0 ? (bomTotal / currentSohUnits) * 100 : 0;
+      bomTotal > 0
+        ? Math.max(0, Math.min(100, ((bomTotal - currentSohUnits) / bomTotal) * 100))
+        : 0;
 
     return {
       bom: bomTotal,

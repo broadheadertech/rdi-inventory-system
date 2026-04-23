@@ -716,7 +716,7 @@ export default function HqReportsPage() {
           <KpiCard
             title="Liquidation Rate"
             value={movements ? formatPercent(movements.liquidationRatePercent) : undefined}
-            footer="BOM ÷ MTD Stock"
+            footer="(BOM − MTD Stock) ÷ BOM"
           />
         </div>
 
