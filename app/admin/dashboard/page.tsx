@@ -410,21 +410,33 @@ export default function HqDashboardPage() {
                   Click any point to see per-branch breakdown for that{" "}
                   {period === "daily" ? "hour" : period === "monthly" ? "day" : "month"}.
                 </p>
-                <div className="h-72">
+                <div className="h-72" style={{ cursor: "pointer" }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
-                      data={salesTimeSeries.buckets.map((b) => ({
+                      data={salesTimeSeries.buckets.map((b, i) => ({
                         label: b.label,
                         sales: b.totalCentavos / 100,
+                        idx: i,
                       }))}
                       margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-                      onClick={(state) => {
-                        // Recharts click event — read activeTooltipIndex
-                        const idx = (state as { activeTooltipIndex?: number })?.activeTooltipIndex;
+                      onClick={(state: unknown) => {
+                        const s = state as
+                          | { activeTooltipIndex?: number; activeLabel?: string | number }
+                          | null;
+                        const idx = s?.activeTooltipIndex;
                         if (typeof idx === "number") {
-                          setSelectedBucketIndex(
-                            selectedBucketIndex === idx ? null : idx,
+                          setSelectedBucketIndex((prev) => (prev === idx ? null : idx));
+                          return;
+                        }
+                        // Fallback — match by activeLabel if provided
+                        const lbl = s?.activeLabel;
+                        if (lbl !== undefined && lbl !== null) {
+                          const found = salesTimeSeries.buckets.findIndex(
+                            (b) => b.label === String(lbl),
                           );
+                          if (found >= 0) {
+                            setSelectedBucketIndex((prev) => (prev === found ? null : found));
+                          }
                         }
                       }}
                     >
@@ -447,7 +459,24 @@ export default function HqDashboardPage() {
                         stroke="#2563eb"
                         strokeWidth={2}
                         dot={{ r: 3, cursor: "pointer" }}
-                        activeDot={{ r: 6, cursor: "pointer" }}
+                        activeDot={{
+                          r: 6,
+                          cursor: "pointer",
+                          onClick: (_e: unknown, payload: unknown) => {
+                            const p = payload as { payload?: { idx?: number } } | undefined;
+                            const idx = p?.payload?.idx;
+                            if (typeof idx === "number") {
+                              setSelectedBucketIndex((prev) => (prev === idx ? null : idx));
+                            }
+                          },
+                        }}
+                        onClick={(data: unknown) => {
+                          const d = data as { payload?: { idx?: number } } | undefined;
+                          const idx = d?.payload?.idx;
+                          if (typeof idx === "number") {
+                            setSelectedBucketIndex((prev) => (prev === idx ? null : idx));
+                          }
+                        }}
                       />
                       {selectedBucketIndex !== null && salesTimeSeries.buckets[selectedBucketIndex] && (
                         <ReferenceLine
