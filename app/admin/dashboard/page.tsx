@@ -320,10 +320,27 @@ export default function HqDashboardPage() {
                 salesBreakdown.brands[1]?.salesCentavos ?? 0
               )}
             />
-            <MetricCard
-              title="Gross Profit"
-              value={formatCentavos(salesBreakdown.grossProfitCentavos)}
-            />
+            {(() => {
+              const sales = salesBreakdown.totalSalesCentavos;
+              const profit = salesBreakdown.grossProfitCentavos;
+              const marginPct = sales > 0 ? (profit / sales) * 100 : 0;
+              return (
+                <MetricCard
+                  title="Margin Sales"
+                  value={sales > 0 ? formatPercent(marginPct) : "—"}
+                  valueClassName={
+                    sales === 0
+                      ? undefined
+                      : marginPct >= 40
+                        ? "text-green-600"
+                        : marginPct >= 20
+                          ? "text-amber-600"
+                          : "text-red-600"
+                  }
+                  footer={`Profit: ${formatCentavos(profit)}`}
+                />
+              );
+            })()}
           </div>
         )}
 
@@ -363,10 +380,27 @@ export default function HqDashboardPage() {
                 />
               );
             })}
-            <MetricCard
-              title="Liquidation Rate"
-              value={formatPercent(inventoryBreakdown.liquidationRatePercent)}
-            />
+            {(() => {
+              const cost = inventoryBreakdown.totalSohCostCentavos ?? 0;
+              const retail = inventoryBreakdown.totalSohRetailCentavos ?? 0;
+              const marginPct = retail > 0 ? (1 - cost / retail) * 100 : 0;
+              return (
+                <MetricCard
+                  title="Margin SOH"
+                  value={retail > 0 ? formatPercent(marginPct) : "—"}
+                  valueClassName={
+                    retail === 0
+                      ? undefined
+                      : marginPct >= 40
+                        ? "text-green-600"
+                        : marginPct >= 20
+                          ? "text-amber-600"
+                          : "text-red-600"
+                  }
+                  footer={`Retail: ${formatCentavos(retail)}`}
+                />
+              );
+            })()}
           </div>
         )}
       </section>

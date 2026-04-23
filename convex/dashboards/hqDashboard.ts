@@ -363,22 +363,38 @@ export const getHqInventoryBreakdown = query({
     const period = args.period ?? "monthly";
     const inventoryRows = await ctx.db.query("inventory").collect();
 
-    const variantStyleCache = new Map<string, Id<"styles"> | null>();
+    const variantInfoCache = new Map<
+      string,
+      { styleId: Id<"styles">; costPriceCentavos: number; priceCentavos: number } | null
+    >();
     const styleBrandCache = new Map<string, Id<"brands"> | null>();
     const categoryBrandCache = new Map<string, Id<"brands"> | null>();
     const brandSoh = new Map<string, number>();
     let totalSohUnits = 0;
+    let totalSohCostCentavos = 0;
+    let totalSohRetailCentavos = 0;
 
     for (const inv of inventoryRows) {
       totalSohUnits += inv.quantity;
 
-      let styleId = variantStyleCache.get(inv.variantId as string);
-      if (styleId === undefined) {
+      let info = variantInfoCache.get(inv.variantId as string);
+      if (info === undefined) {
         const v = await ctx.db.get(inv.variantId);
-        styleId = v ? v.styleId : null;
-        variantStyleCache.set(inv.variantId as string, styleId);
+        info = v
+          ? {
+              styleId: v.styleId,
+              costPriceCentavos: v.costPriceCentavos ?? 0,
+              priceCentavos: v.priceCentavos ?? 0,
+            }
+          : null;
+        variantInfoCache.set(inv.variantId as string, info);
       }
-      if (!styleId) continue;
+      if (!info) continue;
+
+      totalSohCostCentavos += info.costPriceCentavos * inv.quantity;
+      totalSohRetailCentavos += info.priceCentavos * inv.quantity;
+
+      const styleId = info.styleId;
 
       let brandId = styleBrandCache.get(styleId as string);
       if (brandId === undefined) {
@@ -449,6 +465,8 @@ export const getHqInventoryBreakdown = query({
 
     return {
       totalSohUnits,
+      totalSohCostCentavos,
+      totalSohRetailCentavos,
       brands,
       liquidationRatePercent,
     };
