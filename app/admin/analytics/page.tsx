@@ -437,7 +437,7 @@ export default function HQAnalyticsPage() {
           ) : (
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <MetricCard
-                title={`Total Revenue (${periodLabel})`}
+                title={`Total Sales (${periodLabel})`}
                 value={formatCentavos(salesSummary.thisWeek.revenueCentavos)}
                 trendCurrent={salesSummary.thisWeek.revenueCentavos}
                 trendPrevious={salesSummary.lastWeek.revenueCentavos}
@@ -486,7 +486,7 @@ export default function HQAnalyticsPage() {
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
                         <th className="text-left px-3 py-2 font-medium text-muted-foreground">Product</th>
                         <th className="text-right px-3 py-2 font-medium text-muted-foreground">Qty</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sales</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -567,7 +567,7 @@ export default function HQAnalyticsPage() {
                         <Tooltip
                           formatter={(value: number | undefined) => [
                             value !== undefined ? formatCentavos(value) : "—",
-                            "Revenue",
+                            "Sales",
                           ]}
                         />
                         <Bar dataKey="revenue" radius={[0, 4, 4, 0]}>
@@ -593,10 +593,10 @@ export default function HQAnalyticsPage() {
             </div>
           </div>
 
-          {/* Daily Revenue Trend */}
+          {/* Daily Sales Trend */}
           <div className="space-y-3">
             <div>
-              <h3 className="text-sm font-semibold">Revenue Trend ({periodLabel})</h3>
+              <h3 className="text-sm font-semibold">Sales Trend ({periodLabel})</h3>
               <p className="text-xs text-muted-foreground">Current period vs prior period of the same length — across all retail branches</p>
             </div>
             {dailyTrend === undefined ? (
@@ -688,7 +688,7 @@ export default function HQAnalyticsPage() {
                       </Pie>
                       <Tooltip
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        formatter={(value: any) => [formatCentavos(value), "Revenue"]}
+                        formatter={(value: any) => [formatCentavos(value), "Sales"]}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -732,7 +732,7 @@ export default function HQAnalyticsPage() {
                               <tr className="bg-muted/50 border-b">
                                 <th className="text-left px-3 py-2 font-medium text-muted-foreground">Style</th>
                                 <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
-                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                                <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sales</th>
                                 <th className="text-right px-3 py-2 font-medium text-muted-foreground">%</th>
                               </tr>
                             </thead>
@@ -757,7 +757,7 @@ export default function HQAnalyticsPage() {
                           <tr className="bg-muted/50 border-b">
                             <th className="text-left px-3 py-2 font-medium text-muted-foreground">Category</th>
                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sales</th>
                             <th className="text-right px-3 py-2 font-medium text-muted-foreground">%</th>
                           </tr>
                         </thead>
@@ -813,7 +813,7 @@ export default function HQAnalyticsPage() {
             <div className="flex gap-1 rounded-lg border p-1">
               {([
                 { value: "units" as const, label: "Units Sold" },
-                { value: "revenue" as const, label: "Revenue" },
+                { value: "revenue" as const, label: "Sales" },
               ]).map((m) => (
                 <button
                   key={m.value}
@@ -879,7 +879,7 @@ export default function HQAnalyticsPage() {
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         formatter={(value: any) => [
                           comparisonMetric === "revenue" ? formatCentavos(value) : `${value} units`,
-                          comparisonMetric === "revenue" ? "Revenue" : "Units Sold",
+                          comparisonMetric === "revenue" ? "Sales" : "Units Sold",
                         ]}
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         labelFormatter={(label: any) => {
@@ -911,7 +911,7 @@ export default function HQAnalyticsPage() {
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground">Brand</th>
                         )}
                         <th className="text-right px-3 py-2 font-medium text-muted-foreground">Units</th>
-                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                        <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sales</th>
                         <th className="text-right px-3 py-2 font-medium text-muted-foreground">Share</th>
                       </tr>
                     </thead>
@@ -1298,9 +1298,9 @@ export default function HQAnalyticsPage() {
             )}
           </div>
 
-          {/* Revenue Projection */}
+          {/* Sales Projection */}
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Revenue Projection (All Retail Branches)</h3>
+            <h3 className="text-sm font-semibold">Sales Projection (All Retail Branches)</h3>
             {projectedRevenue === undefined ? (
               <Skeleton className="h-20" />
             ) : !projectedRevenue ? (
@@ -1563,7 +1563,7 @@ export default function HQAnalyticsPage() {
                         <tr className="bg-muted/50 border-b">
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground">#</th>
                           <th className="text-left px-3 py-2 font-medium text-muted-foreground">Branch</th>
-                          <th className="text-right px-3 py-2 font-medium text-muted-foreground">Revenue</th>
+                          <th className="text-right px-3 py-2 font-medium text-muted-foreground">Sales</th>
                           <th className="text-right px-3 py-2 font-medium text-muted-foreground">Txns</th>
                           <th className="text-right px-3 py-2 font-medium text-muted-foreground">Avg Ticket</th>
                           <th className="text-center px-3 py-2 font-medium text-muted-foreground">Trend</th>

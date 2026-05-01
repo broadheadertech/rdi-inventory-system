@@ -55,6 +55,9 @@ export const createBranch = mutation({
     classification: v.optional(
       v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
     ),
+    region: v.optional(
+      v.union(v.literal("luzon"), v.literal("visayas"), v.literal("mindanao"))
+    ),
     configuration: v.optional(
       v.object({
         timezone: v.optional(v.string()),
@@ -91,6 +94,7 @@ export const createBranch = mutation({
         longitude: args.longitude,
         channel: args.channel,
         classification: args.classification,
+        region: args.region,
         configuration: args.configuration,
       },
     });
@@ -110,6 +114,9 @@ export const updateBranch = mutation({
     channel: channelValidator,
     classification: v.optional(
       v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
+    ),
+    region: v.optional(
+      v.union(v.literal("luzon"), v.literal("visayas"), v.literal("mindanao"))
     ),
     configuration: v.optional(
       v.object({

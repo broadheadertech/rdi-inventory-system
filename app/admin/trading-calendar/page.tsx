@@ -322,7 +322,7 @@ export default function TradingCalendarPage() {
               <p className="text-sm font-bold leading-snug">{formatDate(selectedDay.date)}</p>
               <div className="flex gap-4 mt-2">
                 <div>
-                  <p className="text-xs text-muted-foreground">Revenue</p>
+                  <p className="text-xs text-muted-foreground">Sales</p>
                   <p className="text-lg font-bold text-green-700">{fmtFull(selectedDay.revenueCentavos)}</p>
                 </div>
                 <div>

@@ -74,7 +74,7 @@ export default function BranchCrossSellAnalyticsPage() {
           sub="suggestions added to cart"
         />
         <KpiCard
-          label="Revenue from Cross-Sell"
+          label="Sales from Cross-Sell"
           value={loading ? "—" : formatCurrency(stats?.totalRevenueCentavos ?? 0)}
           sub="cumulative item value"
         />
@@ -104,7 +104,7 @@ export default function BranchCrossSellAnalyticsPage() {
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">#</th>
                   <th className="px-4 py-2 text-left font-medium text-muted-foreground">Product</th>
                   <th className="px-4 py-2 text-right font-medium text-muted-foreground">Times</th>
-                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Revenue</th>
+                  <th className="px-4 py-2 text-right font-medium text-muted-foreground">Sales</th>
                 </tr>
               </thead>
               <tbody>

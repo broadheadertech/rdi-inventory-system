@@ -65,7 +65,7 @@ export default function ChampionsPage() {
                 <th className="px-4 py-3 w-20">Rank</th>
                 <th className="px-4 py-3">Staff</th>
                 <th className="px-4 py-3 text-right">Transactions</th>
-                <th className="px-4 py-3 text-right">Revenue</th>
+                <th className="px-4 py-3 text-right">Sales</th>
               </tr>
             </thead>
             <tbody>

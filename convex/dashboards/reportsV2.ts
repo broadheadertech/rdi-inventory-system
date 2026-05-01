@@ -309,6 +309,7 @@ export const getPerformanceByDimension = query({
     ...filterArgs,
     dimension: v.union(
       v.literal("people"),
+      v.literal("store"),
       v.literal("department"),
       v.literal("category"),
       v.literal("sku"),
@@ -334,13 +335,17 @@ export const getPerformanceByDimension = query({
     type Row = {
       key: string;
       label: string;
+      region?: string | null;
       revenueCentavos: number;
       unitsSold: number;
       currentSohUnits?: number;
       targetCentavos?: number;
       performancePercent?: number;
+      topCalendarCode?: string | null;
+      calendarCodeMix?: { code: string; revenueCentavos: number }[];
     };
     const agg = new Map<string, Row>();
+    const calendarCodeAgg = new Map<string, Map<string, number>>();
     const bump = (key: string, label: string, revenue: number, units: number) => {
       const cur = agg.get(key);
       if (cur) {
@@ -364,6 +369,57 @@ export const getPerformanceByDimension = query({
         });
       }
     };
+    const bumpCalendar = (rowKey: string, code: string, revenue: number) => {
+      let m = calendarCodeAgg.get(rowKey);
+      if (!m) {
+        m = new Map<string, number>();
+        calendarCodeAgg.set(rowKey, m);
+      }
+      m.set(code, (m.get(code) ?? 0) + revenue);
+    };
+    const finalizeCalendarCodes = () => {
+      for (const row of agg.values()) {
+        const m = calendarCodeAgg.get(row.key);
+        if (!m || m.size === 0) {
+          row.topCalendarCode = null;
+          continue;
+        }
+        let bestCode: string | null = null;
+        let bestRevenue = -1;
+        const mix: { code: string; revenueCentavos: number }[] = [];
+        for (const [code, revenue] of m.entries()) {
+          mix.push({ code, revenueCentavos: revenue });
+          if (revenue > bestRevenue) {
+            bestRevenue = revenue;
+            bestCode = code;
+          }
+        }
+        mix.sort((a, b) => b.revenueCentavos - a.revenueCentavos);
+        row.topCalendarCode = bestCode;
+        row.calendarCodeMix = mix;
+      }
+    };
+
+    // ── Calendar Code resolver — month a variant first arrived (e.g. "January Collection")
+    const MONTH_LABELS = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
+    ];
+    const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
+    const allBatches = await ctx.db.query("inventoryBatches").collect();
+    const variantEarliestReceivedAt = new Map<string, number>();
+    for (const b of allBatches) {
+      const cur = variantEarliestReceivedAt.get(b.variantId as string);
+      if (cur === undefined || b.receivedAt < cur) {
+        variantEarliestReceivedAt.set(b.variantId as string, b.receivedAt);
+      }
+    }
+    const calendarCodeForVariant = (variantId: Id<"variants">): string | null => {
+      const ms = variantEarliestReceivedAt.get(variantId as string);
+      if (ms === undefined) return null;
+      const d = new Date(ms + PHT_OFFSET_MS);
+      return `${MONTH_LABELS[d.getUTCMonth()]} Collection`;
+    };
 
     // Cashiers dimension — simple path (no item scan)
     if (args.dimension === "people") {
@@ -378,12 +434,11 @@ export const getPerformanceByDimension = query({
       };
       for (const t of txns) {
         const name = await getCashier(t.cashierId);
-        // If brand filter active, need to scan items; otherwise use total
+        const items = await ctx.db
+          .query("transactionItems")
+          .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
+          .collect();
         if (args.brandId) {
-          const items = await ctx.db
-            .query("transactionItems")
-            .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
-            .collect();
           for (const it of items) {
             const variant = await ctx.db.get(it.variantId);
             if (!variant) continue;
@@ -393,16 +448,17 @@ export const getPerformanceByDimension = query({
               (style.categoryId ? (await ctx.db.get(style.categoryId))?.brandId : null);
             if (bId === args.brandId) {
               bump(t.cashierId as string, name, it.lineTotalCentavos, it.quantity);
+              const code = calendarCodeForVariant(it.variantId);
+              if (code) bumpCalendar(t.cashierId as string, code, it.lineTotalCentavos);
             }
           }
         } else {
-          // units from items
-          const items = await ctx.db
-            .query("transactionItems")
-            .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
-            .collect();
           const units = items.reduce((s, it) => s + it.quantity, 0);
           bump(t.cashierId as string, name, t.totalCentavos, units);
+          for (const it of items) {
+            const code = calendarCodeForVariant(it.variantId);
+            if (code) bumpCalendar(t.cashierId as string, code, it.lineTotalCentavos);
+          }
         }
       }
 
@@ -423,6 +479,112 @@ export const getPerformanceByDimension = query({
           perCashierTarget > 0 ? (row.revenueCentavos / perCashierTarget) * 100 : 0;
       }
 
+      finalizeCalendarCodes();
+      return Array.from(agg.values()).sort((a, b) => b.revenueCentavos - a.revenueCentavos);
+    }
+
+    // Store dimension — group by transaction.branchId. Brand filter requires item scan.
+    if (args.dimension === "store") {
+      const branchNameCache = new Map<string, string>();
+      const branchRegionCache = new Map<string, string | null>();
+      const branchById = await ctx.db.query("branches").collect();
+      for (const b of branchById) {
+        branchNameCache.set(b._id as string, b.name);
+        branchRegionCache.set(
+          b._id as string,
+          (b as { region?: string }).region ?? null,
+        );
+      }
+
+      // Brand-resolution caches reused for both txn items (sales) and inventory (SOH)
+      const variantCache = new Map<string, Doc<"variants"> | null>();
+      const styleCache = new Map<string, Doc<"styles"> | null>();
+      const categoryBrandCache = new Map<string, Id<"brands"> | null>();
+
+      for (const t of txns) {
+        const branchKey = t.branchId as string;
+        const branchName = branchNameCache.get(branchKey) ?? "Unknown";
+        if (args.brandId) {
+          const items = await ctx.db
+            .query("transactionItems")
+            .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
+            .collect();
+          for (const it of items) {
+            let variant = variantCache.get(it.variantId as string);
+            if (variant === undefined) {
+              variant = await ctx.db.get(it.variantId);
+              variantCache.set(it.variantId as string, variant);
+            }
+            if (!variant) continue;
+            let style = styleCache.get(variant.styleId as string);
+            if (style === undefined) {
+              style = await ctx.db.get(variant.styleId);
+              styleCache.set(variant.styleId as string, style);
+            }
+            if (!style) continue;
+            const bId = await resolveStyleBrandId(ctx as any, style, categoryBrandCache);
+            if (bId !== args.brandId) continue;
+            bump(branchKey, branchName, it.lineTotalCentavos, it.quantity);
+            const code = calendarCodeForVariant(it.variantId);
+            if (code) bumpCalendar(branchKey, code, it.lineTotalCentavos);
+          }
+        } else {
+          const items = await ctx.db
+            .query("transactionItems")
+            .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
+            .collect();
+          const units = items.reduce((s, it) => s + it.quantity, 0);
+          bump(branchKey, branchName, t.totalCentavos, units);
+          for (const it of items) {
+            const code = calendarCodeForVariant(it.variantId);
+            if (code) bumpCalendar(branchKey, code, it.lineTotalCentavos);
+          }
+        }
+      }
+
+      // SOH per store — scoped to allowed branches & brand filter
+      const allInventory = await ctx.db.query("inventory").collect();
+      for (const inv of allInventory) {
+        if (!allowedIds.includes(inv.branchId)) continue;
+        if (inv.quantity <= 0) continue;
+        if (args.brandId) {
+          let variant = variantCache.get(inv.variantId as string);
+          if (variant === undefined) {
+            variant = await ctx.db.get(inv.variantId);
+            variantCache.set(inv.variantId as string, variant);
+          }
+          if (!variant) continue;
+          let style = styleCache.get(variant.styleId as string);
+          if (style === undefined) {
+            style = await ctx.db.get(variant.styleId);
+            styleCache.set(variant.styleId as string, style);
+          }
+          if (!style) continue;
+          const bId = await resolveStyleBrandId(ctx as any, style, categoryBrandCache);
+          if (bId !== args.brandId) continue;
+        }
+        const branchKey = inv.branchId as string;
+        const branchName = branchNameCache.get(branchKey) ?? "Unknown";
+        bumpSoh(branchKey, branchName, inv.quantity);
+      }
+
+      // Per-store target = org period target ÷ active stores in scope
+      const rangeDays = Math.max(1, Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)));
+      const monthlyTarget = await readOrgMonthlyTargetCentavos(ctx);
+      const scopeTargetCentavos = targetForPeriod(monthlyTarget, rangeDays, args.periodKind);
+      const storeCount = agg.size;
+      const perStoreTarget =
+        storeCount > 0 && scopeTargetCentavos > 0
+          ? Math.round(scopeTargetCentavos / storeCount)
+          : 0;
+      for (const row of agg.values()) {
+        row.targetCentavos = perStoreTarget;
+        row.performancePercent =
+          perStoreTarget > 0 ? (row.revenueCentavos / perStoreTarget) * 100 : 0;
+        row.region = branchRegionCache.get(row.key) ?? null;
+      }
+
+      finalizeCalendarCodes();
       return Array.from(agg.values()).sort((a, b) => b.revenueCentavos - a.revenueCentavos);
     }
 
@@ -467,28 +629,31 @@ export const getPerformanceByDimension = query({
           if (bId !== args.brandId) continue;
         }
 
+        let rowKey: string | null = null;
         if (args.dimension === "sku") {
           const label = variant.sku || "(no SKU)";
-          bump(variant._id as string, label, item.lineTotalCentavos, item.quantity);
+          rowKey = variant._id as string;
+          bump(rowKey, label, item.lineTotalCentavos, item.quantity);
         } else if (args.dimension === "size") {
           const label = variant.size || "(none)";
-          bump(label, label, item.lineTotalCentavos, item.quantity);
+          rowKey = label;
+          bump(rowKey, label, item.lineTotalCentavos, item.quantity);
         } else if (args.dimension === "color") {
           const label = variant.color || "(none)";
-          bump(label, label, item.lineTotalCentavos, item.quantity);
+          rowKey = label;
+          bump(rowKey, label, item.lineTotalCentavos, item.quantity);
         } else if (args.dimension === "category") {
-          const catPcId = style.productCategoryId ?? style.categoryId;
-          if (!catPcId) {
-            bump("(none)", "(none)", item.lineTotalCentavos, item.quantity);
+          // Strict: only productCategoryId (the Category set in Settings).
+          // Legacy style.categoryId is intentionally ignored.
+          if (!style.productCategoryId) {
+            rowKey = "(none)";
+            bump(rowKey, "(none)", item.lineTotalCentavos, item.quantity);
           } else {
-            const label = await getPC(catPcId);
-            bump(catPcId as string, label, item.lineTotalCentavos, item.quantity);
+            const label = await getPC(style.productCategoryId);
+            rowKey = style.productCategoryId as string;
+            bump(rowKey, label, item.lineTotalCentavos, item.quantity);
           }
         } else if (args.dimension === "department") {
-          // Department = variant.gender rolled up to existing department labels.
-          //   mens                 → MENS
-          //   womens               → LADIES
-          //   unisex/kids/boys/... → UNISEX
           let dept: "MENS" | "LADIES" | "UNISEX" | "(none)";
           switch (variant.gender) {
             case "mens":
@@ -506,14 +671,21 @@ export const getPerformanceByDimension = query({
             default:
               dept = "(none)";
           }
-          bump(dept, dept, item.lineTotalCentavos, item.quantity);
+          rowKey = dept;
+          bump(rowKey, dept, item.lineTotalCentavos, item.quantity);
         } else if (args.dimension === "fit") {
           if (!style.fitId) {
-            bump("(none)", "(none)", item.lineTotalCentavos, item.quantity);
+            rowKey = "(none)";
+            bump(rowKey, "(none)", item.lineTotalCentavos, item.quantity);
           } else {
             const label = await getPC(style.fitId);
-            bump(style.fitId as string, label, item.lineTotalCentavos, item.quantity);
+            rowKey = style.fitId as string;
+            bump(rowKey, label, item.lineTotalCentavos, item.quantity);
           }
+        }
+        if (rowKey) {
+          const code = calendarCodeForVariant(item.variantId);
+          if (code) bumpCalendar(rowKey, code, item.lineTotalCentavos);
         }
       }
     }
@@ -555,12 +727,12 @@ export const getPerformanceByDimension = query({
         const label = variant.color || "(none)";
         bumpSoh(label, label, inv.quantity);
       } else if (args.dimension === "category") {
-        const catPcId = style.productCategoryId ?? style.categoryId;
-        if (!catPcId) {
+        // Strict: only productCategoryId (Settings). Legacy categoryId ignored.
+        if (!style.productCategoryId) {
           bumpSoh("(none)", "(none)", inv.quantity);
         } else {
-          const label = await getPC(catPcId);
-          bumpSoh(catPcId as string, label, inv.quantity);
+          const label = await getPC(style.productCategoryId);
+          bumpSoh(style.productCategoryId as string, label, inv.quantity);
         }
       } else if (args.dimension === "department") {
         let dept: "MENS" | "LADIES" | "UNISEX" | "(none)";
@@ -591,6 +763,7 @@ export const getPerformanceByDimension = query({
       }
     }
 
+    finalizeCalendarCodes();
     return Array.from(agg.values()).sort((a, b) => b.revenueCentavos - a.revenueCentavos);
   },
 });
@@ -861,6 +1034,209 @@ export const getMovementsSummary = query({
       currentSohUnits,
       liquidationRatePercent,
       byBranch,
+    };
+  },
+});
+
+// ─── getPromotionContributions ────────────────────────────────────────────────
+// For each promotion overlapping the report window, returns:
+//   offer (name), salesCentavos, sharePercent of total period sales,
+//   redemptions = distinct transactions that contained discounted lines while
+//   the promo was active.
+//
+// Attribution heuristic: a transaction item is credited to a promo if
+//   (1) the promo's [startDate, endDate] overlaps the txn timestamp,
+//   (2) the line's unitPrice is below the variant's regular priceCentavos
+//       (i.e., it was actually discounted), AND
+//   (3) the line passes the promo's branch/brand scope where set.
+// Multiple promos can match the same line; the line is split equally across
+// all matching promos so totals stay consistent.
+
+export const getPromotionContributions = query({
+  args: filterArgs,
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const startMs = ymdToMs(args.dateStart);
+    const endMs = ymdToMs(args.dateEnd, true);
+    const { ids: allowedIds } = await resolveAllowedBranches(ctx, {
+      branchId: args.branchId,
+      channel: args.channel,
+    });
+    const allowedSet = new Set(allowedIds.map((id) => id as string));
+
+    if (allowedIds.length === 0) {
+      return {
+        totalSalesCentavos: 0,
+        promotions: [] as Array<{
+          promotionId: string;
+          offer: string;
+          salesCentavos: number;
+          sharePercent: number;
+          redemptions: number;
+        }>,
+      };
+    }
+
+    // Pull all promos that overlap the report window
+    const allPromos = await ctx.db.query("promotions").collect();
+    const overlappingPromos = allPromos.filter((p) => {
+      const ps = p.startDate ?? 0;
+      const pe = p.endDate ?? Number.MAX_SAFE_INTEGER;
+      return ps <= endMs && pe >= startMs;
+    });
+
+    // Caches
+    const variantCache = new Map<string, Doc<"variants"> | null>();
+    const styleBrandCache = new Map<string, Id<"brands"> | null>();
+    const categoryBrandCache = new Map<string, Id<"brands"> | null>();
+
+    type PromoAgg = {
+      promotionId: string;
+      offer: string;
+      salesCentavos: number;
+      txnIds: Set<string>;
+    };
+    const perPromo = new Map<string, PromoAgg>();
+    const ensure = (p: Doc<"promotions">): PromoAgg => {
+      const key = p._id as string;
+      let cur = perPromo.get(key);
+      if (!cur) {
+        cur = {
+          promotionId: key,
+          offer: p.name,
+          salesCentavos: 0,
+          txnIds: new Set<string>(),
+        };
+        perPromo.set(key, cur);
+      }
+      return cur;
+    };
+
+    // Accumulate total period sales (for share%) across allowed branches
+    let totalSalesCentavos = 0;
+
+    for (const bId of allowedIds) {
+      const txns = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", bId).gte("createdAt", startMs).lte("createdAt", endMs),
+        )
+        .collect();
+      for (const t of txns) {
+        if (t.status === "voided") continue;
+
+        // Brand-filter contribution to total: when brandId set, sum only matching items
+        const items = await ctx.db
+          .query("transactionItems")
+          .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
+          .collect();
+
+        // Resolve variant + style for each line up front
+        type LineCtx = {
+          item: Doc<"transactionItems">;
+          variant: Doc<"variants">;
+          isDiscounted: boolean;
+          brandId: Id<"brands"> | null;
+        };
+        const lineCtxs: LineCtx[] = [];
+        for (const it of items) {
+          let variant = variantCache.get(it.variantId as string);
+          if (variant === undefined) {
+            variant = await ctx.db.get(it.variantId);
+            variantCache.set(it.variantId as string, variant);
+          }
+          if (!variant) continue;
+
+          // Brand resolution (for filter + scope match)
+          let brandId = styleBrandCache.get(variant.styleId as string);
+          if (brandId === undefined) {
+            const style = await ctx.db.get(variant.styleId);
+            brandId = style
+              ? await resolveStyleBrandId(ctx as any, style, categoryBrandCache)
+              : null;
+            styleBrandCache.set(variant.styleId as string, brandId);
+          }
+
+          if (args.brandId && brandId !== args.brandId) continue;
+
+          totalSalesCentavos += it.lineTotalCentavos;
+
+          const isDiscounted =
+            (variant.priceCentavos ?? 0) > 0 &&
+            it.unitPriceCentavos < variant.priceCentavos;
+
+          lineCtxs.push({ item: it, variant, isDiscounted, brandId });
+        }
+
+        // Now attribute discounted lines to matching promos
+        for (const ctxLine of lineCtxs) {
+          if (!ctxLine.isDiscounted) continue;
+          const matching: Doc<"promotions">[] = [];
+          for (const p of overlappingPromos) {
+            const ps = p.startDate ?? 0;
+            const pe = p.endDate ?? Number.MAX_SAFE_INTEGER;
+            if (t.createdAt < ps || t.createdAt > pe) continue;
+
+            // Branch scope: empty array = all branches; otherwise must include this branch
+            if (
+              p.branchIds &&
+              p.branchIds.length > 0 &&
+              !p.branchIds.some((id) => (id as string) === (bId as string))
+            ) {
+              continue;
+            }
+            // Brand scope
+            if (
+              p.brandIds &&
+              p.brandIds.length > 0 &&
+              ctxLine.brandId &&
+              !p.brandIds.some((id) => (id as string) === (ctxLine.brandId as string))
+            ) {
+              continue;
+            }
+            // Variant scope
+            if (
+              p.variantIds &&
+              p.variantIds.length > 0 &&
+              !p.variantIds.some(
+                (id) => (id as string) === (ctxLine.variant._id as string),
+              )
+            ) {
+              continue;
+            }
+            matching.push(p);
+          }
+          if (matching.length === 0) continue;
+          const split = ctxLine.item.lineTotalCentavos / matching.length;
+          for (const p of matching) {
+            const agg = ensure(p);
+            agg.salesCentavos += split;
+            agg.txnIds.add(t._id as string);
+          }
+        }
+
+        // Skip if brand filter zeroed out everything
+        if (args.brandId && lineCtxs.length === 0) {
+          // already deducted from totals because we never bumped totalSalesCentavos
+        }
+      }
+    }
+
+    const promotions = [...perPromo.values()]
+      .map((a) => ({
+        promotionId: a.promotionId,
+        offer: a.offer,
+        salesCentavos: Math.round(a.salesCentavos),
+        sharePercent:
+          totalSalesCentavos > 0 ? (a.salesCentavos / totalSalesCentavos) * 100 : 0,
+        redemptions: a.txnIds.size,
+      }))
+      .sort((x, y) => y.salesCentavos - x.salesCentavos);
+
+    return {
+      totalSalesCentavos,
+      promotions,
     };
   },
 });

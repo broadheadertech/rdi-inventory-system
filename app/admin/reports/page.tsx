@@ -67,7 +67,7 @@ function getPresetDates(
 
 type Preset = "daily" | "yesterday" | "weekly" | "monthly" | "yearly" | "custom";
 type Channel = "inline" | "online" | "outlet" | "popup" | "dtc" | "warehouse" | "outright";
-type Dimension = "people" | "department" | "category" | "sku" | "size" | "color" | "fit";
+type Dimension = "people" | "store" | "department" | "category" | "sku" | "size" | "color" | "fit";
 
 const CHANNEL_LABELS: Record<Channel, string> = {
   inline: "Inline",
@@ -81,6 +81,7 @@ const CHANNEL_LABELS: Record<Channel, string> = {
 
 const DIMENSIONS: { value: Dimension; label: string }[] = [
   { value: "people", label: "People Performance" },
+  { value: "store", label: "Store Performance" },
   { value: "department", label: "Department Performance" },
   { value: "category", label: "Category Performance" },
   { value: "sku", label: "SKU Performance" },
@@ -208,12 +209,27 @@ export default function HqReportsPage() {
     | {
         key: string;
         label: string;
+        region?: string | null;
         revenueCentavos: number;
         unitsSold: number;
         currentSohUnits?: number;
         targetCentavos?: number;
         performancePercent?: number;
+        topCalendarCode?: string | null;
+        calendarCodeMix?: { code: string; revenueCentavos: number }[];
       }[]
+    | undefined;
+  const promoContribs = useQuery(api.dashboards.reportsV2.getPromotionContributions, filterArgs) as
+    | {
+        totalSalesCentavos: number;
+        promotions: {
+          promotionId: string;
+          offer: string;
+          salesCentavos: number;
+          sharePercent: number;
+          redemptions: number;
+        }[];
+      }
     | undefined;
   const movements = useQuery(api.dashboards.reportsV2.getMovementsSummary, filterArgs) as
     | {
@@ -523,13 +539,17 @@ export default function HqReportsPage() {
                     <th className="pb-2 font-medium">
                       {DIMENSIONS.find((d) => d.value === dimension)?.label.replace(" Performance", "") ?? ""}
                     </th>
-                    <th className="pb-2 text-right font-medium">Revenue</th>
+                    {dimension === "store" && (
+                      <th className="pb-2 font-medium">Region</th>
+                    )}
+                    <th className="pb-2 text-right font-medium">Sales</th>
                     <th className="pb-2 text-right font-medium">Units</th>
                     <th className="pb-2 text-right font-medium">% of Total</th>
+                    <th className="pb-2 font-medium">Calendar Code</th>
                     {dimension !== "people" && (
                       <th className="pb-2 text-right font-medium">SOH %</th>
                     )}
-                    {dimension === "people" && (
+                    {(dimension === "people" || dimension === "store") && (
                       <>
                         <th className="pb-2 text-right font-medium">Target</th>
                         <th className="pb-2 text-right font-medium">Performance</th>
@@ -548,6 +568,26 @@ export default function HqReportsPage() {
                     return (
                       <tr key={row.key} className="border-b last:border-0">
                         <td className="py-2 font-medium">{row.label}</td>
+                        {dimension === "store" && (
+                          <td className="py-2">
+                            {row.region ? (
+                              <span
+                                className={cn(
+                                  "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize",
+                                  row.region === "luzon"
+                                    ? "bg-rose-100 text-rose-700 border border-rose-200"
+                                    : row.region === "visayas"
+                                      ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                                      : "bg-yellow-100 text-yellow-800 border border-yellow-200",
+                                )}
+                              >
+                                {row.region}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </td>
+                        )}
                         <td className="py-2 text-right tabular-nums">
                           {formatCentavos(row.revenueCentavos)}
                         </td>
@@ -559,6 +599,15 @@ export default function HqReportsPage() {
                             ? `${((row.revenueCentavos / totalPerformanceRevenue) * 100).toFixed(1)}%`
                             : "—"}
                         </td>
+                        <td className="py-2">
+                          {row.topCalendarCode ? (
+                            <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-700">
+                              {row.topCalendarCode}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </td>
                         {dimension !== "people" && (() => {
                           const soh = row.currentSohUnits ?? 0;
                           const flow = soh + row.unitsSold;
@@ -569,7 +618,7 @@ export default function HqReportsPage() {
                             </td>
                           );
                         })()}
-                          {dimension === "people" && (
+                          {(dimension === "people" || dimension === "store") && (
                             <>
                               <td className="py-2 text-right tabular-nums text-muted-foreground">
                                 {hasTarget ? formatCentavos(row.targetCentavos ?? 0) : "—"}
@@ -632,12 +681,12 @@ export default function HqReportsPage() {
           />
         )}
 
-        {dimension === "people" && (
+        {(dimension === "people" || dimension === "store") && (
           <div className="rounded-lg border bg-muted/20 p-4 space-y-3">
             <div>
               <h3 className="text-sm font-semibold">Performance Tiers</h3>
               <p className="text-xs text-muted-foreground">
-                Performance % = cashier revenue ÷ prorated target (scope target ÷ active cashiers).
+                Performance % = {dimension === "store" ? "store" : "cashier"} sales ÷ prorated target (scope target ÷ active {dimension === "store" ? "stores" : "cashiers"}).
                 {" "}Missing targets mean no monthly sales target is configured in{" "}
                 <Link href="/admin/settings" className="underline hover:text-foreground">
                   Settings
@@ -806,6 +855,99 @@ export default function HqReportsPage() {
                   </tr>
                 </tfoot>
               </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Promotion Contributions ── */}
+      <div>
+        <h2 className="text-base font-semibold mb-3">Promotion Contributions</h2>
+        <div className="rounded-lg border p-4">
+          {promoContribs === undefined ? (
+            <div className="space-y-2">
+              {[...Array(3)].map((_, i) => (
+                <div key={i} className="h-10 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : promoContribs.promotions.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No promotion-attributable sales for the selected filters.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-muted-foreground">
+                    <th className="pb-2 font-medium">Offers</th>
+                    <th className="pb-2 text-right font-medium">Sales Amount</th>
+                    <th className="pb-2 text-right font-medium">
+                      % of {(() => {
+                        switch (activePreset) {
+                          case "daily":
+                            return "DTD";
+                          case "yesterday":
+                            return "Yesterday";
+                          case "weekly":
+                            return "WTD";
+                          case "monthly":
+                            return "MTD";
+                          case "yearly":
+                            return "YTD";
+                          default:
+                            return "Range";
+                        }
+                      })()}
+                    </th>
+                    <th className="pb-2 text-right font-medium">Redemption</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {promoContribs.promotions.map((p) => (
+                    <tr key={p.promotionId} className="border-b last:border-0">
+                      <td className="py-2 font-medium">{p.offer}</td>
+                      <td className="py-2 text-right tabular-nums">
+                        {formatCentavos(p.salesCentavos)}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-muted-foreground">
+                        {p.sharePercent.toFixed(1)}%
+                      </td>
+                      <td className="py-2 text-right tabular-nums">
+                        {p.redemptions.toLocaleString("en-PH")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t font-semibold">
+                    <td className="pt-2">Total</td>
+                    <td className="pt-2 text-right tabular-nums">
+                      {formatCentavos(
+                        promoContribs.promotions.reduce((s, p) => s + p.salesCentavos, 0),
+                      )}
+                    </td>
+                    <td className="pt-2 text-right tabular-nums">
+                      {promoContribs.totalSalesCentavos > 0
+                        ? `${(
+                            (promoContribs.promotions.reduce((s, p) => s + p.salesCentavos, 0) /
+                              promoContribs.totalSalesCentavos) *
+                            100
+                          ).toFixed(1)}%`
+                        : "—"}
+                    </td>
+                    <td className="pt-2 text-right tabular-nums">
+                      {promoContribs.promotions
+                        .reduce((s, p) => s + p.redemptions, 0)
+                        .toLocaleString("en-PH")}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Attribution: a discounted line is credited to a promo when its scope
+                (branch/brand/variant) and date window match the transaction. Lines
+                matching multiple promos are split equally so totals reconcile.
+              </p>
             </div>
           )}
         </div>

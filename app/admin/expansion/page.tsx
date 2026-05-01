@@ -101,7 +101,7 @@ export default function ExpansionIntelPage() {
                   <p className="font-semibold">{area.uniqueCustomers}</p>
                 </div>
                 <div className="rounded-md bg-muted/50 px-3 py-2">
-                  <div className="text-muted-foreground text-xs">Revenue</div>
+                  <div className="text-muted-foreground text-xs">Sales</div>
                   <p className="font-semibold">
                     {formatPrice(area.totalRevenueCentavos)}
                   </p>
@@ -118,7 +118,7 @@ export default function ExpansionIntelPage() {
               <div className="rounded-md bg-red-50 border border-red-100 px-3 py-2">
                 <div className="flex items-center gap-1 text-xs text-red-600">
                   <TrendingUp className="h-3 w-3" />
-                  Est. Monthly Revenue
+                  Est. Monthly Sales
                 </div>
                 <p className="font-bold text-red-600 text-lg">
                   {formatPrice(area.estimatedMonthlyRevenueCentavos)}

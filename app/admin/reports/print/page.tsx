@@ -291,7 +291,7 @@ export default function AdminPrintReportsPage() {
               <SectionHeader title="Sales Summary" description={`All-branch performance for ${periodLabel}`} />
               <div className="grid grid-cols-4 gap-4 print:gap-3">
                 {[
-                  { label: "Revenue",      value: fmt(salesSummary.thisWeek.revenueCentavos),        prev: fmt(salesSummary.lastWeek.revenueCentavos) },
+                  { label: "Sales",        value: fmt(salesSummary.thisWeek.revenueCentavos),        prev: fmt(salesSummary.lastWeek.revenueCentavos) },
                   { label: "Transactions", value: String(salesSummary.thisWeek.transactionCount),    prev: String(salesSummary.lastWeek.transactionCount) },
                   { label: "Items Sold",   value: String(salesSummary.thisWeek.itemsSold),           prev: String(salesSummary.lastWeek.itemsSold) },
                   { label: "Avg Ticket",   value: fmt(salesSummary.thisWeek.avgTxnValueCentavos),    prev: fmt(salesSummary.lastWeek.avgTxnValueCentavos) },
@@ -315,7 +315,7 @@ export default function AdminPrintReportsPage() {
               <SectionHeader title="Top Selling Products" description={`Top ${topProducts.length} by revenue — ${periodLabel}`} />
               <PrintTable>
                 <thead>
-                  <tr><Th>#</Th><Th>Product</Th><Th>Size</Th><Th>Color</Th><Th right>Units Sold</Th><Th right>Revenue</Th></tr>
+                  <tr><Th>#</Th><Th>Product</Th><Th>Size</Th><Th>Color</Th><Th right>Units Sold</Th><Th right>Sales</Th></tr>
                 </thead>
                 <tbody>
                   {topProducts.map((p, i) => (
@@ -339,7 +339,7 @@ export default function AdminPrintReportsPage() {
               <SectionHeader title="Sales by Category" description={`Category breakdown — ${periodLabel}`} />
               <PrintTable>
                 <thead>
-                  <tr><Th>#</Th><Th>Category</Th><Th right>Units Sold</Th><Th right>Revenue</Th><Th right>Share</Th></tr>
+                  <tr><Th>#</Th><Th>Category</Th><Th right>Units Sold</Th><Th right>Sales</Th><Th right>Share</Th></tr>
                 </thead>
                 <tbody>
                   {salesByCategory.map((c, i) => (
@@ -362,7 +362,7 @@ export default function AdminPrintReportsPage() {
               <SectionHeader title="Top Brands" description={`Brands ranked by units sold — ${periodLabel}`} />
               <PrintTable>
                 <thead>
-                  <tr><Th>#</Th><Th>Brand</Th><Th right>Units Sold</Th><Th right>Revenue</Th><Th right>Unit Share</Th><Th right>Rev. Share</Th></tr>
+                  <tr><Th>#</Th><Th>Brand</Th><Th right>Units Sold</Th><Th right>Sales</Th><Th right>Unit Share</Th><Th right>Rev. Share</Th></tr>
                 </thead>
                 <tbody>
                   {topBrands.map((b, i) => (
@@ -386,7 +386,7 @@ export default function AdminPrintReportsPage() {
               <SectionHeader title="Top Categories" description={`Categories ranked by units sold — ${periodLabel}`} />
               <PrintTable>
                 <thead>
-                  <tr><Th>#</Th><Th>Category</Th><Th right>Units Sold</Th><Th right>Revenue</Th><Th right>Unit Share</Th><Th right>Rev. Share</Th></tr>
+                  <tr><Th>#</Th><Th>Category</Th><Th right>Units Sold</Th><Th right>Sales</Th><Th right>Unit Share</Th><Th right>Rev. Share</Th></tr>
                 </thead>
                 <tbody>
                   {topCategories.map((c, i) => (
@@ -537,7 +537,7 @@ export default function AdminPrintReportsPage() {
                 <thead>
                   <tr>
                     <Th>#</Th><Th>Branch</Th>
-                    <Th right>Revenue</Th><Th right>Prior Revenue</Th>
+                    <Th right>Sales</Th><Th right>Prior Sales</Th>
                     <Th right>Transactions</Th><Th right>Avg Ticket</Th><Th>Trend</Th>
                   </tr>
                 </thead>

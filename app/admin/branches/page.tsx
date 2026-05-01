@@ -72,6 +72,25 @@ const CLASSIFICATION_COLORS: Record<string, string> = {
   outlet: "bg-amber-100 text-amber-800",
 };
 
+const REGION_OPTIONS = [
+  { value: "none", label: "No Region" },
+  { value: "luzon", label: "Luzon" },
+  { value: "visayas", label: "Visayas" },
+  { value: "mindanao", label: "Mindanao" },
+] as const;
+
+const REGION_LABELS: Record<string, string> = {
+  luzon: "Luzon",
+  visayas: "Visayas",
+  mindanao: "Mindanao",
+};
+
+const REGION_COLORS: Record<string, string> = {
+  luzon: "bg-rose-100 text-rose-800",
+  visayas: "bg-emerald-100 text-emerald-800",
+  mindanao: "bg-yellow-100 text-yellow-800",
+};
+
 const CHANNEL_OPTIONS = [
   { value: "none", label: "No Channel" },
   { value: "inline", label: "Inline" },
@@ -121,6 +140,7 @@ export default function BranchesPage() {
     address: "",
     phone: "",
     classification: "none",
+    region: "none",
     channel: "none",
     latitude: "",
     longitude: "",
@@ -137,6 +157,7 @@ export default function BranchesPage() {
     address: "",
     phone: "",
     classification: "none",
+    region: "none",
     channel: "none",
     latitude: "",
     longitude: "",
@@ -162,7 +183,7 @@ export default function BranchesPage() {
   const pagination = usePagination(filteredBranches);
 
   const resetCreateForm = () => {
-    setCreateForm({ name: "", address: "", phone: "", classification: "none", channel: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
+    setCreateForm({ name: "", address: "", phone: "", classification: "none", region: "none", channel: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
     setCreateErrors({});
   };
 
@@ -205,6 +226,9 @@ export default function BranchesPage() {
         classification: createForm.classification !== "none"
           ? (createForm.classification as "premium" | "aclass" | "bnc" | "outlet")
           : undefined,
+        region: createForm.region !== "none"
+          ? (createForm.region as "luzon" | "visayas" | "mindanao")
+          : undefined,
         channel: createForm.channel !== "none"
           ? (createForm.channel as "inline" | "online" | "outlet" | "popup" | "dtc" | "warehouse" | "outright")
           : undefined,
@@ -230,6 +254,7 @@ export default function BranchesPage() {
       address: branch.address,
       phone: branch.phone ?? "",
       classification: branch.classification ?? "none",
+      region: (branch as { region?: string }).region ?? "none",
       channel: branch.channel ?? "none",
       latitude: branch.latitude?.toString() ?? "",
       longitude: branch.longitude?.toString() ?? "",
@@ -279,6 +304,9 @@ export default function BranchesPage() {
         address: editForm.address.trim(),
         classification: editForm.classification !== "none"
           ? (editForm.classification as "premium" | "aclass" | "bnc" | "outlet")
+          : undefined,
+        region: editForm.region !== "none"
+          ? (editForm.region as "luzon" | "visayas" | "mindanao")
           : undefined,
         channel: editForm.channel !== "none"
           ? (editForm.channel as "inline" | "online" | "outlet" | "popup" | "dtc" | "warehouse" | "outright")
@@ -578,6 +606,27 @@ export default function BranchesPage() {
               </p>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="create-region">Region (LuzViMin)</Label>
+              <Select
+                value={createForm.region}
+                onValueChange={(value) => updateCreateField("region", value)}
+              >
+                <SelectTrigger id="create-region">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REGION_OPTIONS.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Geographic group: Luzon, Visayas, or Mindanao
+              </p>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="create-phone">Phone</Label>
               <Input
                 id="create-phone"
@@ -745,6 +794,27 @@ export default function BranchesPage() {
               </Select>
               <p className="text-xs text-muted-foreground">
                 Determines pricing tier and promotion eligibility
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-region">Region (LuzViMin)</Label>
+              <Select
+                value={editForm.region}
+                onValueChange={(value) => updateEditField("region", value)}
+              >
+                <SelectTrigger id="edit-region">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {REGION_OPTIONS.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Geographic group: Luzon, Visayas, or Mindanao
               </p>
             </div>
             <div className="space-y-2">

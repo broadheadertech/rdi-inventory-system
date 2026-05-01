@@ -2,6 +2,7 @@
 
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import Link from "next/link";
 import { useState, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
@@ -152,7 +153,15 @@ const PERIOD_SECTION_LABEL: Record<Period, string> = {
 export default function HqDashboardPage() {
   const [period, setPeriod] = useState<Period>("monthly");
   const [graphTab, setGraphTab] = useState<"sales" | "soh">("sales");
+  const [brandFilter, setBrandFilter] = useState<string | "all">("all");
   const [selectedBucketIndex, setSelectedBucketIndex] = useState<number | null>(null);
+  const allBrandsList = useQuery(api.catalog.brands.listBrands) as
+    | { _id: string; name: string; isActive: boolean }[]
+    | undefined;
+  const activeBrandList = useMemo(
+    () => (allBrandsList ?? []).filter((b) => b.isActive).sort((a, b) => a.name.localeCompare(b.name)),
+    [allBrandsList],
+  );
   // Clear bucket drill-down when period or graph tab changes
   useEffect(() => {
     setSelectedBucketIndex(null);
@@ -186,8 +195,14 @@ export default function HqDashboardPage() {
         }[];
       }
     | undefined;
-  const salesBreakdown = useQuery(api.dashboards.hqDashboard.getHqSalesBreakdown, { period });
-  const inventoryBreakdown = useQuery(api.dashboards.hqDashboard.getHqInventoryBreakdown, { period });
+  const salesBreakdown = useQuery(api.dashboards.hqDashboard.getHqSalesBreakdown, {
+    period,
+    ...(brandFilter !== "all" ? { brandId: brandFilter as Id<"brands"> } : {}),
+  });
+  const inventoryBreakdown = useQuery(api.dashboards.hqDashboard.getHqInventoryBreakdown, {
+    period,
+    ...(brandFilter !== "all" ? { brandId: brandFilter as Id<"brands"> } : {}),
+  });
   const salesTimeSeries = useQuery(api.dashboards.hqDashboard.getHqSalesTimeSeries, { period });
   const bucketDetail = useQuery(
     api.dashboards.hqDashboard.getHqSalesBucketDetail,
@@ -200,6 +215,19 @@ export default function HqDashboardPage() {
         totalSalesCentavos: number;
         totalTxns: number;
         totalUnits: number;
+        avgBucketCentavos: number;
+        vsAveragePercent: number;
+        channelMix: { channel: string; salesCentavos: number; sharePercent: number }[];
+        pricingMix: {
+          regularPriceSalesCentavos: number;
+          regularPriceUnits: number;
+          markdownSalesCentavos: number;
+          markdownUnits: number;
+          promotionSalesCentavos: number;
+          promotionUnits: number;
+          promoActiveInWindow: boolean;
+        };
+        insights: { tone: "positive" | "negative" | "neutral"; text: string }[];
         items: {
           branchId: string;
           branchName: string;
@@ -269,21 +297,35 @@ export default function HqDashboardPage() {
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h2 className="text-base font-semibold">{PERIOD_SECTION_LABEL[period]}</h2>
-          <div className="flex gap-1 rounded-md border bg-muted/30 p-1">
-            {PERIOD_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setPeriod(opt.value)}
-                className={cn(
-                  "px-3 py-1 text-xs rounded font-medium transition-colors",
-                  period === opt.value
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-gray-100"
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={brandFilter}
+              onChange={(e) => setBrandFilter(e.target.value)}
+              className="rounded-md border px-3 py-1 text-xs"
+            >
+              <option value="all">All Brands</option>
+              {activeBrandList.map((b) => (
+                <option key={b._id} value={b._id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+            <div className="flex gap-1 rounded-md border bg-muted/30 p-1">
+              {PERIOD_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setPeriod(opt.value)}
+                  className={cn(
+                    "px-3 py-1 text-xs rounded font-medium transition-colors",
+                    period === opt.value
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-gray-100"
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -381,23 +423,23 @@ export default function HqDashboardPage() {
               );
             })}
             {(() => {
-              const cost = inventoryBreakdown.totalSohCostCentavos ?? 0;
+              const sales = salesBreakdown?.totalSalesCentavos ?? 0;
               const retail = inventoryBreakdown.totalSohRetailCentavos ?? 0;
-              const marginPct = retail > 0 ? (1 - cost / retail) * 100 : 0;
+              const turnover = retail > 0 ? sales / retail : 0;
               return (
                 <MetricCard
-                  title="Margin SOH"
-                  value={retail > 0 ? formatPercent(marginPct) : "—"}
+                  title="Turnover Rate"
+                  value={retail > 0 ? `${turnover.toFixed(2)}×` : "—"}
                   valueClassName={
                     retail === 0
                       ? undefined
-                      : marginPct >= 40
+                      : turnover >= 1
                         ? "text-green-600"
-                        : marginPct >= 20
+                        : turnover >= 0.5
                           ? "text-amber-600"
                           : "text-red-600"
                   }
-                  footer={`Retail Value: ${formatCentavos(retail)}`}
+                  footer="Sales ÷ Retail SOH"
                 />
               );
             })()}
@@ -517,7 +559,7 @@ export default function HqDashboardPage() {
               </p>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
+                  <LineChart
                     data={inventoryBreakdown.brands.map((b) => ({
                       label: b.brandName,
                       soh: b.sohUnits,
@@ -533,17 +575,15 @@ export default function HqDashboardPage() {
                         `${(v ?? 0).toLocaleString("en-PH")} pcs${name === "par" ? " (PAR)" : ""}`
                       }
                     />
-                    <Bar dataKey="soh" name="SOH">
-                      {inventoryBreakdown.brands.map((b, i) => {
-                        const below = b.parLevel > 0 && b.sohUnits < b.parLevel;
-                        return (
-                          <Cell
-                            key={i}
-                            fill={below ? "#dc2626" : "#16a34a"}
-                          />
-                        );
-                      })}
-                    </Bar>
+                    <Line
+                      type="monotone"
+                      dataKey="soh"
+                      name="SOH"
+                      stroke="#16a34a"
+                      strokeWidth={2}
+                      dot={{ r: 4 }}
+                      activeDot={{ r: 6 }}
+                    />
                     {inventoryBreakdown.brands.some((b) => b.parLevel > 0) && (
                       <ReferenceLine
                         y={Math.max(
@@ -559,7 +599,7 @@ export default function HqDashboardPage() {
                         }}
                       />
                     )}
-                  </BarChart>
+                  </LineChart>
                 </ResponsiveContainer>
               </div>
             </>
@@ -598,11 +638,134 @@ export default function HqDashboardPage() {
                 ))}
               </div>
             ) : bucketDetail.items.length === 0 ? (
-              <div className="p-6 text-center text-sm text-muted-foreground">
-                No sales recorded in this {period === "daily" ? "hour" : period === "monthly" ? "day" : "month"}.
-              </div>
+              <>
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                  No sales recorded in this {period === "daily" ? "hour" : period === "monthly" ? "day" : "month"}.
+                </div>
+                {bucketDetail.insights.length > 0 && (
+                  <div className="border-t bg-amber-50/30 px-4 py-3">
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Why did this happen?
+                    </p>
+                    <ul className="space-y-1 text-sm">
+                      {bucketDetail.insights.map((ins, i) => (
+                        <li
+                          key={i}
+                          className={cn(
+                            "flex gap-2",
+                            ins.tone === "positive"
+                              ? "text-green-700"
+                              : ins.tone === "negative"
+                                ? "text-red-700"
+                                : "text-foreground",
+                          )}
+                        >
+                          <span aria-hidden>
+                            {ins.tone === "positive"
+                              ? "▲"
+                              : ins.tone === "negative"
+                                ? "▼"
+                                : "•"}
+                          </span>
+                          <span>{ins.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
             ) : (
               <>
+                {bucketDetail.insights.length > 0 && (
+                  <div className="border-b bg-blue-50/40 px-4 py-3">
+                    <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      Why did this happen?
+                    </p>
+                    <ul className="space-y-1 text-sm">
+                      {bucketDetail.insights.map((ins, i) => (
+                        <li
+                          key={i}
+                          className={cn(
+                            "flex gap-2",
+                            ins.tone === "positive"
+                              ? "text-green-700"
+                              : ins.tone === "negative"
+                                ? "text-red-700"
+                                : "text-foreground",
+                          )}
+                        >
+                          <span aria-hidden>
+                            {ins.tone === "positive"
+                              ? "▲"
+                              : ins.tone === "negative"
+                                ? "▼"
+                                : "•"}
+                          </span>
+                          <span>{ins.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {(() => {
+                  const pm = bucketDetail.pricingMix;
+                  const total =
+                    pm.regularPriceSalesCentavos +
+                    pm.markdownSalesCentavos +
+                    pm.promotionSalesCentavos;
+                  if (total === 0) return null;
+                  const rows = [
+                    {
+                      label: "Regular Price",
+                      sales: pm.regularPriceSalesCentavos,
+                      units: pm.regularPriceUnits,
+                      tone: "text-green-700 bg-green-50",
+                    },
+                    {
+                      label: "Markdowns",
+                      sales: pm.markdownSalesCentavos,
+                      units: pm.markdownUnits,
+                      tone: "text-amber-700 bg-amber-50",
+                    },
+                    {
+                      label: "Promotions",
+                      sales: pm.promotionSalesCentavos,
+                      units: pm.promotionUnits,
+                      tone: "text-blue-700 bg-blue-50",
+                    },
+                  ];
+                  return (
+                    <div className="border-b px-4 py-3">
+                      <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Sales by pricing parameter
+                      </p>
+                      <div className="grid grid-cols-3 gap-2">
+                        {rows.map((r) => {
+                          const pct = total > 0 ? (r.sales / total) * 100 : 0;
+                          return (
+                            <div
+                              key={r.label}
+                              className={cn("rounded-md border p-3", r.tone)}
+                            >
+                              <p className="text-xs font-medium">{r.label}</p>
+                              <p className="mt-1 text-base font-bold tabular-nums">
+                                {formatCentavos(r.sales)}
+                              </p>
+                              <p className="text-xs tabular-nums opacity-80">
+                                {pct.toFixed(1)}% · {r.units.toLocaleString("en-PH")} units
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {!pm.promoActiveInWindow && pm.markdownSalesCentavos > 0 && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          No promotions were active in this window — discounted lines counted as markdowns.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
@@ -858,7 +1021,7 @@ export default function HqDashboardPage() {
                     </div>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       <span>
-                        Revenue:{" "}
+                        Sales:{" "}
                         <span className="font-medium text-foreground">
                           {formatCentavos(branch.todayRevenueCentavos)}
                         </span>

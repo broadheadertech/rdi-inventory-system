@@ -166,7 +166,7 @@ function WarehouseDashboard({ todayLabel }: { todayLabel: string }) {
         ) : (
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <MetricCard
-              title="Transfer Revenue"
+              title="Transfer Sales"
               value={`₱${(metrics.todayRevenueCentavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}`}
               trendCurrent={metrics.todayRevenueCentavos}
               trendPrevious={metrics.yesterdayRevenueCentavos}

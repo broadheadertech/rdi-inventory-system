@@ -121,7 +121,7 @@ function PerformanceSection() {
           <p className="text-2xl font-bold">{totals.items}</p>
         </div>
         <div className="rounded-lg border bg-card p-4 text-center">
-          <p className="text-sm text-muted-foreground">Total Revenue</p>
+          <p className="text-sm text-muted-foreground">Total Sales</p>
           <p className="text-2xl font-bold">{formatCentavos(totals.revenue)}</p>
         </div>
       </div>
@@ -161,7 +161,7 @@ function PerformanceSection() {
                 <TableHead>Assistant</TableHead>
                 <TableHead className="text-right">Transactions</TableHead>
                 <TableHead className="text-right">Items Sold</TableHead>
-                <TableHead className="text-right">Revenue</TableHead>
+                <TableHead className="text-right">Sales</TableHead>
                 <TableHead className="text-right">Avg / Txn</TableHead>
               </TableRow>
             </TableHeader>

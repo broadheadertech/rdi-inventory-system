@@ -44,6 +44,9 @@ export default defineSchema({
     classification: v.optional(
       v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet"))
     ),
+    region: v.optional(
+      v.union(v.literal("luzon"), v.literal("visayas"), v.literal("mindanao"))
+    ),
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),

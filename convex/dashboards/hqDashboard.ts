@@ -247,7 +247,10 @@ export const getAttentionItems = query({
 // item's brand via style.brandId with legacy category.brandId fallback.
 
 export const getHqSalesBreakdown = query({
-  args: { period: periodArg },
+  args: {
+    period: periodArg,
+    brandId: v.optional(v.id("brands")),
+  },
   handler: async (ctx, args) => {
     await requireRole(ctx, HQ_ROLES);
 
@@ -269,7 +272,6 @@ export const getHqSalesBreakdown = query({
     }
 
     const completedTxns = allTxns.filter((t) => t.status !== "voided");
-    const totalSalesCentavos = completedTxns.reduce((s, t) => s + t.totalCentavos, 0);
 
     const items: Doc<"transactionItems">[] = [];
     for (const txn of completedTxns) {
@@ -287,6 +289,7 @@ export const getHqSalesBreakdown = query({
     const styleBrandCache = new Map<string, Id<"brands"> | null>();
     const categoryBrandCache = new Map<string, Id<"brands"> | null>();
     const brandRevenue = new Map<string, number>();
+    let totalSalesCentavos = 0;
     let grossProfitCentavos = 0;
 
     for (const item of items) {
@@ -299,9 +302,6 @@ export const getHqSalesBreakdown = query({
         variantCache.set(item.variantId as string, variant);
       }
       if (!variant) continue;
-
-      const costThisLine = variant.costPriceCentavos * item.quantity;
-      grossProfitCentavos += item.lineTotalCentavos - costThisLine;
 
       let brandId = styleBrandCache.get(variant.styleId as string);
       if (brandId === undefined) {
@@ -323,6 +323,14 @@ export const getHqSalesBreakdown = query({
         brandId = resolved;
         styleBrandCache.set(variant.styleId as string, brandId);
       }
+
+      // Brand filter — skip non-matching items entirely
+      if (args.brandId && brandId !== args.brandId) continue;
+
+      const costThisLine = variant.costPriceCentavos * item.quantity;
+      totalSalesCentavos += item.lineTotalCentavos;
+      grossProfitCentavos += item.lineTotalCentavos - costThisLine;
+
       if (!brandId) continue;
 
       brandRevenue.set(
@@ -356,7 +364,10 @@ export const getHqSalesBreakdown = query({
 // resolves each variant's brand via style.brandId with legacy fallback.
 
 export const getHqInventoryBreakdown = query({
-  args: { period: periodArg },
+  args: {
+    period: periodArg,
+    brandId: v.optional(v.id("brands")),
+  },
   handler: async (ctx, args) => {
     await requireRole(ctx, HQ_ROLES);
 
@@ -375,8 +386,6 @@ export const getHqInventoryBreakdown = query({
     let totalSohRetailCentavos = 0;
 
     for (const inv of inventoryRows) {
-      totalSohUnits += inv.quantity;
-
       let info = variantInfoCache.get(inv.variantId as string);
       if (info === undefined) {
         const v = await ctx.db.get(inv.variantId);
@@ -390,9 +399,6 @@ export const getHqInventoryBreakdown = query({
         variantInfoCache.set(inv.variantId as string, info);
       }
       if (!info) continue;
-
-      totalSohCostCentavos += info.costPriceCentavos * inv.quantity;
-      totalSohRetailCentavos += info.priceCentavos * inv.quantity;
 
       const styleId = info.styleId;
 
@@ -416,6 +422,14 @@ export const getHqInventoryBreakdown = query({
         brandId = resolved;
         styleBrandCache.set(styleId as string, brandId);
       }
+
+      // Brand filter
+      if (args.brandId && brandId !== args.brandId) continue;
+
+      totalSohUnits += inv.quantity;
+      totalSohCostCentavos += info.costPriceCentavos * inv.quantity;
+      totalSohRetailCentavos += info.priceCentavos * inv.quantity;
+
       if (!brandId) continue;
 
       brandSoh.set(
@@ -593,6 +607,15 @@ export const getHqSalesBucketDetail = query({
     const branches = await ctx.db.query("branches").collect();
     const activeBranches = branches.filter((b) => b.isActive);
 
+    // Was any promotion active during the bucket window?
+    const allPromos = await ctx.db.query("promotions").collect();
+    const promoActiveInWindow = allPromos.some((p) => {
+      if (!p.isActive) return false;
+      const start = p.startDate ?? 0;
+      const end = p.endDate ?? Number.MAX_SAFE_INTEGER;
+      return start <= endMs && end >= startMs;
+    });
+
     type BranchAgg = {
       branchId: Id<"branches">;
       branchName: string;
@@ -602,6 +625,16 @@ export const getHqSalesBucketDetail = query({
       itemsSold: number;
     };
     const perBranch = new Map<string, BranchAgg>();
+
+    // Pricing-parameter aggregator
+    let regularPriceSalesCentavos = 0;
+    let markdownSalesCentavos = 0;
+    let promotionSalesCentavos = 0;
+    let regularPriceUnits = 0;
+    let markdownUnits = 0;
+    let promotionUnits = 0;
+
+    const variantPriceCache = new Map<string, number>();
 
     for (const branch of activeBranches) {
       const txns = await ctx.db
@@ -621,7 +654,27 @@ export const getHqSalesBucketDetail = query({
           .query("transactionItems")
           .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
           .collect();
-        for (const it of items) units += it.quantity;
+        for (const it of items) {
+          units += it.quantity;
+          // Resolve regular price from variant
+          let regular = variantPriceCache.get(it.variantId as string);
+          if (regular === undefined) {
+            const v = await ctx.db.get(it.variantId);
+            regular = v?.priceCentavos ?? 0;
+            variantPriceCache.set(it.variantId as string, regular);
+          }
+          const unitPrice = it.unitPriceCentavos;
+          if (regular === 0 || unitPrice >= regular) {
+            regularPriceSalesCentavos += it.lineTotalCentavos;
+            regularPriceUnits += it.quantity;
+          } else if (promoActiveInWindow) {
+            promotionSalesCentavos += it.lineTotalCentavos;
+            promotionUnits += it.quantity;
+          } else {
+            markdownSalesCentavos += it.lineTotalCentavos;
+            markdownUnits += it.quantity;
+          }
+        }
       }
       if (sales > 0) {
         perBranch.set(branch._id as string, {
@@ -640,6 +693,148 @@ export const getHqSalesBucketDetail = query({
     const totalTxns = items.reduce((s, r) => s + r.transactionCount, 0);
     const totalUnits = items.reduce((s, r) => s + r.itemsSold, 0);
 
+    // ── "Why did it happen" insights ────────────────────────────────────────
+    // 1) Compare this bucket's sales to the average of all buckets in the period
+    const periodStartMs = getPeriodStartMs(period);
+    const periodTxns: Doc<"transactions">[] = [];
+    for (const branch of activeBranches) {
+      const txns = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branch._id).gte("createdAt", periodStartMs)
+        )
+        .collect();
+      periodTxns.push(...txns);
+    }
+    const periodCompleted = periodTxns.filter((t) => t.status !== "voided");
+    const bucketCount =
+      period === "daily" ? 24 : period === "monthly" ? new Date(Date.UTC(y, m + 1, 0)).getUTCDate() : 12;
+    const periodTotalCentavos = periodCompleted.reduce((s, t) => s + t.totalCentavos, 0);
+    const avgBucketCentavos = bucketCount > 0 ? periodTotalCentavos / bucketCount : 0;
+    const vsAveragePercent =
+      avgBucketCentavos > 0
+        ? ((totalSalesCentavos - avgBucketCentavos) / avgBucketCentavos) * 100
+        : 0;
+
+    // 2) Channel mix — share of bucket sales by channel
+    const channelShare = new Map<string, number>();
+    for (const r of items) {
+      const key = r.channel ?? "(none)";
+      channelShare.set(key, (channelShare.get(key) ?? 0) + r.salesCentavos);
+    }
+    const channelMix = [...channelShare.entries()]
+      .map(([channel, sales]) => ({
+        channel,
+        salesCentavos: sales,
+        sharePercent: totalSalesCentavos > 0 ? (sales / totalSalesCentavos) * 100 : 0,
+      }))
+      .sort((a, b) => b.salesCentavos - a.salesCentavos);
+
+    const topBranch = items[0] ?? null;
+    const topBranchSharePercent =
+      topBranch && totalSalesCentavos > 0
+        ? (topBranch.salesCentavos / totalSalesCentavos) * 100
+        : 0;
+    const topChannel = channelMix[0] ?? null;
+
+    // 3) Build narrative bullets
+    const insights: { tone: "positive" | "negative" | "neutral"; text: string }[] = [];
+
+    if (totalSalesCentavos === 0) {
+      insights.push({
+        tone: "negative",
+        text: "No sales recorded in this window — likely closed, offline, or no foot traffic.",
+      });
+    } else {
+      // vs average
+      if (Math.abs(vsAveragePercent) >= 25) {
+        insights.push({
+          tone: vsAveragePercent > 0 ? "positive" : "negative",
+          text: `${vsAveragePercent > 0 ? "Above" : "Below"} period average by ${Math.abs(vsAveragePercent).toFixed(0)}% (avg ₱${(avgBucketCentavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} per ${period === "daily" ? "hour" : period === "monthly" ? "day" : "month"}).`,
+        });
+      } else if (avgBucketCentavos > 0) {
+        insights.push({
+          tone: "neutral",
+          text: `In line with period average (${vsAveragePercent >= 0 ? "+" : ""}${vsAveragePercent.toFixed(0)}%).`,
+        });
+      }
+
+      // top branch concentration
+      if (topBranch && topBranchSharePercent >= 50) {
+        insights.push({
+          tone: "neutral",
+          text: `${topBranch.branchName} drove ${topBranchSharePercent.toFixed(0)}% of sales — heavy concentration in one store.`,
+        });
+      } else if (topBranch) {
+        insights.push({
+          tone: "neutral",
+          text: `Top contributor: ${topBranch.branchName} (${topBranchSharePercent.toFixed(0)}% share).`,
+        });
+      }
+
+      // top channel
+      if (topChannel && topChannel.sharePercent >= 60) {
+        insights.push({
+          tone: "neutral",
+          text: `${topChannel.channel.charAt(0).toUpperCase() + topChannel.channel.slice(1)} channel led with ${topChannel.sharePercent.toFixed(0)}% of sales.`,
+        });
+      }
+
+      // store coverage
+      const activeStoreCount = items.length;
+      if (activeStoreCount === 1 && activeBranches.length > 1) {
+        insights.push({
+          tone: "negative",
+          text: `Only 1 of ${activeBranches.length} branches sold during this window.`,
+        });
+      } else if (activeStoreCount < activeBranches.length / 2 && activeBranches.length >= 4) {
+        insights.push({
+          tone: "negative",
+          text: `Only ${activeStoreCount} of ${activeBranches.length} branches sold during this window.`,
+        });
+      }
+
+      // average ticket sanity
+      if (totalTxns > 0) {
+        const avgTicketCentavos = totalSalesCentavos / totalTxns;
+        const periodAvgTicketCentavos =
+          periodCompleted.length > 0 ? periodTotalCentavos / periodCompleted.length : 0;
+        if (
+          periodAvgTicketCentavos > 0 &&
+          Math.abs(avgTicketCentavos - periodAvgTicketCentavos) / periodAvgTicketCentavos >= 0.3
+        ) {
+          const higher = avgTicketCentavos > periodAvgTicketCentavos;
+          insights.push({
+            tone: higher ? "positive" : "neutral",
+            text: `Average ticket ${higher ? "higher" : "lower"} than usual: ₱${(avgTicketCentavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })} vs period avg ₱${(periodAvgTicketCentavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}.`,
+          });
+        }
+      }
+
+      // pricing-parameter mix bullet
+      const regPct = totalSalesCentavos > 0 ? (regularPriceSalesCentavos / totalSalesCentavos) * 100 : 0;
+      const mdPct = totalSalesCentavos > 0 ? (markdownSalesCentavos / totalSalesCentavos) * 100 : 0;
+      const promoPct = totalSalesCentavos > 0 ? (promotionSalesCentavos / totalSalesCentavos) * 100 : 0;
+      if (regPct + mdPct + promoPct > 0) {
+        if (promoPct >= 50) {
+          insights.push({
+            tone: "neutral",
+            text: `${promoPct.toFixed(0)}% of sales came from active promotions — promo-driven window.`,
+          });
+        } else if (mdPct >= 40) {
+          insights.push({
+            tone: "negative",
+            text: `${mdPct.toFixed(0)}% from markdowns — heavy reliance on price cuts to move stock.`,
+          });
+        } else if (regPct >= 80) {
+          insights.push({
+            tone: "positive",
+            text: `${regPct.toFixed(0)}% sold at regular price — healthy full-price mix.`,
+          });
+        }
+      }
+    }
+
     return {
       period,
       bucketIndex: args.bucketIndex,
@@ -649,6 +844,19 @@ export const getHqSalesBucketDetail = query({
       totalSalesCentavos,
       totalTxns,
       totalUnits,
+      avgBucketCentavos,
+      vsAveragePercent,
+      channelMix,
+      pricingMix: {
+        regularPriceSalesCentavos,
+        regularPriceUnits,
+        markdownSalesCentavos,
+        markdownUnits,
+        promotionSalesCentavos,
+        promotionUnits,
+        promoActiveInWindow,
+      },
+      insights,
       items,
     };
   },
