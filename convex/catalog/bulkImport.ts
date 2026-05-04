@@ -135,6 +135,15 @@ export const _findOrCreateStyle = internalMutation({
     description: v.optional(v.string()),
     basePriceCentavos: v.number(),
     userId: v.id("users"),
+    // Optional Product Code Configuration links — used by the seeder + POS-format
+    // import to attach the configured productCodes alongside the legacy categoryId.
+    brandId: v.optional(v.id("brands")),
+    departmentId: v.optional(v.id("productCodes")),
+    divisionId: v.optional(v.id("productCodes")),
+    productCategoryId: v.optional(v.id("productCodes")),
+    subCategoryId: v.optional(v.id("productCodes")),
+    styleCode: v.optional(v.string()),
+    srp: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const siblings = await ctx.db
@@ -146,6 +155,21 @@ export const _findOrCreateStyle = internalMutation({
     );
 
     if (existing) {
+      // Backfill missing productCode links + brand/styleCode/srp on existing rows.
+      const patch: Record<string, unknown> = {};
+      if (args.brandId && !existing.brandId) patch.brandId = args.brandId;
+      if (args.departmentId && !existing.departmentId) patch.departmentId = args.departmentId;
+      if (args.divisionId && !existing.divisionId) patch.divisionId = args.divisionId;
+      if (args.productCategoryId && !existing.productCategoryId) {
+        patch.productCategoryId = args.productCategoryId;
+      }
+      if (args.subCategoryId && !existing.subCategoryId) patch.subCategoryId = args.subCategoryId;
+      if (args.styleCode && !existing.styleCode) patch.styleCode = args.styleCode;
+      if (args.srp !== undefined && existing.srp === undefined) patch.srp = args.srp;
+      if (Object.keys(patch).length > 0) {
+        patch.updatedAt = Date.now();
+        await ctx.db.patch(existing._id, patch);
+      }
       return { id: existing._id, created: false };
     }
 
@@ -159,6 +183,13 @@ export const _findOrCreateStyle = internalMutation({
 
     const styleId = await ctx.db.insert("styles", {
       categoryId: args.categoryId,
+      brandId: args.brandId,
+      departmentId: args.departmentId,
+      divisionId: args.divisionId,
+      productCategoryId: args.productCategoryId,
+      subCategoryId: args.subCategoryId,
+      styleCode: args.styleCode,
+      srp: args.srp,
       name: args.name,
       description: args.description,
       basePriceCentavos: args.basePriceCentavos,
@@ -174,6 +205,8 @@ export const _findOrCreateStyle = internalMutation({
       entityId: styleId,
       after: {
         categoryId: args.categoryId,
+        productCategoryId: args.productCategoryId,
+        divisionId: args.divisionId,
         name: args.name,
         basePriceCentavos: args.basePriceCentavos,
         isActive: true,
@@ -434,6 +467,315 @@ export const bulkImportProducts = action({
       brandsCreated,
       categoriesCreated,
       stylesCreated,
+    };
+  },
+});
+
+// ─── Internal Query: List ProductCodes (for POS-format import resolution) ───
+
+export const _listProductCodes = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("productCodes").collect();
+  },
+});
+
+// ─── Internal Mutation: Create initial inventoryBatch (ACTUAL COUNT) ────────
+
+export const _seedInitialInventoryBatch = internalMutation({
+  args: {
+    branchId: v.id("branches"),
+    variantId: v.id("variants"),
+    quantity: v.number(),
+    costPriceCentavos: v.number(),
+    receivedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    if (args.quantity <= 0) return null;
+    const batchId = await ctx.db.insert("inventoryBatches", {
+      branchId: args.branchId,
+      variantId: args.variantId,
+      quantity: args.quantity,
+      costPriceCentavos: args.costPriceCentavos,
+      receivedAt: args.receivedAt,
+      source: "legacy",
+      createdAt: Date.now(),
+    });
+    // Roll forward into the inventory aggregate
+    const existing = await ctx.db
+      .query("inventory")
+      .withIndex("by_branch_variant", (q) =>
+        q.eq("branchId", args.branchId).eq("variantId", args.variantId),
+      )
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        quantity: existing.quantity + args.quantity,
+        arrivedAt: args.receivedAt,
+        updatedAt: Date.now(),
+      });
+    } else {
+      await ctx.db.insert("inventory", {
+        branchId: args.branchId,
+        variantId: args.variantId,
+        quantity: args.quantity,
+        arrivedAt: args.receivedAt,
+        updatedAt: Date.now(),
+      });
+    }
+    return batchId;
+  },
+});
+
+// ─── Action: POS-format Bulk Import ─────────────────────────────────────────
+// Accepts the wide column set commonly produced by retail POS exports:
+//   Barcode / Product Code, Product ID, Product No, Short PCH Description,
+//   Long Description, UOM, SRP, Price Mode, Senior Item?, SCD Value, Is VAT?,
+//   Markup %, Min. Level, STYLE CODE, CALENDAR CODE, PRICING, Category 4,
+//   With Exp. Date?, BRAND, DEPARTMENT, DIVISION, CATEGORY, SUBCATEGORY,
+//   ACTUAL COUNT, ACTIVE
+//
+// DEPARTMENT / DIVISION / CATEGORY / SUBCATEGORY are looked up against
+// productCodes by description (case-insensitive) and linked on the style.
+// ACTUAL COUNT (when > 0 and a default branch is supplied) creates an
+// inventoryBatch + inventory row so the variant has on-hand stock.
+
+export const bulkImportProductsPos = action({
+  args: {
+    items: v.array(
+      v.object({
+        barcode: v.optional(v.string()),
+        productId: v.optional(v.string()),
+        productNo: v.optional(v.string()),
+        shortDescription: v.optional(v.string()),
+        longDescription: v.optional(v.string()),
+        uom: v.optional(v.string()),
+        srpPesos: v.optional(v.number()),
+        priceMode: v.optional(v.string()),
+        seniorItem: v.optional(v.boolean()),
+        scdValue: v.optional(v.number()),
+        isVat: v.optional(v.boolean()),
+        markupPercent: v.optional(v.number()),
+        minLevel: v.optional(v.number()),
+        styleCode: v.optional(v.string()),
+        calendarCode: v.optional(v.string()),
+        pricing: v.optional(v.string()),
+        category4: v.optional(v.string()),
+        withExpDate: v.optional(v.boolean()),
+        brand: v.string(),
+        department: v.optional(v.string()),
+        division: v.optional(v.string()),
+        category: v.string(),
+        subCategory: v.optional(v.string()),
+        actualCount: v.optional(v.number()),
+        active: v.optional(v.boolean()),
+        // Variant attributes — POS exports rarely include these, but allow
+        // overrides; default to "OS" / "Default" so the variant is creatable.
+        size: v.optional(v.string()),
+        color: v.optional(v.string()),
+        gender: v.optional(v.string()),
+      }),
+    ),
+    initialStockBranchId: v.optional(v.id("branches")),
+  },
+  handler: async (ctx, args) => {
+    if (args.items.length > MAX_BATCH_SIZE) {
+      throw new ConvexError({
+        code: "BATCH_TOO_LARGE",
+        message: `Batch size ${args.items.length} exceeds maximum of ${MAX_BATCH_SIZE}`,
+      });
+    }
+
+    const user = await ctx.runQuery(internal.catalog.bulkImport._verifyAdminRole);
+
+    // Resolve productCodes lookup once
+    const allPCs: Array<{
+      _id: Id<"productCodes">;
+      type: string;
+      description: string;
+    }> = await ctx.runQuery(internal.catalog.bulkImport._listProductCodes);
+    const findPC = (
+      type: string,
+      desc: string | undefined,
+    ): Id<"productCodes"> | undefined => {
+      if (!desc || !desc.trim()) return undefined;
+      const target = desc.trim().toUpperCase();
+      const hit = allPCs.find(
+        (p) => p.type === type && p.description.toUpperCase() === target,
+      );
+      return hit?._id;
+    };
+
+    // Department label → variant.gender heuristic
+    const genderFromDepartment = (
+      dept: string | undefined,
+    ): "mens" | "womens" | "unisex" | "kids" | "boys" | "girls" | undefined => {
+      if (!dept) return undefined;
+      const d = dept.trim().toUpperCase();
+      if (d === "MENS" || d === "MEN" || d === "MALE") return "mens";
+      if (d === "LADIES" || d === "WOMENS" || d === "WOMEN" || d === "FEMALE") return "womens";
+      if (d === "UNISEX") return "unisex";
+      if (d === "KIDS") return "kids";
+      if (d === "BOYS") return "boys";
+      if (d === "GIRLS") return "girls";
+      return undefined;
+    };
+
+    const brandCache = new Map<string, Id<"brands">>();
+    const categoryCache = new Map<string, Id<"categories">>();
+    const styleCache = new Map<string, Id<"styles">>();
+
+    let successCount = 0;
+    let skippedCount = 0;
+    let failureCount = 0;
+    let stockSeededCount = 0;
+    const errors: Array<{ rowIndex: number; barcode: string; error: string }> = [];
+    const skipped: Array<{ rowIndex: number; barcode: string; reason: string }> = [];
+
+    for (let i = 0; i < args.items.length; i++) {
+      const row = args.items[i];
+      const rowKey = row.barcode ?? row.productId ?? `row-${i}`;
+      try {
+        // Brand
+        const brandKey = row.brand.toLowerCase();
+        let brandId = brandCache.get(brandKey);
+        if (!brandId) {
+          const r = await ctx.runMutation(
+            internal.catalog.bulkImport._findOrCreateBrand,
+            { name: row.brand, userId: user._id },
+          );
+          brandId = r.id;
+          brandCache.set(brandKey, brandId!);
+        }
+
+        // Legacy category bucket (per-brand). Keeps backward-compat with the
+        // existing styles index. POS rows use CATEGORY for the productCode link.
+        const legacyCatKey = `${brandKey}::${row.category.toLowerCase()}`;
+        let legacyCatId = categoryCache.get(legacyCatKey);
+        if (!legacyCatId) {
+          const r = await ctx.runMutation(
+            internal.catalog.bulkImport._findOrCreateCategory,
+            { brandId, name: row.category, userId: user._id },
+          );
+          legacyCatId = r.id;
+          categoryCache.set(legacyCatKey, legacyCatId!);
+        }
+
+        // Resolve productCode IDs from POS column values
+        const departmentId = findPC("department", row.department);
+        const divisionId = findPC("division", row.division);
+        const productCategoryId = findPC("category", row.category);
+        const subCategoryId = findPC("subCategory", row.subCategory);
+
+        // Style
+        const styleName = row.shortDescription?.trim() || row.longDescription?.trim() || row.productNo || rowKey;
+        const styleKey = `${legacyCatKey}::${styleName.toLowerCase()}`;
+        let styleId = styleCache.get(styleKey);
+        if (!styleId) {
+          const basePriceCentavos = Math.round((row.srpPesos ?? 0) * 100);
+          const r = await ctx.runMutation(
+            internal.catalog.bulkImport._findOrCreateStyle,
+            {
+              categoryId: legacyCatId,
+              brandId,
+              departmentId,
+              divisionId,
+              productCategoryId,
+              subCategoryId,
+              styleCode: row.styleCode,
+              srp: row.srpPesos,
+              name: styleName,
+              description: row.longDescription,
+              basePriceCentavos: basePriceCentavos > 0 ? basePriceCentavos : 1,
+              userId: user._id,
+            },
+          );
+          styleId = r.id;
+          styleCache.set(styleKey, styleId!);
+        }
+
+        // Variant — POS exports give one barcode per row, so each row = one variant.
+        const variantBarcode =
+          row.barcode && row.barcode.trim() !== "" ? row.barcode.trim() : undefined;
+        const variantSku =
+          row.productId && row.productId.trim() !== ""
+            ? row.productId.trim()
+            : variantBarcode ?? `AUTO-${i}-${Date.now()}`;
+        const priceCentavos = Math.max(1, Math.round((row.srpPesos ?? 0) * 100));
+        const gender = (row.gender as string | undefined) ?? genderFromDepartment(row.department);
+
+        const variantResult = await ctx.runMutation(
+          internal.catalog.bulkImport._createImportedVariant,
+          {
+            styleId: styleId!,
+            sku: variantSku,
+            barcode: variantBarcode,
+            size: row.size?.trim() || "OS",
+            color: row.color?.trim() || "Default",
+            gender,
+            priceCentavos,
+            costPriceCentavos:
+              row.markupPercent !== undefined && row.srpPesos !== undefined && row.markupPercent > 0
+                ? Math.round((row.srpPesos * 100) / (1 + row.markupPercent / 100))
+                : undefined,
+            userId: user._id,
+          },
+        );
+
+        if (variantResult.status === "skipped") {
+          skippedCount++;
+          skipped.push({
+            rowIndex: i,
+            barcode: rowKey,
+            reason: variantResult.reason,
+          });
+          continue;
+        }
+
+        successCount++;
+
+        // Optional: seed initial stock if ACTUAL COUNT + branch were supplied
+        if (
+          args.initialStockBranchId &&
+          row.actualCount !== undefined &&
+          row.actualCount > 0
+        ) {
+          await ctx.runMutation(
+            internal.catalog.bulkImport._seedInitialInventoryBatch,
+            {
+              branchId: args.initialStockBranchId,
+              variantId: variantResult.variantId,
+              quantity: row.actualCount,
+              costPriceCentavos:
+                row.markupPercent !== undefined &&
+                row.srpPesos !== undefined &&
+                row.markupPercent > 0
+                  ? Math.round((row.srpPesos * 100) / (1 + row.markupPercent / 100))
+                  : Math.round((row.srpPesos ?? 0) * 50),
+              receivedAt: Date.now(),
+            },
+          );
+          stockSeededCount++;
+        }
+      } catch (error: unknown) {
+        failureCount++;
+        const message =
+          error instanceof ConvexError
+            ? (error.data as { message?: string })?.message ?? String(error.data)
+            : error instanceof Error
+              ? error.message
+              : "Unknown error";
+        errors.push({ rowIndex: i, barcode: rowKey, error: message });
+      }
+    }
+
+    return {
+      successCount,
+      skippedCount,
+      failureCount,
+      stockSeededCount,
+      errors,
+      skipped,
     };
   },
 });

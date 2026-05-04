@@ -727,6 +727,48 @@ export const seedDatabase = action({
     const sizeGroupsCreated: number = await ctx.runMutation(internal.seed._seedSizeGroups);
     console.log(`Size Groups: ${sizeGroupsCreated} created`);
 
+    // 5b. Resolve Product Code Configuration → category & division IDs
+    //     Catalog category names map to the configured productCodes (Settings → Product Codes).
+    //     "TOPS / BOTTOMS / OUTERWEAR / SWIMWEAR / CAPS / BAG" — under divisions
+    //     "APPAREL" or "NON-APPAREL".
+    const allProductCodes: Array<{
+      _id: Id<"productCodes">;
+      type: string;
+      description: string;
+      parentId?: Id<"productCodes">;
+    }> = await ctx.runQuery(internal.catalog.productCodes._listAll);
+    const pcByTypeDesc = (type: string, desc: string): Id<"productCodes"> | undefined => {
+      const hit = allProductCodes.find(
+        (p) => p.type === type && p.description.toUpperCase() === desc.toUpperCase(),
+      );
+      return hit?._id;
+    };
+    const APPAREL_DIVISION_ID = pcByTypeDesc("division", "APPAREL");
+    const NON_APPAREL_DIVISION_ID = pcByTypeDesc("division", "NON-APPAREL");
+    const CATALOG_CATEGORY_MAP: Record<
+      string,
+      { categoryDesc: string; division: "APPAREL" | "NON-APPAREL" }
+    > = {
+      "T-Shirts":    { categoryDesc: "TOPS",      division: "APPAREL" },
+      "Polo Shirts": { categoryDesc: "TOPS",      division: "APPAREL" },
+      "Hoodies":     { categoryDesc: "OUTERWEAR", division: "APPAREL" },
+      "Shorts":      { categoryDesc: "BOTTOMS",   division: "APPAREL" },
+      "Boardshorts": { categoryDesc: "SWIMWEAR",  division: "APPAREL" },
+      "Joggers":     { categoryDesc: "BOTTOMS",   division: "APPAREL" },
+      "Caps":        { categoryDesc: "CAPS",      division: "NON-APPAREL" },
+      "Bags":        { categoryDesc: "BAG",       division: "NON-APPAREL" },
+    };
+    const resolveProductCodeIds = (
+      catalogCategoryName: string,
+    ): { productCategoryId?: Id<"productCodes">; divisionId?: Id<"productCodes"> } => {
+      const m = CATALOG_CATEGORY_MAP[catalogCategoryName];
+      if (!m) return {};
+      const productCategoryId = pcByTypeDesc("category", m.categoryDesc);
+      const divisionId =
+        m.division === "APPAREL" ? APPAREL_DIVISION_ID : NON_APPAREL_DIVISION_ID;
+      return { productCategoryId, divisionId };
+    };
+
     // 6. Generate flat items array
     console.log("Generating product catalog...");
     // Build brand→tags lookup
@@ -817,10 +859,11 @@ export const seedDatabase = action({
           categoryCache.set(catKey, categoryId!);
         }
 
-        // Style
+        // Style — also link to Product Code Configuration (Category + Division)
         const styleKey = `${catKey}::${row.styleName.toLowerCase()}`;
         let styleId = styleCache.get(styleKey);
         if (!styleId) {
+          const pcLinks = resolveProductCodeIds(row.category);
           const result = await ctx.runMutation(
             internal.catalog.bulkImport._findOrCreateStyle,
             {
@@ -829,6 +872,8 @@ export const seedDatabase = action({
               description: row.desc,
               basePriceCentavos: row.price,
               userId: user._id,
+              productCategoryId: pcLinks.productCategoryId,
+              divisionId: pcLinks.divisionId,
             }
           );
           styleId = result.id;

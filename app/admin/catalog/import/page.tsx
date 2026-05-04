@@ -6,6 +6,7 @@ import { api } from "@/convex/_generated/api";
 import { getErrorMessage } from "@/lib/utils";
 import { toast } from "sonner";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import Papa from "papaparse";
 import {
   Table,
@@ -133,8 +134,9 @@ export default function BulkImportPage() {
 
   // ─── CSV Parsing ────────────────────────────────────────────────────────
 
+  const router = useRouter();
   const processFile = useCallback((file: File) => {
-    if (!file.name.endsWith(".csv")) {
+    if (!file.name.toLowerCase().endsWith(".csv")) {
       toast.error("Please upload a CSV file");
       return;
     }
@@ -146,7 +148,6 @@ export default function BulkImportPage() {
         toast.error(`Failed to read file: ${err.message}`);
       },
       complete: (parseResult) => {
-        // Abort on fatal parse errors; warn on non-fatal (e.g., "TooFewFields")
         const fatalErrors = parseResult.errors.filter(
           (e) => e.type !== "FieldMismatch"
         );
@@ -163,12 +164,45 @@ export default function BulkImportPage() {
         }
 
         const fields = parseResult.meta.fields ?? [];
+
+        // Auto-detect POS format and bounce the user to the POS importer if so.
+        // POS exports are wide and use uppercase headers like "BRAND", "DEPARTMENT",
+        // "Barcode / Product Code". Detect by looking for any of those headers.
+        const fieldsNorm = fields.map((f) => f.trim().toUpperCase().replace(/\s+/g, " "));
+        const POS_SIGNALS = [
+          "BARCODE / PRODUCT CODE",
+          "DEPARTMENT",
+          "DIVISION",
+          "SUBCATEGORY",
+          "STYLE CODE",
+          "ACTUAL COUNT",
+          "SHORT PCH DESCRIPTION PCH (25 PCH CHARS)",
+        ];
+        const looksLikePos = POS_SIGNALS.some((s) => fieldsNorm.includes(s));
+        if (looksLikePos) {
+          try {
+            sessionStorage.setItem(
+              "pos-import-handoff",
+              JSON.stringify({
+                fileName: file.name,
+                rows: parseResult.data,
+              }),
+            );
+          } catch {
+            // sessionStorage might be full; user will just have to re-drop the file
+          }
+          toast.info("Detected POS-format columns — opening the POS importer.");
+          router.push("/admin/catalog/import/pos");
+          return;
+        }
+
         const missingColumns = REQUIRED_COLUMNS.filter(
           (col) => !fields.includes(col)
         );
         if (missingColumns.length > 0) {
           toast.error(
-            `Missing required columns: ${missingColumns.join(", ")}`
+            `Missing required columns: ${missingColumns.join(", ")}. ` +
+              `If you're uploading a POS-format export, use the POS-Format Import page instead.`,
           );
           return;
         }
@@ -191,7 +225,7 @@ export default function BulkImportPage() {
         toast.success(`Parsed ${parseResult.data.length} rows from ${file.name}`);
       },
     });
-  }, []);
+  }, [router]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -394,11 +428,14 @@ export default function BulkImportPage() {
         </Link>
       </div>
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold">Bulk Product Import</h1>
           <p className="text-sm text-muted-foreground">
-            Upload a CSV file to import products into the catalog
+            Simple CSV format. Need the wide POS export columns?{" "}
+            <Link href="/admin/catalog/import/pos" className="underline hover:text-foreground">
+              Use POS-Format Import →
+            </Link>
           </p>
         </div>
         <Button variant="outline" onClick={handleDownloadSample}>

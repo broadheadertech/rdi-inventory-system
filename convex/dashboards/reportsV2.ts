@@ -400,11 +400,8 @@ export const getPerformanceByDimension = query({
       }
     };
 
-    // ── Calendar Code resolver — month a variant first arrived (e.g. "January Collection")
-    const MONTH_LABELS = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December",
-    ];
+    // ── Calendar Code resolver — last 2 digits of year + 2-digit month (PHT)
+    //   e.g. April 2026 → "2604"   December 2025 → "2512"
     const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
     const allBatches = await ctx.db.query("inventoryBatches").collect();
     const variantEarliestReceivedAt = new Map<string, number>();
@@ -418,7 +415,9 @@ export const getPerformanceByDimension = query({
       const ms = variantEarliestReceivedAt.get(variantId as string);
       if (ms === undefined) return null;
       const d = new Date(ms + PHT_OFFSET_MS);
-      return `${MONTH_LABELS[d.getUTCMonth()]} Collection`;
+      const yearTwoDigit = String(d.getUTCFullYear() % 100).padStart(2, "0");
+      const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+      return `${yearTwoDigit}${month}`;
     };
 
     // Cashiers dimension — simple path (no item scan)
