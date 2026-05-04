@@ -17,6 +17,7 @@ const SEED_BRANCHES = [
     latitude: 14.2714,
     longitude: 121.1254,
     channel: "warehouse" as const,
+    region: "luzon" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "08:00", closeTime: "17:00" },
@@ -29,6 +30,7 @@ const SEED_BRANCHES = [
     latitude: 14.6042,
     longitude: 120.9822,
     channel: "inline" as const,
+    region: "luzon" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "21:00" },
@@ -41,6 +43,7 @@ const SEED_BRANCHES = [
     latitude: 10.3157,
     longitude: 123.8854,
     channel: "inline" as const,
+    region: "visayas" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "20:00" },
@@ -53,6 +56,7 @@ const SEED_BRANCHES = [
     latitude: 7.0731,
     longitude: 125.6128,
     channel: "inline" as const,
+    region: "mindanao" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "20:00" },
@@ -65,6 +69,7 @@ const SEED_BRANCHES = [
     latitude: 14.2714,
     longitude: 121.1254,
     channel: "online" as const,
+    region: "luzon" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "00:00", closeTime: "23:59" },
@@ -77,6 +82,7 @@ const SEED_BRANCHES = [
     latitude: 14.6573,
     longitude: 121.0303,
     channel: "outlet" as const,
+    region: "luzon" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "21:00" },
@@ -89,6 +95,7 @@ const SEED_BRANCHES = [
     latitude: 14.5510,
     longitude: 121.0490,
     channel: "popup" as const,
+    region: "luzon" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "11:00", closeTime: "22:00" },
@@ -101,6 +108,7 @@ const SEED_BRANCHES = [
     latitude: 14.5532,
     longitude: 121.0210,
     channel: "dtc" as const,
+    region: "luzon" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "21:00" },
@@ -108,11 +116,12 @@ const SEED_BRANCHES = [
   },
   {
     name: "SM Mall Outright",
-    address: "SM Megamall, Mandaluyong, Metro Manila 1555",
-    phone: "+63 2 8888 7007",
-    latitude: 14.5851,
-    longitude: 121.0568,
+    address: "SM City Cebu, North Reclamation Area, Cebu City 6000",
+    phone: "+63 32 888 7007",
+    latitude: 10.3115,
+    longitude: 123.9180,
     channel: "outright" as const,
+    region: "visayas" as const,
     configuration: {
       timezone: "Asia/Manila",
       businessHours: { openTime: "10:00", closeTime: "21:00" },
@@ -559,6 +568,9 @@ export const _seedBranches = internalMutation({
             v.literal("outright"),
           )
         ),
+        region: v.optional(
+          v.union(v.literal("luzon"), v.literal("visayas"), v.literal("mindanao"))
+        ),
         configuration: v.optional(
           v.object({
             timezone: v.optional(v.string()),
@@ -588,6 +600,7 @@ export const _seedBranches = internalMutation({
           latitude: branch.latitude,
           longitude: branch.longitude,
           channel: branch.channel,
+          region: branch.region,
           configuration: branch.configuration,
           isActive: true,
           updatedAt: Date.now(),

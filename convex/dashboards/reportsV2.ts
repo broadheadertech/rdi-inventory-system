@@ -1126,13 +1126,11 @@ export const getPromotionContributions = query({
       for (const t of txns) {
         if (t.status === "voided") continue;
 
-        // Brand-filter contribution to total: when brandId set, sum only matching items
         const items = await ctx.db
           .query("transactionItems")
           .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
           .collect();
 
-        // Resolve variant + style for each line up front
         type LineCtx = {
           item: Doc<"transactionItems">;
           variant: Doc<"variants">;
@@ -1148,7 +1146,6 @@ export const getPromotionContributions = query({
           }
           if (!variant) continue;
 
-          // Brand resolution (for filter + scope match)
           let brandId = styleBrandCache.get(variant.styleId as string);
           if (brandId === undefined) {
             const style = await ctx.db.get(variant.styleId);
@@ -1169,7 +1166,27 @@ export const getPromotionContributions = query({
           lineCtxs.push({ item: it, variant, isDiscounted, brandId });
         }
 
-        // Now attribute discounted lines to matching promos
+        // Path A — Direct attribution: txn explicitly tagged with a promotionId.
+        const txnPromotionId = (t as { promotionId?: Id<"promotions"> }).promotionId;
+        if (txnPromotionId) {
+          const promo = overlappingPromos.find(
+            (p) => (p._id as string) === (txnPromotionId as string),
+          );
+          if (promo) {
+            const txnSales = lineCtxs.reduce(
+              (s, l) => s + l.item.lineTotalCentavos,
+              0,
+            );
+            if (txnSales > 0) {
+              const agg = ensure(promo);
+              agg.salesCentavos += txnSales;
+              agg.txnIds.add(t._id as string);
+            }
+            continue; // direct attribution wins — skip the heuristic for this txn
+          }
+        }
+
+        // Path B — Line-level heuristic for line-discounted lines without a tagged promotionId.
         for (const ctxLine of lineCtxs) {
           if (!ctxLine.isDiscounted) continue;
           const matching: Doc<"promotions">[] = [];
@@ -1178,7 +1195,6 @@ export const getPromotionContributions = query({
             const pe = p.endDate ?? Number.MAX_SAFE_INTEGER;
             if (t.createdAt < ps || t.createdAt > pe) continue;
 
-            // Branch scope: empty array = all branches; otherwise must include this branch
             if (
               p.branchIds &&
               p.branchIds.length > 0 &&
@@ -1186,7 +1202,6 @@ export const getPromotionContributions = query({
             ) {
               continue;
             }
-            // Brand scope
             if (
               p.brandIds &&
               p.brandIds.length > 0 &&
@@ -1195,7 +1210,6 @@ export const getPromotionContributions = query({
             ) {
               continue;
             }
-            // Variant scope
             if (
               p.variantIds &&
               p.variantIds.length > 0 &&
@@ -1214,11 +1228,6 @@ export const getPromotionContributions = query({
             agg.salesCentavos += split;
             agg.txnIds.add(t._id as string);
           }
-        }
-
-        // Skip if brand filter zeroed out everything
-        if (args.brandId && lineCtxs.length === 0) {
-          // already deducted from totals because we never bumped totalSalesCentavos
         }
       }
     }
