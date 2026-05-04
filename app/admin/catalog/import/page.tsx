@@ -93,12 +93,22 @@ interface ImportSkipped {
   reason: string;
 }
 
+interface PriceUpdate {
+  rowIndex: number;
+  sku: string;
+  barcode: string;
+  oldPriceCentavos: number;
+  newPriceCentavos: number;
+}
+
 interface BatchResult {
   successCount: number;
   skippedCount: number;
+  priceUpdatedCount: number;
   failureCount: number;
   errors: ImportError[];
   skipped: ImportSkipped[];
+  priceUpdates: PriceUpdate[];
   brandsCreated: number;
   categoriesCreated: number;
   stylesCreated: number;
@@ -124,9 +134,11 @@ export default function BulkImportPage() {
   const [results, setResults] = useState<{
     successCount: number;
     skippedCount: number;
+    priceUpdatedCount: number;
     failureCount: number;
     errors: ImportError[];
     skipped: ImportSkipped[];
+    priceUpdates: PriceUpdate[];
     brandsCreated: number;
     categoriesCreated: number;
     stylesCreated: number;
@@ -319,9 +331,11 @@ export default function BulkImportPage() {
     const aggregated = {
       successCount: 0,
       skippedCount: 0,
+      priceUpdatedCount: 0,
       failureCount: 0,
       errors: [] as ImportError[],
       skipped: [] as ImportSkipped[],
+      priceUpdates: [] as PriceUpdate[],
       brandsCreated: 0,
       categoriesCreated: 0,
       stylesCreated: 0,
@@ -336,6 +350,7 @@ export default function BulkImportPage() {
 
         aggregated.successCount += batchResult.successCount;
         aggregated.skippedCount += batchResult.skippedCount;
+        aggregated.priceUpdatedCount += batchResult.priceUpdatedCount;
         aggregated.failureCount += batchResult.failureCount;
         aggregated.brandsCreated += batchResult.brandsCreated;
         aggregated.categoriesCreated += batchResult.categoriesCreated;
@@ -353,6 +368,12 @@ export default function BulkImportPage() {
           aggregated.skipped.push({
             ...s,
             rowIndex: s.rowIndex + offset,
+          });
+        });
+        batchResult.priceUpdates.forEach((p) => {
+          aggregated.priceUpdates.push({
+            ...p,
+            rowIndex: p.rowIndex + offset,
           });
         });
       }
@@ -573,11 +594,17 @@ export default function BulkImportPage() {
               <h2 className="text-lg font-semibold">Import Complete</h2>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground">Succeeded</p>
                 <p className="text-2xl font-bold text-green-600">
                   {results.successCount}
+                </p>
+              </div>
+              <div>
+                <p className="text-sm text-muted-foreground">Price Updated</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {results.priceUpdatedCount}
                 </p>
               </div>
               <div>

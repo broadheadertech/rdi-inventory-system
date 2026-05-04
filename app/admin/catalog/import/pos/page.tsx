@@ -170,13 +170,22 @@ interface ImportSkipped {
   barcode: string;
   reason: string;
 }
+interface PriceUpdate {
+  rowIndex: number;
+  sku: string;
+  barcode: string;
+  oldPriceCentavos: number;
+  newPriceCentavos: number;
+}
 interface BatchResult {
   successCount: number;
   skippedCount: number;
+  priceUpdatedCount: number;
   failureCount: number;
   stockSeededCount: number;
   errors: ImportError[];
   skipped: ImportSkipped[];
+  priceUpdates: PriceUpdate[];
 }
 
 export default function PosBulkImportPage() {
@@ -196,10 +205,12 @@ export default function PosBulkImportPage() {
   const [results, setResults] = useState<{
     successCount: number;
     skippedCount: number;
+    priceUpdatedCount: number;
     failureCount: number;
     stockSeededCount: number;
     errors: ImportError[];
     skipped: ImportSkipped[];
+    priceUpdates: PriceUpdate[];
   } | null>(null);
 
   const processFile = useCallback((file: File) => {
@@ -341,10 +352,12 @@ export default function PosBulkImportPage() {
     const aggregated = {
       successCount: 0,
       skippedCount: 0,
+      priceUpdatedCount: 0,
       failureCount: 0,
       stockSeededCount: 0,
       errors: [] as ImportError[],
       skipped: [] as ImportSkipped[],
+      priceUpdates: [] as PriceUpdate[],
     };
 
     try {
@@ -358,6 +371,7 @@ export default function PosBulkImportPage() {
         });
         aggregated.successCount += result.successCount;
         aggregated.skippedCount += result.skippedCount;
+        aggregated.priceUpdatedCount += result.priceUpdatedCount;
         aggregated.failureCount += result.failureCount;
         aggregated.stockSeededCount += result.stockSeededCount;
         const offset = b * BATCH_SIZE;
@@ -367,12 +381,19 @@ export default function PosBulkImportPage() {
         result.skipped.forEach((s) =>
           aggregated.skipped.push({ ...s, rowIndex: s.rowIndex + offset }),
         );
+        result.priceUpdates.forEach((p) =>
+          aggregated.priceUpdates.push({ ...p, rowIndex: p.rowIndex + offset }),
+        );
       }
-      if (aggregated.failureCount === 0 && aggregated.skippedCount === 0) {
+      if (
+        aggregated.failureCount === 0 &&
+        aggregated.skippedCount === 0 &&
+        aggregated.priceUpdatedCount === 0
+      ) {
         toast.success(`Import complete! ${aggregated.successCount} products imported.`);
       } else {
         toast.warning(
-          `Imported ${aggregated.successCount}, skipped ${aggregated.skippedCount}, failed ${aggregated.failureCount}.`,
+          `Imported ${aggregated.successCount}, price-updated ${aggregated.priceUpdatedCount}, skipped ${aggregated.skippedCount}, failed ${aggregated.failureCount}.`,
         );
       }
     } catch (error) {
@@ -580,11 +601,17 @@ export default function PosBulkImportPage() {
 
       {results && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
             <div className="rounded-md border p-4">
               <p className="text-xs text-muted-foreground">Imported</p>
               <p className="text-2xl font-bold text-green-600">
                 {results.successCount.toLocaleString()}
+              </p>
+            </div>
+            <div className="rounded-md border p-4">
+              <p className="text-xs text-muted-foreground">Price Updated</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {results.priceUpdatedCount.toLocaleString()}
               </p>
             </div>
             <div className="rounded-md border p-4">
@@ -606,6 +633,35 @@ export default function PosBulkImportPage() {
               </p>
             </div>
           </div>
+
+          {results.priceUpdates.length > 0 && (
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-4">
+              <p className="font-semibold text-blue-800 flex items-center gap-1">
+                <CheckCircle2 className="h-4 w-4" /> Price Updates
+              </p>
+              <ul className="mt-2 text-sm text-blue-700 space-y-1 font-mono">
+                {results.priceUpdates.slice(0, 25).map((p, i) => (
+                  <li key={i}>
+                    Row {p.rowIndex + 1} SKU &quot;{p.sku}&quot; price update: ₱
+                    {(p.oldPriceCentavos / 100).toLocaleString("en-PH", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}{" "}
+                    → ₱
+                    {(p.newPriceCentavos / 100).toLocaleString("en-PH", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </li>
+                ))}
+                {results.priceUpdates.length > 25 && (
+                  <li className="text-blue-500 italic">
+                    …and {results.priceUpdates.length - 25} more
+                  </li>
+                )}
+              </ul>
+            </div>
+          )}
 
           {results.errors.length > 0 && (
             <div className="rounded-md border border-red-200 bg-red-50 p-4">

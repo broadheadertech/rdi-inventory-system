@@ -256,22 +256,78 @@ export const _createImportedVariant = internalMutation({
       });
     }
 
-    // Check SKU uniqueness — skip if duplicate
+    // SKU lookup — if it already exists, decide between price-update vs skip.
     const existingSku = await ctx.db
       .query("variants")
       .withIndex("by_sku", (q) => q.eq("sku", args.sku))
       .first();
     if (existingSku) {
+      const oldPrice = existingSku.priceCentavos;
+      const oldCost = existingSku.costPriceCentavos;
+      const priceChanged = args.priceCentavos !== oldPrice;
+      const costChanged =
+        args.costPriceCentavos !== undefined && args.costPriceCentavos !== oldCost;
+      if (priceChanged || costChanged) {
+        const patch: Record<string, unknown> = { updatedAt: Date.now() };
+        if (priceChanged) patch.priceCentavos = args.priceCentavos;
+        if (costChanged) patch.costPriceCentavos = args.costPriceCentavos;
+        await ctx.db.patch(existingSku._id, patch);
+        await _logAuditEntry(ctx, {
+          action: "variant.priceUpdate",
+          userId: args.userId,
+          entityType: "variants",
+          entityId: existingSku._id,
+          before: { priceCentavos: oldPrice, costPriceCentavos: oldCost },
+          after: {
+            priceCentavos: priceChanged ? args.priceCentavos : oldPrice,
+            costPriceCentavos: costChanged ? args.costPriceCentavos : oldCost,
+          },
+        });
+        return {
+          status: "priceUpdated" as const,
+          variantId: existingSku._id,
+          oldPriceCentavos: oldPrice,
+          newPriceCentavos: args.priceCentavos,
+        };
+      }
       return { status: "skipped" as const, reason: `SKU "${args.sku}" already exists` };
     }
 
-    // Check barcode uniqueness — skip if duplicate
+    // Barcode lookup — same logic when SKU was new but barcode collides
     if (args.barcode && args.barcode.trim() !== "") {
       const existingBarcode = await ctx.db
         .query("variants")
         .withIndex("by_barcode", (q) => q.eq("barcode", args.barcode!))
         .first();
       if (existingBarcode) {
+        const oldPrice = existingBarcode.priceCentavos;
+        const oldCost = existingBarcode.costPriceCentavos;
+        const priceChanged = args.priceCentavos !== oldPrice;
+        const costChanged =
+          args.costPriceCentavos !== undefined && args.costPriceCentavos !== oldCost;
+        if (priceChanged || costChanged) {
+          const patch: Record<string, unknown> = { updatedAt: Date.now() };
+          if (priceChanged) patch.priceCentavos = args.priceCentavos;
+          if (costChanged) patch.costPriceCentavos = args.costPriceCentavos;
+          await ctx.db.patch(existingBarcode._id, patch);
+          await _logAuditEntry(ctx, {
+            action: "variant.priceUpdate",
+            userId: args.userId,
+            entityType: "variants",
+            entityId: existingBarcode._id,
+            before: { priceCentavos: oldPrice, costPriceCentavos: oldCost },
+            after: {
+              priceCentavos: priceChanged ? args.priceCentavos : oldPrice,
+              costPriceCentavos: costChanged ? args.costPriceCentavos : oldCost,
+            },
+          });
+          return {
+            status: "priceUpdated" as const,
+            variantId: existingBarcode._id,
+            oldPriceCentavos: oldPrice,
+            newPriceCentavos: args.priceCentavos,
+          };
+        }
         return { status: "skipped" as const, reason: `Barcode "${args.barcode}" already exists` };
       }
     }
@@ -370,10 +426,18 @@ export const bulkImportProducts = action({
 
     let successCount = 0;
     let skippedCount = 0;
+    let priceUpdatedCount = 0;
     let failureCount = 0;
     let brandsCreated = 0;
     let categoriesCreated = 0;
     let stylesCreated = 0;
+    const priceUpdates: Array<{
+      rowIndex: number;
+      sku: string;
+      barcode: string;
+      oldPriceCentavos: number;
+      newPriceCentavos: number;
+    }> = [];
     const errors: Array<{ rowIndex: number; sku: string; error: string }> = [];
     const skipped: Array<{ rowIndex: number; sku: string; reason: string }> = [];
 
@@ -443,6 +507,15 @@ export const bulkImportProducts = action({
         if (variantResult.status === "skipped") {
           skippedCount++;
           skipped.push({ rowIndex: i, sku: row.sku, reason: variantResult.reason });
+        } else if (variantResult.status === "priceUpdated") {
+          priceUpdatedCount++;
+          priceUpdates.push({
+            rowIndex: i,
+            sku: row.sku,
+            barcode: row.barcode ?? "",
+            oldPriceCentavos: variantResult.oldPriceCentavos,
+            newPriceCentavos: variantResult.newPriceCentavos,
+          });
         } else {
           successCount++;
         }
@@ -461,9 +534,11 @@ export const bulkImportProducts = action({
     return {
       successCount,
       skippedCount,
+      priceUpdatedCount,
       failureCount,
       errors,
       skipped,
+      priceUpdates,
       brandsCreated,
       categoriesCreated,
       stylesCreated,
@@ -627,10 +702,18 @@ export const bulkImportProductsPos = action({
 
     let successCount = 0;
     let skippedCount = 0;
+    let priceUpdatedCount = 0;
     let failureCount = 0;
     let stockSeededCount = 0;
     const errors: Array<{ rowIndex: number; barcode: string; error: string }> = [];
     const skipped: Array<{ rowIndex: number; barcode: string; reason: string }> = [];
+    const priceUpdates: Array<{
+      rowIndex: number;
+      sku: string;
+      barcode: string;
+      oldPriceCentavos: number;
+      newPriceCentavos: number;
+    }> = [];
 
     for (let i = 0; i < args.items.length; i++) {
       const row = args.items[i];
@@ -732,6 +815,18 @@ export const bulkImportProductsPos = action({
           continue;
         }
 
+        if (variantResult.status === "priceUpdated") {
+          priceUpdatedCount++;
+          priceUpdates.push({
+            rowIndex: i,
+            sku: variantSku,
+            barcode: rowKey,
+            oldPriceCentavos: variantResult.oldPriceCentavos,
+            newPriceCentavos: variantResult.newPriceCentavos,
+          });
+          continue;
+        }
+
         successCount++;
 
         // Optional: seed initial stock if ACTUAL COUNT + branch were supplied
@@ -772,10 +867,12 @@ export const bulkImportProductsPos = action({
     return {
       successCount,
       skippedCount,
+      priceUpdatedCount,
       failureCount,
       stockSeededCount,
       errors,
       skipped,
+      priceUpdates,
     };
   },
 });
