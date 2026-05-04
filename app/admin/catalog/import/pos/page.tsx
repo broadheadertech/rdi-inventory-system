@@ -422,7 +422,7 @@ export default function PosBulkImportPage() {
       {/* Column reference */}
       <div className="rounded-md border bg-muted/30 p-4">
         <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">
-          Expected columns (case-insensitive, header order doesn't matter)
+          Expected columns (case-insensitive, header order doesn&apos;t matter)
         </p>
         <div className="flex flex-wrap gap-1.5">
           {POS_COLUMNS.map((c) => (
