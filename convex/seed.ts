@@ -745,6 +745,8 @@ export const seedDatabase = action({
     };
     const APPAREL_DIVISION_ID = pcByTypeDesc("division", "APPAREL");
     const NON_APPAREL_DIVISION_ID = pcByTypeDesc("division", "NON-APPAREL");
+    const MENS_DEPARTMENT_ID = pcByTypeDesc("department", "MENS");
+    const LADIES_DEPARTMENT_ID = pcByTypeDesc("department", "LADIES");
     const CATALOG_CATEGORY_MAP: Record<
       string,
       { categoryDesc: string; division: "APPAREL" | "NON-APPAREL" }
@@ -758,15 +760,42 @@ export const seedDatabase = action({
       "Caps":        { categoryDesc: "CAPS",      division: "NON-APPAREL" },
       "Bags":        { categoryDesc: "BAG",       division: "NON-APPAREL" },
     };
+    // Map the seed gender → configured department productCode.
+    // Only MENS and LADIES exist in productCodes; unisex/kids fall back to MENS
+    // so Department Performance has data instead of an empty (none) bucket.
+    const departmentForGender = (
+      gender?: string,
+    ): Id<"productCodes"> | undefined => {
+      switch (gender) {
+        case "womens":
+          return LADIES_DEPARTMENT_ID;
+        case "mens":
+        case "unisex":
+        case "kids":
+        case "boys":
+        case "girls":
+          return MENS_DEPARTMENT_ID;
+        default:
+          return MENS_DEPARTMENT_ID;
+      }
+    };
     const resolveProductCodeIds = (
       catalogCategoryName: string,
-    ): { productCategoryId?: Id<"productCodes">; divisionId?: Id<"productCodes"> } => {
+      gender?: string,
+    ): {
+      productCategoryId?: Id<"productCodes">;
+      divisionId?: Id<"productCodes">;
+      departmentId?: Id<"productCodes">;
+    } => {
       const m = CATALOG_CATEGORY_MAP[catalogCategoryName];
-      if (!m) return {};
-      const productCategoryId = pcByTypeDesc("category", m.categoryDesc);
-      const divisionId =
-        m.division === "APPAREL" ? APPAREL_DIVISION_ID : NON_APPAREL_DIVISION_ID;
-      return { productCategoryId, divisionId };
+      const productCategoryId = m ? pcByTypeDesc("category", m.categoryDesc) : undefined;
+      const divisionId = m
+        ? m.division === "APPAREL"
+          ? APPAREL_DIVISION_ID
+          : NON_APPAREL_DIVISION_ID
+        : undefined;
+      const departmentId = departmentForGender(gender);
+      return { productCategoryId, divisionId, departmentId };
     };
 
     // 6. Generate flat items array
@@ -859,11 +888,11 @@ export const seedDatabase = action({
           categoryCache.set(catKey, categoryId!);
         }
 
-        // Style — also link to Product Code Configuration (Category + Division)
+        // Style — also link to Product Code Configuration (Category + Division + Department)
         const styleKey = `${catKey}::${row.styleName.toLowerCase()}`;
         let styleId = styleCache.get(styleKey);
         if (!styleId) {
-          const pcLinks = resolveProductCodeIds(row.category);
+          const pcLinks = resolveProductCodeIds(row.category, row.gender);
           const result = await ctx.runMutation(
             internal.catalog.bulkImport._findOrCreateStyle,
             {
@@ -874,6 +903,7 @@ export const seedDatabase = action({
               userId: user._id,
               productCategoryId: pcLinks.productCategoryId,
               divisionId: pcLinks.divisionId,
+              departmentId: pcLinks.departmentId,
             }
           );
           styleId = result.id;

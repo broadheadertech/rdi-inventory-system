@@ -653,25 +653,15 @@ export const getPerformanceByDimension = query({
             bump(rowKey, label, item.lineTotalCentavos, item.quantity);
           }
         } else if (args.dimension === "department") {
-          let dept: "MENS" | "LADIES" | "UNISEX" | "(none)";
-          switch (variant.gender) {
-            case "mens":
-              dept = "MENS";
-              break;
-            case "womens":
-              dept = "LADIES";
-              break;
-            case "unisex":
-            case "kids":
-            case "boys":
-            case "girls":
-              dept = "UNISEX";
-              break;
-            default:
-              dept = "(none)";
+          // Strict: only style.departmentId (Settings → Product Codes, type=department).
+          if (!style.departmentId) {
+            rowKey = "(none)";
+            bump(rowKey, "(none)", item.lineTotalCentavos, item.quantity);
+          } else {
+            const label = await getPC(style.departmentId);
+            rowKey = style.departmentId as string;
+            bump(rowKey, label, item.lineTotalCentavos, item.quantity);
           }
-          rowKey = dept;
-          bump(rowKey, dept, item.lineTotalCentavos, item.quantity);
         } else if (args.dimension === "fit") {
           if (!style.fitId) {
             rowKey = "(none)";
@@ -734,24 +724,13 @@ export const getPerformanceByDimension = query({
           bumpSoh(style.productCategoryId as string, label, inv.quantity);
         }
       } else if (args.dimension === "department") {
-        let dept: "MENS" | "LADIES" | "UNISEX" | "(none)";
-        switch (variant.gender) {
-          case "mens":
-            dept = "MENS";
-            break;
-          case "womens":
-            dept = "LADIES";
-            break;
-          case "unisex":
-          case "kids":
-          case "boys":
-          case "girls":
-            dept = "UNISEX";
-            break;
-          default:
-            dept = "(none)";
+        // Strict: only style.departmentId from Settings → Product Codes.
+        if (!style.departmentId) {
+          bumpSoh("(none)", "(none)", inv.quantity);
+        } else {
+          const label = await getPC(style.departmentId);
+          bumpSoh(style.departmentId as string, label, inv.quantity);
         }
-        bumpSoh(dept, dept, inv.quantity);
       } else if (args.dimension === "fit") {
         if (!style.fitId) {
           bumpSoh("(none)", "(none)", inv.quantity);
