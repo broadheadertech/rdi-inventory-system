@@ -155,7 +155,8 @@ export const _findOrCreateStyle = internalMutation({
     );
 
     if (existing) {
-      // Backfill missing productCode links + brand/styleCode/srp on existing rows.
+      // Backfill productCode links when missing; patch SRP / basePriceCentavos
+      // whenever they differ so re-imports with updated prices flow through.
       const patch: Record<string, unknown> = {};
       if (args.brandId && !existing.brandId) patch.brandId = args.brandId;
       if (args.departmentId && !existing.departmentId) patch.departmentId = args.departmentId;
@@ -165,7 +166,15 @@ export const _findOrCreateStyle = internalMutation({
       }
       if (args.subCategoryId && !existing.subCategoryId) patch.subCategoryId = args.subCategoryId;
       if (args.styleCode && !existing.styleCode) patch.styleCode = args.styleCode;
-      if (args.srp !== undefined && existing.srp === undefined) patch.srp = args.srp;
+      if (args.srp !== undefined && args.srp !== existing.srp) {
+        patch.srp = args.srp;
+      }
+      if (
+        args.basePriceCentavos > 0 &&
+        args.basePriceCentavos !== existing.basePriceCentavos
+      ) {
+        patch.basePriceCentavos = args.basePriceCentavos;
+      }
       if (Object.keys(patch).length > 0) {
         patch.updatedAt = Date.now();
         await ctx.db.patch(existing._id, patch);
