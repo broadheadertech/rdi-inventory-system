@@ -312,6 +312,7 @@ export const getPerformanceByDimension = query({
       v.literal("store"),
       v.literal("department"),
       v.literal("category"),
+      v.literal("subCategory"),
       v.literal("sku"),
       v.literal("size"),
       v.literal("color"),
@@ -652,6 +653,16 @@ export const getPerformanceByDimension = query({
             rowKey = style.productCategoryId as string;
             bump(rowKey, label, item.lineTotalCentavos, item.quantity);
           }
+        } else if (args.dimension === "subCategory") {
+          // Strict: only style.subCategoryId from Settings → Product Codes.
+          if (!style.subCategoryId) {
+            rowKey = "(none)";
+            bump(rowKey, "(none)", item.lineTotalCentavos, item.quantity);
+          } else {
+            const label = await getPC(style.subCategoryId);
+            rowKey = style.subCategoryId as string;
+            bump(rowKey, label, item.lineTotalCentavos, item.quantity);
+          }
         } else if (args.dimension === "department") {
           // Strict: only style.departmentId (Settings → Product Codes, type=department).
           if (!style.departmentId) {
@@ -722,6 +733,13 @@ export const getPerformanceByDimension = query({
         } else {
           const label = await getPC(style.productCategoryId);
           bumpSoh(style.productCategoryId as string, label, inv.quantity);
+        }
+      } else if (args.dimension === "subCategory") {
+        if (!style.subCategoryId) {
+          bumpSoh("(none)", "(none)", inv.quantity);
+        } else {
+          const label = await getPC(style.subCategoryId);
+          bumpSoh(style.subCategoryId as string, label, inv.quantity);
         }
       } else if (args.dimension === "department") {
         // Strict: only style.departmentId from Settings → Product Codes.

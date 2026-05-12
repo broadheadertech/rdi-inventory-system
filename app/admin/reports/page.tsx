@@ -67,7 +67,7 @@ function getPresetDates(
 
 type Preset = "daily" | "yesterday" | "weekly" | "monthly" | "yearly" | "custom";
 type Channel = "inline" | "online" | "outlet" | "popup" | "dtc" | "warehouse" | "outright";
-type Dimension = "people" | "store" | "department" | "category" | "sku" | "size" | "color" | "fit";
+type Dimension = "people" | "store" | "department" | "category" | "subCategory" | "sku" | "size" | "color" | "fit";
 
 const CHANNEL_LABELS: Record<Channel, string> = {
   inline: "Inline",
@@ -84,6 +84,7 @@ const DIMENSIONS: { value: Dimension; label: string }[] = [
   { value: "store", label: "Store Performance" },
   { value: "department", label: "Department Performance" },
   { value: "category", label: "Category Performance" },
+  { value: "subCategory", label: "Subcategory Performance" },
   { value: "sku", label: "SKU Performance" },
   { value: "size", label: "Size Performance" },
   { value: "color", label: "Color Performance" },
