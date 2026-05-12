@@ -107,6 +107,7 @@ import type * as reservations_manage from "../reservations/manage.js";
 import type * as reservations_notifications from "../reservations/notifications.js";
 import type * as reservations_reservations from "../reservations/reservations.js";
 import type * as seed from "../seed.js";
+import type * as seedAligned from "../seedAligned.js";
 import type * as seedReset from "../seedReset.js";
 import type * as seedVisualization from "../seedVisualization.js";
 import type * as snapshots_generate from "../snapshots/generate.js";
@@ -252,6 +253,7 @@ declare const fullApi: ApiFromModules<{
   "reservations/notifications": typeof reservations_notifications;
   "reservations/reservations": typeof reservations_reservations;
   seed: typeof seed;
+  seedAligned: typeof seedAligned;
   seedReset: typeof seedReset;
   seedVisualization: typeof seedVisualization;
   "snapshots/generate": typeof snapshots_generate;
