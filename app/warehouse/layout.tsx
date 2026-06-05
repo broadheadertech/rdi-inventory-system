@@ -16,7 +16,6 @@ import {
   ClipboardCheck,
   TrendingUp,
   Bot,
-  RefreshCw,
   Box,
   ShieldAlert,
   Ghost,
@@ -54,7 +53,6 @@ const operationsNavItems: NavItem[] = [
   { href: "/warehouse/logistics", label: "Logistics", icon: Truck },
   { href: "/warehouse/driver-analytics", label: "Driver Analytics", icon: BarChart3 },
   { href: "/warehouse/restock-ai", label: "Restock AI", icon: Bot },
-  { href: "/warehouse/auto-replenish", label: "Auto-Replenish", icon: RefreshCw },
   { href: "/warehouse/surge-alerts", label: "Surge Alerts", icon: TrendingUp },
   { href: "/warehouse/inventory-aging", label: "Inventory Aging", icon: Clock },
   { href: "/warehouse/fulfillment-speed", label: "Fulfillment Speed", icon: Timer },
@@ -62,7 +60,6 @@ const operationsNavItems: NavItem[] = [
 
 const floorNavItems: NavItem[] = [
   { href: "/warehouse/packing", label: "Box Packing", icon: Box },
-  { href: "/warehouse/transfers", label: "Transfers", icon: ArrowRightLeft },
   { href: "/warehouse/quarantine", label: "Quarantine", icon: ShieldAlert },
   { href: "/warehouse/cycle-count", label: "Cycle Count", icon: ClipboardCheck },
   { href: "/warehouse/ghost-stock", label: "Ghost Stock", icon: Ghost },
@@ -172,7 +169,7 @@ export default function WarehouseLayout({
             {FULL_NAV_ROLES.includes(currentUser.role) ? (
               <>
                 <NavSection
-                  items={operationsNavItems}
+                  items={[...addedNavItems, ...operationsNavItems]}
                   pathname={pathname}
                   label="Operations"
                 />
@@ -181,12 +178,6 @@ export default function WarehouseLayout({
                   items={floorNavItems}
                   pathname={pathname}
                   label="Warehouse Floor"
-                />
-                <Separator className="my-2" />
-                <NavSection
-                  items={addedNavItems}
-                  pathname={pathname}
-                  label="New Tools"
                 />
               </>
             ) : (
