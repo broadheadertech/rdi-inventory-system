@@ -7,7 +7,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Truck, ShoppingCart } from "lucide-react";
+import { Truck, ShoppingCart, PackageCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
@@ -24,6 +24,7 @@ type NavItem = {
 
 const mainNavItems: NavItem[] = [
   { href: "/warehouse/suppliers", label: "Supplier List", icon: Truck },
+  { href: "/warehouse/receiving", label: "Receiving", icon: PackageCheck },
   { href: "/pos", label: "POS", icon: ShoppingCart },
 ];
 

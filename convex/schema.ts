@@ -517,6 +517,41 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_name", ["name"]),
 
+  // ─── Supplier Receiving (inbound supply deliveries) ───────────────────────
+  // A receiving delivery from a supplier, with a declared allocation that is
+  // checked against the actual received (scanned) quantities.
+  supplierReceipts: defineTable({
+    supplierId: v.id("suppliers"),
+    branchId: v.id("branches"),        // warehouse branch stock is received into
+    poNumber: v.string(),              // Purchase Order / PR number
+    receiptPhotoStorageId: v.optional(v.id("_storage")), // photo of the PO receipt
+    deliveryWindowStart: v.number(),   // delivery date range start
+    deliveryWindowEnd: v.number(),     // delivery date range end
+    status: v.union(
+      v.literal("pending"),     // created, awaiting receiving
+      v.literal("receiving"),   // scanning in progress
+      v.literal("completed"),   // finished, matched declared allocation
+      v.literal("discrepancy")  // finished, received != declared
+    ),
+    notes: v.optional(v.string()),
+    createdById: v.id("users"),
+    completedAt: v.optional(v.number()),
+    completedById: v.optional(v.id("users")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_supplier", ["supplierId"])
+    .index("by_status", ["status"])
+    .index("by_createdAt", ["createdAt"]),
+
+  supplierReceiptItems: defineTable({
+    receiptId: v.id("supplierReceipts"),
+    variantId: v.id("variants"),
+    declaredQuantity: v.number(),   // declared allocation from the supplier
+    receivedQuantity: v.number(),   // actual received (sum of scans)
+    isUnexpected: v.optional(v.boolean()), // scanned but not in declared allocation
+  }).index("by_receipt", ["receiptId"]),
+
   supplierProposals: defineTable({
     supplierId: v.id("users"),
     brand: v.string(),
@@ -1185,11 +1220,13 @@ export default defineSchema({
       v.literal("driver_arrived"),
       v.literal("driver_delivered"),
       v.literal("transfer_confirmed"),
-      v.literal("transfer_cancelled")
+      v.literal("transfer_cancelled"),
+      v.literal("supply_discrepancy")
     ),
     title: v.string(),
     body: v.string(),
     transferId: v.optional(v.id("transfers")),
+    supplierReceiptId: v.optional(v.id("supplierReceipts")),
     isRead: v.boolean(),
     createdAt: v.number(),
   })

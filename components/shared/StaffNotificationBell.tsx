@@ -20,6 +20,7 @@ const TYPE_STYLES: Record<string, { dot: string; bg: string }> = {
   driver_delivered:   { dot: "bg-green-600",  bg: "bg-green-50" },
   transfer_confirmed: { dot: "bg-emerald-600",bg: "bg-emerald-50" },
   transfer_cancelled: { dot: "bg-gray-400",   bg: "bg-gray-50" },
+  supply_discrepancy: { dot: "bg-red-500",    bg: "bg-red-50" },
 };
 
 function timeAgo(ms: number): string {
