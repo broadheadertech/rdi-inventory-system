@@ -24,7 +24,7 @@ import { decrypt } from "@/lib/encryption";
 import type { Id } from "@/convex/_generated/dataModel";
 import Link from "next/link";
 
-const ALLOWED_ROLES = ["admin", "manager", "cashier"];
+const ALLOWED_ROLES = ["admin", "manager", "cashier", "warehouseStaff"];
 
 export default function PosLayout({ children }: { children: React.ReactNode }) {
   const currentUser = useQuery(api.auth.users.getCurrentUser);

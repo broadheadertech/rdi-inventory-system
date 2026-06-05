@@ -22,7 +22,7 @@ const PUBLIC_PREFIXES = [
 
 const ROLE_ROUTE_ACCESS: Record<string, readonly string[]> = {
   "/admin": ["admin"],
-  "/pos": ["admin", "manager", "cashier"],
+  "/pos": ["admin", "manager", "cashier", "warehouseStaff"],
   "/branch": ["admin", "manager", "viewer"],
   "/warehouse": ["admin", "hqStaff", "warehouseStaff"],
   "/driver": ["admin", "driver"],
@@ -34,7 +34,7 @@ const ROLE_DEFAULT_ROUTES: Record<string, string> = {
   hqStaff: "/warehouse",
   manager: "/branch/dashboard",
   cashier: "/pos",
-  warehouseStaff: "/warehouse/transfers",
+  warehouseStaff: "/warehouse/suppliers",
   viewer: "/branch/dashboard",
   driver: "/driver/deliveries",
   supplier: "/supplier/portal",

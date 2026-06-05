@@ -7,22 +7,7 @@ import { useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import {
-  LayoutDashboard,
-  ClipboardCheck,
-  TrendingUp,
-  Truck,
-  Bot,
-  RefreshCw,
-  ArrowRightLeft,
-  PackageCheck,
-  ShieldAlert,
-  Ghost,
-  Box,
-  BarChart3,
-  Clock,
-  Timer,
-} from "lucide-react";
+import { Truck, ShoppingCart } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
@@ -37,26 +22,9 @@ type NavItem = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-const operationsNavItems: NavItem[] = [
-  { href: "/warehouse", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/warehouse/transfer-requests", label: "Transfer Requests", icon: ClipboardCheck },
-  { href: "/warehouse/demand", label: "Demand", icon: TrendingUp },
-  { href: "/warehouse/logistics", label: "Logistics", icon: Truck },
-  { href: "/warehouse/driver-analytics", label: "Driver Analytics", icon: BarChart3 },
-  { href: "/warehouse/restock-ai", label: "Restock AI", icon: Bot },
-  { href: "/warehouse/auto-replenish", label: "Auto-Replenish", icon: RefreshCw },
-  { href: "/warehouse/surge-alerts", label: "Surge Alerts", icon: TrendingUp },
-  { href: "/warehouse/inventory-aging", label: "Inventory Aging", icon: Clock },
-  { href: "/warehouse/fulfillment-speed", label: "Fulfillment Speed", icon: Timer },
-];
-
-const floorNavItems: NavItem[] = [
-  { href: "/warehouse/packing", label: "Box Packing", icon: Box },
-  { href: "/warehouse/transfers", label: "Transfers", icon: ArrowRightLeft },
-  { href: "/warehouse/receiving", label: "Receiving", icon: PackageCheck },
-  { href: "/warehouse/quarantine", label: "Quarantine", icon: ShieldAlert },
-  { href: "/warehouse/cycle-count", label: "Cycle Count", icon: ClipboardCheck },
-  { href: "/warehouse/ghost-stock", label: "Ghost Stock", icon: Ghost },
+const mainNavItems: NavItem[] = [
+  { href: "/warehouse/suppliers", label: "Supplier List", icon: Truck },
+  { href: "/pos", label: "POS", icon: ShoppingCart },
 ];
 
 function NavSection({
@@ -158,17 +126,7 @@ export default function WarehouseLayout({
           </div>
           <Separator />
           <nav className="p-2 space-y-1">
-            <NavSection
-              items={operationsNavItems}
-              pathname={pathname}
-              label="Operations"
-            />
-            <Separator className="my-2" />
-            <NavSection
-              items={floorNavItems}
-              pathname={pathname}
-              label="Warehouse Floor"
-            />
+            <NavSection items={mainNavItems} pathname={pathname} />
           </nav>
         </aside>
         <main className="flex-1 p-6">{children}</main>

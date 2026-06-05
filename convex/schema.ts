@@ -506,6 +506,17 @@ export default defineSchema({
     .index("by_branch_period", ["branchId", "period"])
     .index("by_period", ["period"]),
 
+  // ─── Supplier Directory (warehouse vendor list) ───────────────────────────
+  // Simple supplier master maintained from the warehouse. Name + address only.
+  suppliers: defineTable({
+    name: v.string(),
+    address: v.string(),
+    isActive: v.boolean(),
+    createdById: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_name", ["name"]),
+
   supplierProposals: defineTable({
     supplierId: v.id("users"),
     brand: v.string(),

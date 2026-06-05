@@ -142,6 +142,7 @@ import type * as storefront_voting from "../storefront/voting.js";
 import type * as storefront_vouchers from "../storefront/vouchers.js";
 import type * as storefront_wishlist from "../storefront/wishlist.js";
 import type * as storefront_wrapped from "../storefront/wrapped.js";
+import type * as suppliers_directory from "../suppliers/directory.js";
 import type * as suppliers_portal from "../suppliers/portal.js";
 import type * as transfers_boxPacking from "../transfers/boxPacking.js";
 import type * as transfers_fulfillment from "../transfers/fulfillment.js";
@@ -288,6 +289,7 @@ declare const fullApi: ApiFromModules<{
   "storefront/vouchers": typeof storefront_vouchers;
   "storefront/wishlist": typeof storefront_wishlist;
   "storefront/wrapped": typeof storefront_wrapped;
+  "suppliers/directory": typeof suppliers_directory;
   "suppliers/portal": typeof suppliers_portal;
   "transfers/boxPacking": typeof transfers_boxPacking;
   "transfers/fulfillment": typeof transfers_fulfillment;

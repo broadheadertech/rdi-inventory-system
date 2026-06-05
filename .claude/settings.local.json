@@ -2,7 +2,11 @@
   "permissions": {
     "allow": [
       "Bash(npx tsc --noEmit)",
-      "Bash(npx convex *)"
+      "Bash(npx convex *)",
+      "Bash(PowerShell -Command \"Get-ChildItem -Path 'c:\\\\Users\\\\JENZEN\\\\Documents\\\\Broadheader\\\\redbox\\\\RDI\\\\app\\\\warehouse' -Recurse -Include '*.tsx' | Select-Object FullName | Format-Table -AutoSize -Wrap\")",
+      "Bash(netstat -ano)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"ProcessId = 23956\" | Select-Object ProcessId, CommandLine | Format-List; $p = \\(Get-CimInstance Win32_Process -Filter \"ParentProcessId = 23956\"\\); $p | Select-Object ProcessId, CommandLine | Format-List)",
+      "PowerShell($child = Get-CimInstance Win32_Process -Filter \"ProcessId = 23956\"; \"Parent PID: $\\($child.ParentProcessId\\)\"; $parent = Get-CimInstance Win32_Process -Filter \"ProcessId = $\\($child.ParentProcessId\\)\"; $parent | Select-Object ProcessId, CommandLine | Format-List)"
     ]
   }
 }
