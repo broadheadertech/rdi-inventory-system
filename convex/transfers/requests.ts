@@ -12,6 +12,12 @@ const TRANSFER_CREATE_ROLES: readonly string[] = Array.from(
   new Set([...BRANCH_MANAGEMENT_ROLES, ...HQ_ROLES])
 );
 
+// Warehouse staff can approve/reject movements (in addition to HQ) so they can
+// self-serve the Stock Movement pipeline.
+const TRANSFER_APPROVE_ROLES: readonly string[] = Array.from(
+  new Set([...HQ_ROLES, "warehouseStaff"])
+);
+
 export const listActiveBranches = query({
   args: {},
   handler: async (ctx) => {
@@ -388,7 +394,7 @@ export const approveTransfer = mutation({
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
 
-    if (!(HQ_ROLES as readonly string[]).includes(scope.user.role)) {
+    if (!TRANSFER_APPROVE_ROLES.includes(scope.user.role)) {
       throw new ConvexError({ code: "UNAUTHORIZED" });
     }
 
@@ -436,7 +442,7 @@ export const rejectTransfer = mutation({
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
 
-    if (!(HQ_ROLES as readonly string[]).includes(scope.user.role)) {
+    if (!TRANSFER_APPROVE_ROLES.includes(scope.user.role)) {
       throw new ConvexError({ code: "UNAUTHORIZED" });
     }
 

@@ -197,25 +197,21 @@ export default function MovementDetailPage() {
       {/* Stage action card */}
       {status === "requested" && (
         <StageCard title="Approval">
-          {isHQ ? (
-            <div className="flex gap-2">
-              <Button onClick={() => run(() => approve({ transferId }))} disabled={busy}>
-                Approve
-              </Button>
-              <Button
-                variant="outline"
-                disabled={busy}
-                onClick={() => {
-                  const reason = window.prompt("Reason for rejection?")?.trim();
-                  if (reason) run(() => reject({ transferId, reason }));
-                }}
-              >
-                Reject
-              </Button>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Awaiting HQ approval.</p>
-          )}
+          <div className="flex gap-2">
+            <Button onClick={() => run(() => approve({ transferId }))} disabled={busy}>
+              Approve
+            </Button>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                const reason = window.prompt("Reason for rejection?")?.trim();
+                if (reason) run(() => reject({ transferId, reason }));
+              }}
+            >
+              Reject
+            </Button>
+          </div>
         </StageCard>
       )}
 

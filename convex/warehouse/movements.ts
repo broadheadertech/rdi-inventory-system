@@ -11,12 +11,34 @@
 //   to   = warehouse  → Moving In  (return)
 //   neither warehouse → branch → branch (interBranch)
 
-import { query, mutation } from "../_generated/server";
+import { query, mutation, internalMutation } from "../_generated/server";
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
+import { releaseHeldStock } from "../_helpers/transferStock";
 import { internal } from "../_generated/api";
+
+// Maintenance: cancel a non-terminal movement and release its held source stock.
+// Invoked from the CLI to clean up test/stuck movements.
+export const _cancelMovement = internalMutation({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    const t = await ctx.db.get(args.transferId);
+    if (!t) return { ok: false, reason: "not found" };
+    if (t.status === "delivered" || t.status === "cancelled" || t.status === "rejected") {
+      return { ok: false, reason: `already ${t.status}` };
+    }
+    await releaseHeldStock(ctx, args.transferId, t.fromBranchId);
+    const now = Date.now();
+    await ctx.db.patch(args.transferId, {
+      status: "cancelled",
+      cancelledAt: now,
+      updatedAt: now,
+    });
+    return { ok: true };
+  },
+});
 
 const MOVEMENT_ROLES = [...WAREHOUSE_ROLES, "manager"] as const;
 
