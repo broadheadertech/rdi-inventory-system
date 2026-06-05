@@ -74,8 +74,8 @@ export default function NewMovementPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">New Movement</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Dispatch stock between the warehouse and branches. The other side
-          confirms receipt.
+          Create a movement request. It then flows through Approve → Pack →
+          Dispatch → Confirm.
         </p>
       </div>
 
@@ -243,7 +243,7 @@ export default function NewMovementPage() {
             }
           }}
         >
-          {submitting ? "Dispatching…" : "Dispatch Movement"}
+          {submitting ? "Submitting…" : "Create Request"}
         </Button>
       </div>
     </div>

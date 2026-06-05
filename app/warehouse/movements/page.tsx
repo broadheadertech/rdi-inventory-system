@@ -3,7 +3,9 @@
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import Link from "next/link";
+import { useState } from "react";
 import { Plus, ArrowUpRight, ArrowDownLeft } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -42,8 +44,25 @@ const STATUS_LABELS: Record<string, string> = {
   rejected: "Rejected",
 };
 
+const FILTERS = [
+  { key: "all", label: "All" },
+  { key: "requested", label: "Pending" },
+  { key: "approved", label: "Approved" },
+  { key: "packed", label: "Packed" },
+  { key: "inTransit", label: "In Transit" },
+  { key: "delivered", label: "Delivered" },
+  { key: "discrepancy", label: "Discrepancy" },
+] as const;
+
 export default function MovementsListPage() {
   const movements = useQuery(api.warehouse.movements.listMovements);
+  const [filter, setFilter] = useState<string>("all");
+
+  const filtered = movements?.filter((m) => {
+    if (filter === "all") return true;
+    if (filter === "discrepancy") return m.hasDiscrepancy;
+    return m.status === filter;
+  });
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -62,6 +81,24 @@ export default function MovementsListPage() {
         </Button>
       </div>
 
+      {/* Stage filters (reports view) */}
+      <div className="flex flex-wrap gap-1.5">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setFilter(f.key)}
+            className={cn(
+              "rounded-full px-3 py-1 text-xs font-medium transition-colors",
+              filter === f.key
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-muted/70"
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
       <div className="rounded-lg border">
         <Table>
           <TableHeader>
@@ -76,7 +113,7 @@ export default function MovementsListPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {movements === undefined ? (
+            {filtered === undefined ? (
               Array.from({ length: 3 }).map((_, i) => (
                 <TableRow key={i}>
                   <TableCell colSpan={7}>
@@ -84,53 +121,63 @@ export default function MovementsListPage() {
                   </TableCell>
                 </TableRow>
               ))
-            ) : movements.length === 0 ? (
+            ) : filtered.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={7}
                   className="py-10 text-center text-sm text-muted-foreground"
                 >
-                  No movements yet. Click “New Movement” to start.
+                  No movements{filter === "all" ? "" : " in this stage"} yet.
                 </TableCell>
               </TableRow>
             ) : (
-              movements.map((m) => (
-                <TableRow key={m._id as string}>
-                  <TableCell>
-                    {m.direction === "out" ? (
-                      <span className="inline-flex items-center gap-1 font-medium text-orange-600">
-                        <ArrowUpRight className="h-4 w-4" /> Out
+              filtered.map((m) => {
+                const actionable = ["requested", "approved", "packed", "inTransit"].includes(
+                  m.status
+                );
+                return (
+                  <TableRow key={m._id as string}>
+                    <TableCell>
+                      {m.direction === "out" ? (
+                        <span className="inline-flex items-center gap-1 font-medium text-orange-600">
+                          <ArrowUpRight className="h-4 w-4" /> Out
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
+                          <ArrowDownLeft className="h-4 w-4" /> In
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell>{m.otherBranchName}</TableCell>
+                    <TableCell className="text-right">{m.lineCount}</TableCell>
+                    <TableCell className="text-right">{m.totalQty}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatDate(m.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      <span
+                        className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
+                          STATUS_STYLES[m.status] ?? "bg-gray-100 text-gray-700"
+                        }`}
+                      >
+                        {STATUS_LABELS[m.status] ?? m.status}
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
-                        <ArrowDownLeft className="h-4 w-4" /> In
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell>{m.otherBranchName}</TableCell>
-                  <TableCell className="text-right">{m.lineCount}</TableCell>
-                  <TableCell className="text-right">{m.totalQty}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(m.createdAt)}
-                  </TableCell>
-                  <TableCell>
-                    <span
-                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${
-                        STATUS_STYLES[m.status] ?? "bg-gray-100 text-gray-700"
-                      }`}
-                    >
-                      {STATUS_LABELS[m.status] ?? m.status}
-                    </span>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button asChild size="sm" variant="outline">
-                      <Link href={`/warehouse/movements/${m._id}`}>
-                        {m.status === "inTransit" ? "Open" : "View"}
-                      </Link>
-                    </Button>
-                  </TableCell>
-                </TableRow>
-              ))
+                      {m.hasDiscrepancy && (
+                        <span className="ml-1.5 inline-block rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                          Discrepancy
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button asChild size="sm" variant={actionable ? "default" : "outline"}>
+                        <Link href={`/warehouse/movements/${m._id}`}>
+                          {actionable ? "Open" : "View"}
+                        </Link>
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>

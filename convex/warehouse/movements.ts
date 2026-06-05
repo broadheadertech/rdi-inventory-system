@@ -16,6 +16,7 @@ import type { QueryCtx, MutationCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
+import { internal } from "../_generated/api";
 
 const MOVEMENT_ROLES = [...WAREHOUSE_ROLES, "manager"] as const;
 
@@ -220,20 +221,15 @@ export const createMovement = mutation({
       }
     }
 
-    // Create the transfer already dispatched (inTransit), packed = requested
+    // Create the movement as a Request — it flows through the staged pipeline
+    // (Approve → Pack → Assign/Dispatch → Confirm). Source stock is held now.
     const transferId = await ctx.db.insert("transfers", {
       fromBranchId: args.fromBranchId,
       toBranchId: args.toBranchId,
       requestedById: user._id,
       type,
-      status: "inTransit",
+      status: "requested",
       notes: args.notes?.trim() || undefined,
-      approvedById: user._id,
-      approvedAt: now,
-      packedById: user._id,
-      packedAt: now,
-      shippedById: user._id,
-      shippedAt: now,
       createdAt: now,
       updatedAt: now,
     });
@@ -243,9 +239,13 @@ export const createMovement = mutation({
         transferId,
         variantId: item.variantId,
         requestedQuantity: item.quantity,
-        packedQuantity: item.quantity,
       });
     }
+
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "transfer_requested",
+      transferId,
+    });
 
     return transferId;
   },
@@ -281,6 +281,13 @@ export const listMovements = query({
           .withIndex("by_transfer", (q) => q.eq("transferId", t._id))
           .collect();
         const isOut = t.fromBranchId === warehouse._id;
+        const hasDiscrepancy =
+          t.status === "delivered" &&
+          items.some(
+            (i) =>
+              (i.receivedQuantity ?? 0) !==
+              (i.packedQuantity ?? i.requestedQuantity)
+          );
         return {
           _id: t._id,
           direction: isOut ? ("out" as const) : ("in" as const),
@@ -288,6 +295,8 @@ export const listMovements = query({
             ? nameById.get(t.toBranchId as string) ?? "Unknown"
             : nameById.get(t.fromBranchId as string) ?? "Unknown",
           status: t.status,
+          hasDiscrepancy,
+          driverAssigned: !!t.driverId,
           lineCount: items.length,
           totalQty: items.reduce((s, i) => s + (i.packedQuantity ?? i.requestedQuantity), 0),
           createdAt: t.createdAt,
@@ -324,16 +333,18 @@ export const getMovement = query({
     const enriched = await Promise.all(
       items.map(async (i) => {
         const label = await variantLabel(ctx, i.variantId);
-        const sent = i.packedQuantity ?? i.requestedQuantity;
         return {
           itemId: i._id,
           ...label,
-          sentQuantity: sent,
+          requestedQuantity: i.requestedQuantity,
+          packedQuantity: i.packedQuantity ?? null,
           receivedQuantity: i.receivedQuantity ?? null,
           damageNotes: i.damageNotes ?? null,
         };
       })
     );
+
+    const driver = transfer.driverId ? await ctx.db.get(transfer.driverId) : null;
 
     return {
       _id: transfer._id,
@@ -342,9 +353,15 @@ export const getMovement = query({
       fromBranchName: fromBranch?.name ?? "Unknown",
       toBranchName: toBranch?.name ?? "Unknown",
       notes: transfer.notes ?? null,
+      // Lifecycle timeline
+      createdAt: transfer.createdAt,
+      approvedAt: transfer.approvedAt ?? null,
+      packedAt: transfer.packedAt ?? null,
       shippedAt: transfer.shippedAt ?? null,
       deliveredAt: transfer.deliveredAt ?? null,
-      createdAt: transfer.createdAt,
+      rejectedReason: transfer.rejectedReason ?? null,
+      driverId: transfer.driverId ?? null,
+      driverName: driver?.name ?? null,
       items: enriched,
     };
   },
