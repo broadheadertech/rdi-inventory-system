@@ -42,6 +42,7 @@ import type * as analytics_trendingByCity from "../analytics/trendingByCity.js";
 import type * as audit_logs from "../audit/logs.js";
 import type * as auth_branches from "../auth/branches.js";
 import type * as auth_clerkWebhook from "../auth/clerkWebhook.js";
+import type * as auth_impersonation from "../auth/impersonation.js";
 import type * as auth_users from "../auth/users.js";
 import type * as branches_cashierAccounts from "../branches/cashierAccounts.js";
 import type * as branches_cashierAccountsActions from "../branches/cashierAccountsActions.js";
@@ -148,6 +149,7 @@ import type * as suppliers_receiving from "../suppliers/receiving.js";
 import type * as transfers_boxPacking from "../transfers/boxPacking.js";
 import type * as transfers_fulfillment from "../transfers/fulfillment.js";
 import type * as transfers_requests from "../transfers/requests.js";
+import type * as warehouse_movements from "../warehouse/movements.js";
 
 import type {
   ApiFromModules,
@@ -190,6 +192,7 @@ declare const fullApi: ApiFromModules<{
   "audit/logs": typeof audit_logs;
   "auth/branches": typeof auth_branches;
   "auth/clerkWebhook": typeof auth_clerkWebhook;
+  "auth/impersonation": typeof auth_impersonation;
   "auth/users": typeof auth_users;
   "branches/cashierAccounts": typeof branches_cashierAccounts;
   "branches/cashierAccountsActions": typeof branches_cashierAccountsActions;
@@ -296,6 +299,7 @@ declare const fullApi: ApiFromModules<{
   "transfers/boxPacking": typeof transfers_boxPacking;
   "transfers/fulfillment": typeof transfers_fulfillment;
   "transfers/requests": typeof transfers_requests;
+  "warehouse/movements": typeof warehouse_movements;
 }>;
 
 /**

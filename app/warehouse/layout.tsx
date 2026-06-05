@@ -7,7 +7,23 @@ import { useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { Truck, ShoppingCart, PackageCheck } from "lucide-react";
+import {
+  Truck,
+  ShoppingCart,
+  PackageCheck,
+  ArrowRightLeft,
+  LayoutDashboard,
+  ClipboardCheck,
+  TrendingUp,
+  Bot,
+  RefreshCw,
+  Box,
+  ShieldAlert,
+  Ghost,
+  BarChart3,
+  Clock,
+  Timer,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
@@ -22,11 +38,37 @@ type NavItem = {
   icon: React.ComponentType<{ className?: string }>;
 };
 
-const mainNavItems: NavItem[] = [
+// Shown to every warehouse role (the new, warehouse-exclusive tools)
+const addedNavItems: NavItem[] = [
   { href: "/warehouse/suppliers", label: "Supplier List", icon: Truck },
-  { href: "/warehouse/receiving", label: "Receiving", icon: PackageCheck },
+  { href: "/warehouse/receiving", label: "Goods Receipt", icon: PackageCheck },
+  { href: "/warehouse/movements", label: "Stock Movement", icon: ArrowRightLeft },
   { href: "/pos", label: "POS", icon: ShoppingCart },
 ];
+
+// Full original toolset — shown to HQ staff + admin only (warehouse staff see the trimmed set)
+const operationsNavItems: NavItem[] = [
+  { href: "/warehouse", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/warehouse/transfer-requests", label: "Transfer Requests", icon: ClipboardCheck },
+  { href: "/warehouse/demand", label: "Demand", icon: TrendingUp },
+  { href: "/warehouse/logistics", label: "Logistics", icon: Truck },
+  { href: "/warehouse/driver-analytics", label: "Driver Analytics", icon: BarChart3 },
+  { href: "/warehouse/restock-ai", label: "Restock AI", icon: Bot },
+  { href: "/warehouse/auto-replenish", label: "Auto-Replenish", icon: RefreshCw },
+  { href: "/warehouse/surge-alerts", label: "Surge Alerts", icon: TrendingUp },
+  { href: "/warehouse/inventory-aging", label: "Inventory Aging", icon: Clock },
+  { href: "/warehouse/fulfillment-speed", label: "Fulfillment Speed", icon: Timer },
+];
+
+const floorNavItems: NavItem[] = [
+  { href: "/warehouse/packing", label: "Box Packing", icon: Box },
+  { href: "/warehouse/transfers", label: "Transfers", icon: ArrowRightLeft },
+  { href: "/warehouse/quarantine", label: "Quarantine", icon: ShieldAlert },
+  { href: "/warehouse/cycle-count", label: "Cycle Count", icon: ClipboardCheck },
+  { href: "/warehouse/ghost-stock", label: "Ghost Stock", icon: Ghost },
+];
+
+const FULL_NAV_ROLES = ["admin", "hqStaff"];
 
 function NavSection({
   items,
@@ -127,7 +169,29 @@ export default function WarehouseLayout({
           </div>
           <Separator />
           <nav className="p-2 space-y-1">
-            <NavSection items={mainNavItems} pathname={pathname} />
+            {FULL_NAV_ROLES.includes(currentUser.role) ? (
+              <>
+                <NavSection
+                  items={operationsNavItems}
+                  pathname={pathname}
+                  label="Operations"
+                />
+                <Separator className="my-2" />
+                <NavSection
+                  items={floorNavItems}
+                  pathname={pathname}
+                  label="Warehouse Floor"
+                />
+                <Separator className="my-2" />
+                <NavSection
+                  items={addedNavItems}
+                  pathname={pathname}
+                  label="New Tools"
+                />
+              </>
+            ) : (
+              <NavSection items={addedNavItems} pathname={pathname} />
+            )}
           </nav>
         </aside>
         <main className="flex-1 p-6">{children}</main>

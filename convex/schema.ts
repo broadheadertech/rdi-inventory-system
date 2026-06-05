@@ -19,6 +19,8 @@ export default defineSchema({
     branchId: v.optional(v.id("branches")),
     assignedBrands: v.optional(v.array(v.string())),
     isActive: v.boolean(),
+    // Admin "View as Branch" — when set, an admin is scoped to this branch
+    viewingAsBranchId: v.optional(v.id("branches")),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

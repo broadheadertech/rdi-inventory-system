@@ -118,7 +118,7 @@ export default function ReceiptDetailPage() {
       <div className="mx-auto max-w-4xl">
         <p className="text-sm text-muted-foreground">Receipt not found.</p>
         <Button variant="outline" className="mt-4" onClick={() => router.push("/warehouse/receiving")}>
-          Back to Receiving
+          Back to Goods Receipt
         </Button>
       </div>
     );
@@ -132,7 +132,7 @@ export default function ReceiptDetailPage() {
           href="/warehouse/receiving"
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
-          <ArrowLeft className="h-4 w-4" /> Receiving
+          <ArrowLeft className="h-4 w-4" /> Goods Receipt
         </Link>
         <div className="mt-2 flex items-start justify-between gap-4">
           <div>

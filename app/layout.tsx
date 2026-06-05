@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import { ConvexClientProvider } from "@/components/providers/ConvexClientProvider";
 import { BrandProvider } from "@/components/providers/BrandProvider";
+import { ImpersonationBanner } from "@/components/shared/ImpersonationBanner";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
@@ -66,6 +67,7 @@ export default function RootLayout({
         <body className={inter.className}>
           <ConvexClientProvider>
             <BrandProvider>{children}</BrandProvider>
+            <ImpersonationBanner />
           </ConvexClientProvider>
           <Toaster />
         </body>

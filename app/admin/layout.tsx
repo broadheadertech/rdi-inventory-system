@@ -12,21 +12,15 @@ import {
   Building2,
   Package,
   PackageSearch,
-  Database,
   LayoutDashboard,
   BarChart3,
   LineChart,
   ArrowLeftRight,
   ClipboardList,
-  FileText,
   Settings,
   Tag,
-  ImageIcon,
   Sparkles,
   Ruler,
-  MapPin,
-  Megaphone,
-  Flame,
   Clock,
   Timer,
   CalendarDays,
@@ -38,6 +32,7 @@ import { useState } from "react";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
+import { ViewAsBranchPicker } from "@/components/shared/ViewAsBranchPicker";
 
 const ALLOWED_ROLES = ["admin"] as const;
 
@@ -54,7 +49,6 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/catalog", label: "Catalog", icon: Package, roles: ["admin"] },
   { href: "/admin/inventory", label: "Inventory", icon: PackageSearch, roles: ["admin"] },
   { href: "/admin/settings", label: "Settings", icon: Settings, roles: ["admin"] },
-  { href: "/admin/seed", label: "Seed Data", icon: Database, roles: ["admin"] },
 ];
 
 const overviewNavItems: NavItem[] = [
@@ -65,16 +59,11 @@ const overviewNavItems: NavItem[] = [
 
 const operationsNavItems: NavItem[] = [
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
-  { href: "/admin/invoices", label: "Invoices", icon: FileText, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
 ];
 
 const marketingNavItems: NavItem[] = [
   { href: "/admin/promotions", label: "Promotions", icon: Tag, roles: ["admin"] },
-  { href: "/admin/banners", label: "Banners", icon: ImageIcon, roles: ["admin"] },
-  { href: "/admin/announcements", label: "Announcements", icon: Megaphone, roles: ["admin"] },
-  { href: "/admin/hot-deals", label: "Hot Deals", icon: Flame, roles: ["admin"] },
-  { href: "/admin/drops", label: "Exclusive Drops", icon: Sparkles, roles: ["admin"] },
 ];
 
 const insightsNavItems: NavItem[] = [
@@ -84,7 +73,6 @@ const insightsNavItems: NavItem[] = [
   { href: "/admin/cross-sell-analytics", label: "Cross-Sell", icon: Sparkles, roles: ["admin"] },
   { href: "/admin/trading-calendar", label: "Trading Calendar", icon: CalendarDays, roles: ["admin"] },
   { href: "/admin/size-curves", label: "Size Curves", icon: Ruler, roles: ["admin"] },
-  { href: "/admin/expansion", label: "Expansion Intel", icon: MapPin, roles: ["admin"] },
 ];
 
 function NavSection({
@@ -202,6 +190,9 @@ export default function AdminLayout({
             <div className="flex items-center justify-between mt-1">
               <p className="text-sm text-muted-foreground">{currentUser.name}</p>
               <StaffNotificationBell />
+            </div>
+            <div className="mt-3">
+              <ViewAsBranchPicker />
             </div>
           </div>
           <Separator />

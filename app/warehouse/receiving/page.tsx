@@ -43,7 +43,7 @@ export default function ReceivingListPage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Receiving</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Goods Receipt</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             Receive supplies from suppliers against a declared allocation.
           </p>
@@ -51,7 +51,7 @@ export default function ReceivingListPage() {
         <Button asChild>
           <Link href="/warehouse/receiving/new">
             <Plus className="mr-1.5 h-4 w-4" />
-            New Receipt
+            New Goods Receipt
           </Link>
         </Button>
       </div>
@@ -66,13 +66,14 @@ export default function ReceivingListPage() {
               <TableHead className="text-foreground text-right">Declared</TableHead>
               <TableHead className="text-foreground text-right">Received</TableHead>
               <TableHead className="text-foreground">Status</TableHead>
+              <TableHead className="text-foreground text-right">Action</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {receipts === undefined ? (
               Array.from({ length: 3 }).map((_, i) => (
                 <TableRow key={i}>
-                  <TableCell colSpan={6}>
+                  <TableCell colSpan={7}>
                     <div className="h-4 w-full animate-pulse rounded bg-muted" />
                   </TableCell>
                 </TableRow>
@@ -80,10 +81,10 @@ export default function ReceivingListPage() {
             ) : receipts.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={6}
+                  colSpan={7}
                   className="py-10 text-center text-sm text-muted-foreground"
                 >
-                  No receipts yet. Click “New Receipt” to start.
+                  No goods receipts yet. Click “New Goods Receipt” to start.
                 </TableCell>
               </TableRow>
             ) : (
@@ -115,6 +116,21 @@ export default function ReceivingListPage() {
                     >
                       {STATUS_LABELS[r.status] ?? r.status}
                     </span>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      asChild
+                      size="sm"
+                      variant={r.status === "pending" ? "default" : "outline"}
+                    >
+                      <Link href={`/warehouse/receiving/${r._id}`}>
+                        {r.status === "pending"
+                          ? "Start Receiving"
+                          : r.status === "receiving"
+                            ? "Continue"
+                            : "View"}
+                      </Link>
+                    </Button>
                   </TableCell>
                 </TableRow>
               ))
