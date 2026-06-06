@@ -267,11 +267,11 @@ export const getBranchAgingReport = query({
   args: {},
   handler: async (ctx) => {
     const scope = await withBranchScope(ctx);
-    if (!scope.branchId) {
-      throw new Error("Branch scope required");
-    }
 
-    const entries = await aggregateAging(ctx, { branchId: scope.branchId });
+    // HQ/admin (no branch) → all branches; branch users → their branch.
+    const entries = await aggregateAging(ctx, {
+      branchId: scope.branchId ?? undefined,
+    });
 
     // 4-wave enrichment (same as HQ)
     const uniqueVariantIds = [...new Set(entries.map((e) => e.variantId))];

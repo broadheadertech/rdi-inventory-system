@@ -7,7 +7,7 @@ import { useState } from "react";
 import { Eye } from "lucide-react";
 
 export function ViewAsBranchPicker() {
-  const branches = useQuery(api.auth.branches.listBranches);
+  const branches = useQuery(api.warehouse.movements.listMovementBranches);
   const start = useMutation(api.auth.impersonation.startViewingAsBranch);
   const router = useRouter();
   const [branchId, setBranchId] = useState("");

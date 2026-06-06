@@ -26,9 +26,13 @@ export async function withBranchScope(
 ): Promise<BranchScope> {
   const user = await requireAuth(ctx);
 
-  // Admin "View as Branch": when an admin has selected a branch to view,
+  // "View as Branch": when an admin or HQ staff has selected a branch to view,
   // scope them to it (full actions, audited) instead of all-branches access.
-  if (user.role === "admin" && user.viewingAsBranchId) {
+  // This is also how HQ operates a single store's POS register.
+  if (
+    (user.role === "admin" || user.role === "hqStaff") &&
+    user.viewingAsBranchId
+  ) {
     return {
       user,
       userId: user._id,

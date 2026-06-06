@@ -81,7 +81,7 @@ export function StaffNotificationBell() {
 
       {/* Dropdown panel */}
       {open && (
-        <div className="absolute right-0 top-9 z-50 w-80 rounded-xl border bg-white shadow-lg overflow-hidden">
+        <div className="absolute left-0 top-9 z-50 w-80 rounded-xl border bg-white shadow-lg overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b bg-gray-50/80">
             <p className="text-sm font-semibold">Notifications</p>

@@ -26,6 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
+import { ViewAsBranchPicker } from "@/components/shared/ViewAsBranchPicker";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 
@@ -163,6 +164,11 @@ export default function WarehouseLayout({
               <p className="text-sm text-muted-foreground">{currentUser.name}</p>
               <StaffNotificationBell />
             </div>
+            {FULL_NAV_ROLES.includes(currentUser.role) && (
+              <div className="mt-3">
+                <ViewAsBranchPicker />
+              </div>
+            )}
           </div>
           <Separator />
           <nav className="p-2 space-y-1">

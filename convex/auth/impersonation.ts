@@ -6,8 +6,11 @@
 
 import { query, mutation } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
-import { requireRole, ADMIN_ROLES } from "../_helpers/permissions";
+import { requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+
+// Admin + HQ staff can "view as branch" (HQ uses it to operate a store register).
+const VIEW_AS_ROLES = ["admin", "hqStaff"] as const;
 
 /** Returns the branch the admin is currently viewing as, or null. */
 export const getViewingAsBranch = query({
@@ -19,7 +22,12 @@ export const getViewingAsBranch = query({
       .query("users")
       .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
       .unique();
-    if (!user || user.role !== "admin" || !user.viewingAsBranchId) return null;
+    if (
+      !user ||
+      !(VIEW_AS_ROLES as readonly string[]).includes(user.role) ||
+      !user.viewingAsBranchId
+    )
+      return null;
     const branch = await ctx.db.get(user.viewingAsBranchId);
     return branch
       ? { branchId: branch._id, branchName: branch.name }
@@ -31,7 +39,7 @@ export const getViewingAsBranch = query({
 export const startViewingAsBranch = mutation({
   args: { branchId: v.id("branches") },
   handler: async (ctx, args) => {
-    const admin = await requireRole(ctx, ADMIN_ROLES);
+    const admin = await requireRole(ctx, VIEW_AS_ROLES);
 
     const branch = await ctx.db.get(args.branchId);
     if (!branch || !branch.isActive) {
@@ -58,7 +66,7 @@ export const startViewingAsBranch = mutation({
 export const stopViewingAsBranch = mutation({
   args: {},
   handler: async (ctx) => {
-    const admin = await requireRole(ctx, ADMIN_ROLES);
+    const admin = await requireRole(ctx, VIEW_AS_ROLES);
 
     const previous = admin.viewingAsBranchId;
     if (!previous) return;

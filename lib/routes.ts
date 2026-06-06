@@ -21,7 +21,7 @@ export const ROLE_DEFAULT_ROUTES: Record<Role, string> = {
  */
 export const ROLE_ROUTE_ACCESS: Record<string, readonly string[]> = {
   "/admin": ["admin"],
-  "/pos": ["admin", "manager", "cashier", "warehouseStaff"],
+  "/pos": ["admin", "manager", "cashier", "warehouseStaff", "hqStaff"],
   "/branch": ["admin", "manager", "viewer"],
   "/warehouse": ["admin", "hqStaff", "warehouseStaff"],
   "/driver": ["admin", "driver"],
