@@ -273,6 +273,50 @@ export const createMovement = mutation({
   },
 });
 
+// ─── Dispatch via third-party courier (packed → inTransit, no driver) ───────────
+
+export const dispatchViaCourier = mutation({
+  args: {
+    transferId: v.id("transfers"),
+    courierId: v.id("couriers"),
+    trackingNumber: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, MOVEMENT_ROLES);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Movement not found." });
+    }
+    if (transfer.status !== "packed") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only packed movements can be dispatched.",
+      });
+    }
+
+    const courier = await ctx.db.get(args.courierId);
+    if (!courier || !courier.isActive) {
+      throw new ConvexError({ code: "INVALID_ARGUMENT", message: "Invalid courier." });
+    }
+
+    const now = Date.now();
+    const expectedDeliveryDate = transfer.expectedDeliveryDays
+      ? now + transfer.expectedDeliveryDays * 86_400_000
+      : undefined;
+
+    await ctx.db.patch(args.transferId, {
+      status: "inTransit",
+      shippedAt: now,
+      shippedById: user._id,
+      courierId: args.courierId,
+      trackingNumber: args.trackingNumber?.trim() || undefined,
+      ...(expectedDeliveryDate ? { expectedDeliveryDate } : {}),
+      updatedAt: now,
+    });
+  },
+});
+
 // ─── List warehouse-touching movements ──────────────────────────────────────────
 
 export const listMovements = query({
@@ -367,6 +411,7 @@ export const getMovement = query({
     );
 
     const driver = transfer.driverId ? await ctx.db.get(transfer.driverId) : null;
+    const courier = transfer.courierId ? await ctx.db.get(transfer.courierId) : null;
 
     return {
       _id: transfer._id,
@@ -384,6 +429,8 @@ export const getMovement = query({
       rejectedReason: transfer.rejectedReason ?? null,
       driverId: transfer.driverId ?? null,
       driverName: driver?.name ?? null,
+      courierName: courier?.name ?? null,
+      trackingNumber: transfer.trackingNumber ?? null,
       items: enriched,
     };
   },

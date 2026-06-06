@@ -43,6 +43,8 @@ const ROLE_OPTIONS = [
   { value: "warehouseStaff", label: "Warehouse Staff" },
   { value: "hqStaff", label: "HQ Staff" },
   { value: "viewer", label: "Viewer" },
+  { value: "driver", label: "Driver" },
+  { value: "supplier", label: "Supplier" },
 ] as const;
 
 const ROLE_COLORS: Record<string, string> = {
@@ -52,6 +54,8 @@ const ROLE_COLORS: Record<string, string> = {
   warehouseStaff: "bg-amber-100 text-amber-800",
   hqStaff: "bg-purple-100 text-purple-800",
   viewer: "bg-gray-100 text-gray-800",
+  driver: "bg-cyan-100 text-cyan-800",
+  supplier: "bg-orange-100 text-orange-800",
 };
 
 export default function UsersPage() {

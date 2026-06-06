@@ -59,6 +59,7 @@ export default function MovementDetailPage() {
   const pack = useMutation(api.transfers.fulfillment.completeTransferPacking);
   const dispatch = useMutation(api.transfers.fulfillment.markTransferInTransit);
   const assignDriver = useMutation(api.logistics.assignments.assignDriverToTransfer);
+  const dispatchCourier = useMutation(api.warehouse.movements.dispatchViaCourier);
   const confirm = useMutation(api.transfers.fulfillment.confirmTransferDelivery);
 
   const isHQ = currentUser ? HQ_ROLES.includes(currentUser.role) : false;
@@ -67,10 +68,16 @@ export default function MovementDetailPage() {
     api.logistics.assignments.listActiveDrivers,
     isHQ && movement?.status === "packed" ? {} : "skip"
   );
+  const couriers = useQuery(
+    api.logistics.couriers.listActiveCouriers,
+    movement?.status === "packed" ? {} : "skip"
+  );
 
   const [packQty, setPackQty] = useState<Record<string, number>>({});
   const [recvQty, setRecvQty] = useState<Record<string, number>>({});
   const [driverId, setDriverId] = useState("");
+  const [courierId, setCourierId] = useState("");
+  const [tracking, setTracking] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -241,11 +248,19 @@ export default function MovementDetailPage() {
 
       {status === "packed" && (
         <StageCard title="Dispatch">
-          <div className="flex flex-wrap items-center gap-3">
-            <Button disabled={busy} onClick={() => run(() => dispatch({ transferId }))}>
-              <Truck className="mr-1.5 h-4 w-4" />
-              Dispatch (no driver)
-            </Button>
+          <div className="space-y-3">
+            {/* Option 1: no driver — receiving side confirms */}
+            <div className="flex items-center gap-3">
+              <Button disabled={busy} onClick={() => run(() => dispatch({ transferId }))}>
+                <Truck className="mr-1.5 h-4 w-4" />
+                Dispatch (no driver)
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                Receiving branch confirms on arrival.
+              </span>
+            </div>
+
+            {/* Option 2: internal driver (HQ only) */}
             {isHQ && (
               <div className="flex items-center gap-2">
                 <select
@@ -267,9 +282,51 @@ export default function MovementDetailPage() {
                     run(() => assignDriver({ transferId, driverId: driverId as Id<"users"> }))
                   }
                 >
-                  Assign & Dispatch
+                  Assign Driver
                 </Button>
               </div>
+            )}
+
+            {/* Option 3: third-party courier */}
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                value={courierId}
+                onChange={(e) => setCourierId(e.target.value)}
+                className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+              >
+                <option value="">Courier…</option>
+                {couriers?.map((c) => (
+                  <option key={c._id as string} value={c._id as string}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <Input
+                value={tracking}
+                onChange={(e) => setTracking(e.target.value)}
+                placeholder="Tracking # (optional)"
+                className="h-9 w-48"
+              />
+              <Button
+                variant="outline"
+                disabled={busy || !courierId}
+                onClick={() =>
+                  run(() =>
+                    dispatchCourier({
+                      transferId,
+                      courierId: courierId as Id<"couriers">,
+                      trackingNumber: tracking.trim() || undefined,
+                    })
+                  )
+                }
+              >
+                Dispatch via Courier
+              </Button>
+            </div>
+            {couriers && couriers.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No couriers yet — add them in Admin → Couriers.
+              </p>
             )}
           </div>
         </StageCard>
@@ -287,6 +344,13 @@ export default function MovementDetailPage() {
 
       {status === "inTransit" && !movement.driverId && (
         <StageCard title="Confirm Receipt">
+          {movement.courierName && (
+            <p className="mb-2 inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-2.5 py-1 text-xs text-blue-700">
+              <Truck className="h-3.5 w-3.5" />
+              Shipped via {movement.courierName}
+              {movement.trackingNumber ? ` · Tracking ${movement.trackingNumber}` : ""}
+            </p>
+          )}
           <p className="mb-3 text-sm text-muted-foreground">
             Confirm what arrived at{" "}
             <span className="font-medium text-foreground">{movement.toBranchName}</span>. Any

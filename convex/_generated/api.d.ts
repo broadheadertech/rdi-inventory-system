@@ -86,6 +86,7 @@ import type * as inventory_stockLevels from "../inventory/stockLevels.js";
 import type * as inventory_surgeDetection from "../inventory/surgeDetection.js";
 import type * as invoices_internalInvoices from "../invoices/internalInvoices.js";
 import type * as logistics_assignments from "../logistics/assignments.js";
+import type * as logistics_couriers from "../logistics/couriers.js";
 import type * as logistics_deliveries from "../logistics/deliveries.js";
 import type * as logistics_notificationRecords from "../logistics/notificationRecords.js";
 import type * as logistics_notifications from "../logistics/notifications.js";
@@ -236,6 +237,7 @@ declare const fullApi: ApiFromModules<{
   "inventory/surgeDetection": typeof inventory_surgeDetection;
   "invoices/internalInvoices": typeof invoices_internalInvoices;
   "logistics/assignments": typeof logistics_assignments;
+  "logistics/couriers": typeof logistics_couriers;
   "logistics/deliveries": typeof logistics_deliveries;
   "logistics/notificationRecords": typeof logistics_notificationRecords;
   "logistics/notifications": typeof logistics_notifications;

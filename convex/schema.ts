@@ -294,6 +294,9 @@ export default defineSchema({
     deliveredById: v.optional(v.id("users")),
     driverId: v.optional(v.id("users")),
     driverArrivedAt: v.optional(v.number()),
+    // Third-party courier dispatch (alternative to an internal driver)
+    courierId: v.optional(v.id("couriers")),
+    trackingNumber: v.optional(v.string()),
     expectedDeliveryDays: v.optional(v.number()),  // warehouse sets how many days
     expectedDeliveryDate: v.optional(v.number()),   // computed: shippedAt + days
     createdAt: v.number(),
@@ -507,6 +510,15 @@ export default defineSchema({
     .index("by_branch", ["branchId"])
     .index("by_branch_period", ["branchId", "period"])
     .index("by_period", ["period"]),
+
+  // ─── Couriers (third-party delivery providers) ────────────────────────────
+  couriers: defineTable({
+    name: v.string(),
+    isActive: v.boolean(),
+    createdById: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_name", ["name"]),
 
   // ─── Supplier Directory (warehouse vendor list) ───────────────────────────
   // Simple supplier master maintained from the warehouse. Name + address only.
