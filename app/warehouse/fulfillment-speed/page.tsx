@@ -81,7 +81,7 @@ function StageCard({ label, icon, stats, thresholds }: {
 export default function WarehouseFulfillmentSpeedPage() {
   const [periodDays, setPeriodDays] = useState("30");
 
-  const data = useQuery(api.analytics.fulfillmentSpeed.getBranchFulfillmentSpeed, {
+  const data = useQuery(api.analytics.fulfillmentSpeed.getFulfillmentSpeed, {
     periodDays: parseInt(periodDays),
   });
 

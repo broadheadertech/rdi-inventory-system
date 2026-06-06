@@ -49,6 +49,7 @@ function DeliveryList({
     toBranchName: string;
     toBranchAddress: string;
     itemCount: number;
+    driverAcceptedAt: number | null;
     driverArrivedAt: number | null;
     createdAt: number;
   }[];
@@ -84,9 +85,13 @@ function DeliveryList({
                 <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
                   Arrived
                 </span>
-              ) : (
+              ) : delivery.driverAcceptedAt ? (
                 <span className="shrink-0 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
-                  In Transit
+                  Accepted
+                </span>
+              ) : (
+                <span className="shrink-0 rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700">
+                  New
                 </span>
               )}
             </div>
@@ -109,6 +114,7 @@ function DeliveryDetail({
   const detail = useQuery(api.logistics.deliveries.getDeliveryDetail, {
     transferId,
   });
+  const acceptDeliveryMut = useMutation(api.logistics.deliveries.acceptDelivery);
   const markArrivedMut = useMutation(api.logistics.deliveries.markArrived);
   const confirmDeliveryMut = useMutation(
     api.logistics.deliveries.driverConfirmDelivery
@@ -153,6 +159,20 @@ function DeliveryDetail({
     window.open(url, "_blank");
   }
 
+  function handleAccept() {
+    setSubmitting(true);
+    setError(null);
+    acceptDeliveryMut({ transferId }).then(
+      () => setSubmitting(false),
+      (err: unknown) => {
+        setError(
+          err instanceof Error ? err.message : "Failed to accept — try again."
+        );
+        setSubmitting(false);
+      }
+    );
+  }
+
   function handleMarkArrived() {
     setSubmitting(true);
     setError(null);
@@ -185,6 +205,7 @@ function DeliveryDetail({
     );
   }
 
+  const hasAccepted = detail.driverAcceptedAt !== null;
   const hasArrived = detail.driverArrivedAt !== null;
 
   return (
@@ -299,7 +320,16 @@ function DeliveryDetail({
 
       {/* Bottom CTA — fixed to bottom */}
       <div className="sticky bottom-0 border-t bg-background p-4 space-y-2">
-        {!hasArrived ? (
+        {!hasAccepted ? (
+          <button
+            type="button"
+            onClick={handleAccept}
+            disabled={submitting}
+            className="w-full h-14 rounded-lg bg-primary text-primary-foreground text-base font-semibold active:opacity-90 disabled:opacity-50"
+          >
+            {submitting ? "Accepting..." : "Accept Delivery"}
+          </button>
+        ) : !hasArrived ? (
           <>
             <button
               type="button"

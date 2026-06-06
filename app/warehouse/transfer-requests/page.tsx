@@ -46,6 +46,18 @@ function TransferTypeBadge({ type }: { type: string }) {
   );
 }
 
+// Format the gap between dispatch and driver acceptance
+function dispatchGap(
+  from: number | null | undefined,
+  to: number | null | undefined
+): string | null {
+  if (!from || !to) return null;
+  const mins = Math.max(0, Math.round((to - from) / 60000));
+  if (mins < 60) return `${mins}m after dispatch`;
+  const h = mins / 60;
+  return `${h.toFixed(1)}h after dispatch`;
+}
+
 // M4: show timestamp for a completed stage
 function StageTimestamp({
   label,
@@ -205,6 +217,9 @@ export default function HQTransfersPage() {
                   Requested At
                 </th>
                 <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                  Driver Accepted
+                </th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                   Actions
                 </th>
               </tr>
@@ -213,7 +228,7 @@ export default function HQTransfersPage() {
               {transfers === undefined &&
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="border-b animate-pulse">
-                    {Array.from({ length: 8 }).map((_, j) => (
+                    {Array.from({ length: 9 }).map((_, j) => (
                       <td key={j} className="px-4 py-3">
                         <div className="h-4 rounded bg-muted w-full" />
                       </td>
@@ -224,7 +239,7 @@ export default function HQTransfersPage() {
               {transfers !== undefined && filtered.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-8 text-center text-muted-foreground"
                   >
                     {emptyLabel
@@ -270,6 +285,31 @@ export default function HQTransfersPage() {
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {relativeTime(transfer.createdAt)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {transfer.driverAcceptedAt ? (
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-medium text-foreground">
+                          {relativeTime(transfer.driverAcceptedAt)}
+                        </p>
+                        {transfer.driverName && (
+                          <p className="text-xs text-muted-foreground">
+                            {transfer.driverName}
+                          </p>
+                        )}
+                        {dispatchGap(transfer.shippedAt, transfer.driverAcceptedAt) && (
+                          <p className="text-xs text-muted-foreground">
+                            {dispatchGap(transfer.shippedAt, transfer.driverAcceptedAt)}
+                          </p>
+                        )}
+                      </div>
+                    ) : transfer.driverName ? (
+                      <span className="text-xs text-amber-600">
+                        Awaiting acceptance
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {canApprove && transfer.status === "requested" && (

@@ -35,6 +35,7 @@ export const listMyDeliveries = query({
           toBranchName: toBranch?.isActive ? toBranch.name : "(inactive)",
           toBranchAddress: toBranch?.address ?? "",
           itemCount: items.length,
+          driverAcceptedAt: transfer.driverAcceptedAt ?? null,
           driverArrivedAt: transfer.driverArrivedAt ?? null,
           createdAt: transfer.createdAt,
         };
@@ -112,6 +113,7 @@ export const getDeliveryDetail = query({
       items: enrichedItems,
       boxes: boxBreakdown,
       deliveryMode: boxes.length > 0 ? ("box" as const) : ("piece" as const),
+      driverAcceptedAt: transfer.driverAcceptedAt ?? null,
       driverArrivedAt: transfer.driverArrivedAt ?? null,
       createdAt: transfer.createdAt,
     };
@@ -119,6 +121,41 @@ export const getDeliveryDetail = query({
 });
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
+
+export const acceptDelivery = mutation({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, DRIVER_ROLES);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    if (transfer.status !== "inTransit") {
+      throw new ConvexError({ code: "INVALID_STATE", message: "Transfer is not in transit." });
+    }
+    if (transfer.driverId !== user._id) {
+      throw new ConvexError({ code: "UNAUTHORIZED", message: "Transfer not assigned to you." });
+    }
+    if (transfer.driverAcceptedAt) {
+      throw new ConvexError({ code: "INVALID_STATE", message: "Already accepted." });
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(args.transferId, {
+      driverAcceptedAt: now,
+      updatedAt: now,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "transfer.driverAccepted",
+      userId: user._id,
+      entityType: "transfers",
+      entityId: args.transferId,
+      after: { driverAcceptedAt: now },
+    });
+  },
+});
 
 export const markArrived = mutation({
   args: { transferId: v.id("transfers") },
@@ -134,6 +171,9 @@ export const markArrived = mutation({
     }
     if (transfer.driverId !== user._id) {
       throw new ConvexError({ code: "UNAUTHORIZED", message: "Transfer not assigned to you." });
+    }
+    if (!transfer.driverAcceptedAt) {
+      throw new ConvexError({ code: "INVALID_STATE", message: "Accept the delivery before marking arrived." });
     }
     if (transfer.driverArrivedAt) {
       throw new ConvexError({ code: "INVALID_STATE", message: "Already marked as arrived." });

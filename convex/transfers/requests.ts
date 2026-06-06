@@ -336,6 +336,12 @@ export const listTransfers = query({
           rejectorName = rejector?.name ?? null;
         }
 
+        let driverName: string | null = null;
+        if (transfer.driverId) {
+          const driver = await ctx.db.get(transfer.driverId);
+          driverName = driver?.name ?? null;
+        }
+
         const items = await ctx.db
           .query("transferItems")
           .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
@@ -378,6 +384,11 @@ export const listTransfers = query({
           rejectedAt: transfer.rejectedAt ?? null,
           rejectorName,
           rejectedReason: transfer.rejectedReason ?? null,
+          // Driver / dispatch timing
+          driverName,
+          shippedAt: transfer.shippedAt ?? null,
+          driverAcceptedAt: transfer.driverAcceptedAt ?? null,
+          driverArrivedAt: transfer.driverArrivedAt ?? null,
           items: enrichedItems,
         };
       })

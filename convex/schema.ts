@@ -293,6 +293,7 @@ export default defineSchema({
     deliveredAt: v.optional(v.number()),
     deliveredById: v.optional(v.id("users")),
     driverId: v.optional(v.id("users")),
+    driverAcceptedAt: v.optional(v.number()), // when the driver accepted the assigned transit
     driverArrivedAt: v.optional(v.number()),
     // Third-party courier dispatch (alternative to an internal driver)
     courierId: v.optional(v.id("couriers")),

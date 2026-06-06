@@ -14,7 +14,7 @@ const MAX_RESULTS = 30;
 export const getSurgeAlerts = query({
   args: {},
   handler: async (ctx) => {
-    await requireRole(ctx, ["admin", "manager", "warehouse_manager"]);
+    await requireRole(ctx, ["admin", "hqStaff", "warehouseStaff", "manager"]);
 
     // Get today's and last week's snapshots
     const todayDate = getPHTDate(0);
