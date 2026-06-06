@@ -210,13 +210,11 @@ export const getBranchFulfillmentSpeed = query({
   },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
-    if (!scope.branchId) {
-      throw new Error("Branch scope required");
-    }
 
+    // HQ/admin (no branch) → all branches; branch users → their branch.
     const result = await aggregateFulfillmentSpeed(ctx, {
       periodDays: args.periodDays,
-      branchId: scope.branchId,
+      branchId: scope.branchId ?? undefined,
     });
 
     const nameMap = await enrichDetails(ctx, result.details);
