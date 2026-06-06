@@ -3,6 +3,7 @@
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { friendlyError } from "@/lib/errors";
 import { useState } from "react";
 
 // ─── Loading Skeleton ────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ function DeliveryDetail({
       () => setSubmitting(false),
       (err: unknown) => {
         setError(
-          err instanceof Error ? err.message : "Failed to accept — try again."
+          friendlyError(err, "Couldn't accept this delivery — try again.")
         );
         setSubmitting(false);
       }
@@ -182,7 +183,7 @@ function DeliveryDetail({
       },
       (err: unknown) => {
         setError(
-          err instanceof Error ? err.message : "Failed to mark arrived — try again."
+          friendlyError(err, "Couldn't mark as arrived — try again.")
         );
         setSubmitting(false);
       }
@@ -198,7 +199,7 @@ function DeliveryDetail({
       },
       (err: unknown) => {
         setError(
-          err instanceof Error ? err.message : "Delivery failed — try again."
+          friendlyError(err, "Couldn't confirm delivery — try again.")
         );
         setSubmitting(false);
       }

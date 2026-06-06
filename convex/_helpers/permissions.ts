@@ -26,7 +26,8 @@ export type ValidRole =
 export const ADMIN_ROLES = ["admin"] as const;
 export const HQ_ROLES = ["admin", "hqStaff"] as const;
 export const BRANCH_MANAGEMENT_ROLES = ["admin", "manager"] as const;
-export const POS_ROLES = ["admin", "manager", "cashier"] as const;
+// warehouseStaff (warehouse-as-a-store) and hqStaff (via View as Branch) can operate POS too
+export const POS_ROLES = ["admin", "manager", "cashier", "warehouseStaff", "hqStaff"] as const;
 export const WAREHOUSE_ROLES = ["admin", "hqStaff", "warehouseStaff"] as const;
 export const BRANCH_VIEW_ROLES = ["admin", "manager", "viewer"] as const;
 export const DRIVER_ROLES = ["admin", "driver"] as const;

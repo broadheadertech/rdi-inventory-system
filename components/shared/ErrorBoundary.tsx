@@ -2,6 +2,7 @@
 
 import React from "react";
 import { Button } from "@/components/ui/button";
+import { friendlyError } from "@/lib/errors";
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -40,17 +41,17 @@ export class ErrorBoundary extends React.Component<
         return this.props.fallback;
       }
 
-      // Extract user-friendly message from ConvexError if available
-      const errorData = (this.state.error as Record<string, unknown> | null)
-        ?.data as Record<string, unknown> | undefined;
-      const message =
-        (errorData?.message as string) ??
-        "Something went wrong. Please try again.";
+      const message = friendlyError(this.state.error);
 
       return (
-        <div className="flex min-h-[400px] flex-col items-center justify-center gap-4 p-8">
-          <h2 className="text-lg font-semibold text-destructive">Error</h2>
-          <p className="text-center text-muted-foreground">{message}</p>
+        <div className="flex min-h-[400px] flex-col items-center justify-center gap-3 p-8">
+          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+            <span className="text-2xl">😕</span>
+          </div>
+          <h2 className="text-lg font-semibold">Hmm, that didn&apos;t work</h2>
+          <p className="max-w-sm text-center text-sm text-muted-foreground">
+            {message}
+          </p>
           <Button onClick={this.reset} variant="outline">
             Try Again
           </Button>

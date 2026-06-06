@@ -8,6 +8,7 @@ import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { ArrowLeft, ScanLine, CheckCircle2, AlertTriangle } from "lucide-react";
+import { friendlyError } from "@/lib/errors";
 import { BarcodeScanner } from "@/components/shared/BarcodeScanner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,7 +72,7 @@ export default function ReceiptDetailPage() {
     } catch (err) {
       setFeedback({
         kind: "err",
-        message: err instanceof Error ? err.message : "Scan failed",
+        message: friendlyError(err, "That scan didn't work."),
       });
     }
   }
@@ -97,7 +98,7 @@ export default function ReceiptDetailPage() {
     } catch (err) {
       setFeedback({
         kind: "err",
-        message: err instanceof Error ? err.message : "Failed to complete",
+        message: friendlyError(err, "Couldn't complete the receipt."),
       });
     } finally {
       setCompleting(false);

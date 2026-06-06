@@ -3,6 +3,7 @@
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { friendlyError } from "@/lib/errors";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Plus } from "lucide-react";
@@ -228,7 +229,7 @@ export default function NewReceiptPage() {
 
       router.push(`/warehouse/receiving/${receiptId}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create receipt");
+      setError(friendlyError(err, "Couldn't create the goods receipt."));
       setSubmitting(false);
     }
   }

@@ -3,6 +3,7 @@
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { friendlyError } from "@/lib/errors";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
@@ -87,7 +88,7 @@ export default function MovementDetailPage() {
     try {
       await fn();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Action failed");
+      setError(friendlyError(err, "That action didn't go through."));
     } finally {
       setBusy(false);
     }

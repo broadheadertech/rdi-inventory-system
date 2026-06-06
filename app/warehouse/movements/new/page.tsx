@@ -3,6 +3,7 @@
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { friendlyError } from "@/lib/errors";
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Plus, ArrowUpRight, ArrowDownLeft, ArrowRightLeft } from "lucide-react";
@@ -237,7 +238,7 @@ export default function NewMovementPage() {
               router.push(`/warehouse/movements/${transferId}`);
             } catch (err) {
               setError(
-                err instanceof Error ? err.message : "Failed to create movement"
+                friendlyError(err, "Couldn't create the movement.")
               );
               setSubmitting(false);
             }

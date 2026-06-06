@@ -4,6 +4,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useState } from "react";
+import { friendlyError } from "@/lib/errors";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,7 +35,7 @@ export default function CouriersPage() {
       await createCourier({ name: name.trim() });
       setName("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add courier");
+      setError(friendlyError(err, "Couldn't add the courier."));
     } finally {
       setBusy(false);
     }
