@@ -1,7 +1,76 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
+// BIR registration values shown on POS receipts (per branch/outlet).
+const birConfig = v.object({
+  businessName: v.optional(v.string()),
+  tin: v.optional(v.string()),
+  businessAddress: v.optional(v.string()),
+  terminalNumber: v.optional(v.string()),
+  minNumber: v.optional(v.string()),
+  serialNumber: v.optional(v.string()),
+  accreditationNumber: v.optional(v.string()),
+  accreditationDate: v.optional(v.string()),
+  ptuNumber: v.optional(v.string()),
+  ptuDate: v.optional(v.string()),
+  softwareName: v.optional(v.string()),
+  softwareVersion: v.optional(v.string()),
+  supplierName: v.optional(v.string()),
+  supplierTin: v.optional(v.string()),
+  supplierAddress: v.optional(v.string()),
+});
+
 export default defineSchema({
+  // ─── BIR Registration (per branch, with branch-admin → admin approval) ─────
+  // ─── Finalized Z-readings (end-of-day, with accumulated grand total) ───────
+  zReadings: defineTable({
+    branchId: v.id("branches"),
+    zCounter: v.number(),          // sequential Z-reading number per branch
+    date: v.string(),              // YYYYMMDD (PHT)
+    beginningSI: v.optional(v.string()),
+    endingSI: v.optional(v.string()),
+    transactionCount: v.number(),
+    voidedCount: v.number(),
+    grossSalesCentavos: v.number(),
+    vatableSalesCentavos: v.number(),
+    vatExemptSalesCentavos: v.number(),
+    zeroRatedSalesCentavos: v.number(),
+    vatAmountCentavos: v.number(),
+    discountCentavos: v.number(),
+    cashSalesCentavos: v.number(),
+    gcashSalesCentavos: v.number(),
+    mayaSalesCentavos: v.number(),
+    previousGrandTotalCentavos: v.number(),
+    accumulatedGrandTotalCentavos: v.number(), // non-resetting lifetime total
+    generatedById: v.id("users"),
+    generatedAt: v.number(),
+  })
+    .index("by_branch", ["branchId"])
+    .index("by_branch_date", ["branchId", "date"]),
+
+  // ─── Continuous (non-resetting) invoice number counter, per branch ─────────
+  invoiceCounters: defineTable({
+    branchId: v.id("branches"),
+    nextSeq: v.number(), // next serial to issue
+    updatedAt: v.number(),
+  }).index("by_branch", ["branchId"]),
+
+  birRegistrations: defineTable({
+    branchId: v.id("branches"),
+    active: v.optional(birConfig),   // approved values — used on receipts
+    pending: v.optional(birConfig),  // proposed change awaiting admin approval
+    pendingStatus: v.optional(
+      v.union(v.literal("pending"), v.literal("rejected"))
+    ),
+    requestedById: v.optional(v.id("users")),
+    requestedAt: v.optional(v.number()),
+    reviewedById: v.optional(v.id("users")),
+    reviewedAt: v.optional(v.number()),
+    reviewNotes: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_branch", ["branchId"]),
+
+
   users: defineTable({
     clerkId: v.string(),
     email: v.string(),
@@ -239,6 +308,14 @@ export default defineSchema({
       )
     ),
     customerId: v.optional(v.string()),
+    // Sold-To (customer) details for the BIR invoice — optional, captured at checkout
+    customerName: v.optional(v.string()),
+    customerTin: v.optional(v.string()),
+    customerAddress: v.optional(v.string()),
+    customerBusinessStyle: v.optional(v.string()),
+    // Senior Citizen / PWD ID details when a SC/PWD discount applies
+    scPwdName: v.optional(v.string()),
+    scPwdIdNumber: v.optional(v.string()),
     amountTenderedCentavos: v.optional(v.number()),
     changeCentavos: v.optional(v.number()),
     isOffline: v.boolean(),

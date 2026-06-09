@@ -1,7 +1,8 @@
 import { v, ConvexError } from "convex/values";
-import { query, QueryCtx } from "../_generated/server";
+import { query, mutation, QueryCtx } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { POS_ROLES } from "../_helpers/permissions";
+import { _logAuditEntry } from "../_helpers/auditLog";
 import type { Id, Doc } from "../_generated/dataModel";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -417,8 +418,26 @@ export const getZReading = query({
     const openShiftCount = dayShifts.filter((s) => s.status === "open").length;
     const closedShiftCount = dayShifts.filter((s) => s.status === "closed").length;
 
+    // Accumulated grand total context (BIR): previous total + today's projection,
+    // and whether this date has already been finalized into a Z-reading.
+    const lastZ = await ctx.db
+      .query("zReadings")
+      .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+      .order("desc")
+      .first();
+    const finalizedForDate = await ctx.db
+      .query("zReadings")
+      .withIndex("by_branch_date", (q) => q.eq("branchId", branchId).eq("date", dateStr))
+      .first();
+    const previousGrandTotalCentavos = lastZ?.accumulatedGrandTotalCentavos ?? 0;
+
     return {
       readingType: "Z" as const,
+      zCounterNext: (lastZ?.zCounter ?? 0) + 1,
+      alreadyFinalized: !!finalizedForDate,
+      finalizedZCounter: finalizedForDate?.zCounter ?? null,
+      previousGrandTotalCentavos,
+      projectedGrandTotalCentavos: previousGrandTotalCentavos + reading.totalSalesCentavos,
       generatedAt: Date.now(),
       date: dateStr,
       branchId,
@@ -478,5 +497,141 @@ export const getRecentClosedShifts = query({
     }
 
     return result;
+  },
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FINALIZE Z-READING — persists the day's Z with an accumulated grand total
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export const finalizeZReading = mutation({
+  args: { date: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+    const branchId = scope.branchId;
+    if (!branchId) {
+      throw new ConvexError({ code: "INVALID_STATE", message: "No branch in scope." });
+    }
+
+    const dateStr = args.date ?? getTodayPHT();
+
+    // One Z-reading per day (BIR end-of-day close)
+    const existing = await ctx.db
+      .query("zReadings")
+      .withIndex("by_branch_date", (q) => q.eq("branchId", branchId).eq("date", dateStr))
+      .first();
+    if (existing) {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "A Z-reading has already been finalized for this date.",
+      });
+    }
+
+    const { startMs, endMs } = getPhilippineDateRange(dateStr);
+    const txns = await ctx.db
+      .query("transactions")
+      .withIndex("by_branch_date", (q) =>
+        q.eq("branchId", branchId).gte("createdAt", startMs).lte("createdAt", endMs)
+      )
+      .collect();
+
+    let gross = 0, vatable = 0, vatExempt = 0, vat = 0, discount = 0;
+    let cash = 0, gcash = 0, maya = 0, count = 0, voided = 0;
+    let firstSI: string | null = null;
+    let lastSI: string | null = null;
+
+    for (const t of txns) {
+      if (t.status === "voided") { voided++; continue; }
+      count++;
+      gross += t.totalCentavos;
+      const isDisc = t.discountType === "senior" || t.discountType === "pwd";
+      if (isDisc) {
+        vatExempt += t.subtotalCentavos - t.vatAmountCentavos;
+        discount += t.discountAmountCentavos;
+      } else {
+        vatable += t.subtotalCentavos;
+        vat += t.vatAmountCentavos;
+      }
+      const splitAmt = t.splitPayment?.amountCentavos ?? 0;
+      const primary = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
+      if (t.paymentMethod === "cash") cash += primary;
+      else if (t.paymentMethod === "gcash") gcash += primary;
+      else maya += primary;
+      if (t.splitPayment) {
+        const m = t.splitPayment.method;
+        if (m === "cash") cash += splitAmt;
+        else if (m === "gcash") gcash += splitAmt;
+        else maya += splitAmt;
+      }
+      if (!firstSI || t.receiptNumber < firstSI) firstSI = t.receiptNumber;
+      if (!lastSI || t.receiptNumber > lastSI) lastSI = t.receiptNumber;
+    }
+
+    // Roll the accumulated grand total forward + increment the Z-counter
+    const last = await ctx.db
+      .query("zReadings")
+      .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+      .order("desc")
+      .first();
+    const previousGrandTotalCentavos = last?.accumulatedGrandTotalCentavos ?? 0;
+    const zCounter = (last?.zCounter ?? 0) + 1;
+    const accumulatedGrandTotalCentavos = previousGrandTotalCentavos + gross;
+
+    const now = Date.now();
+    const zId = await ctx.db.insert("zReadings", {
+      branchId,
+      zCounter,
+      date: dateStr,
+      beginningSI: firstSI ?? undefined,
+      endingSI: lastSI ?? undefined,
+      transactionCount: count,
+      voidedCount: voided,
+      grossSalesCentavos: gross,
+      vatableSalesCentavos: vatable,
+      vatExemptSalesCentavos: vatExempt,
+      zeroRatedSalesCentavos: 0,
+      vatAmountCentavos: vat,
+      discountCentavos: discount,
+      cashSalesCentavos: cash,
+      gcashSalesCentavos: gcash,
+      mayaSalesCentavos: maya,
+      previousGrandTotalCentavos,
+      accumulatedGrandTotalCentavos,
+      generatedById: scope.userId,
+      generatedAt: now,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "pos.zReadingFinalized",
+      userId: scope.userId,
+      branchId,
+      entityType: "zReadings",
+      entityId: zId,
+      after: { zCounter, date: dateStr, accumulatedGrandTotalCentavos },
+    });
+
+    return { zCounter, previousGrandTotalCentavos, accumulatedGrandTotalCentavos };
+  },
+});
+
+// ─── Finalized Z-reading history ───────────────────────────────────────────────
+
+export const listZReadings = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await withBranchScope(ctx);
+    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+    const branchId = scope.branchId;
+    if (!branchId) return [];
+    return await ctx.db
+      .query("zReadings")
+      .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+      .order("desc")
+      .take(60);
   },
 });

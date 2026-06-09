@@ -18,6 +18,7 @@ import {
   ArrowLeftRight,
   ClipboardList,
   Truck,
+  Receipt,
   Settings,
   Tag,
   Sparkles,
@@ -61,6 +62,7 @@ const overviewNavItems: NavItem[] = [
 const operationsNavItems: NavItem[] = [
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
   { href: "/admin/couriers", label: "Couriers", icon: Truck, roles: ["admin"] },
+  { href: "/admin/bir-registration", label: "BIR Approvals", icon: Receipt, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
 ];
 

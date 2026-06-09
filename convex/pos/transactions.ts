@@ -1,5 +1,6 @@
 import { v, ConvexError } from "convex/values";
 import { mutation, query } from "../_generated/server";
+import type { MutationCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
@@ -14,20 +15,33 @@ import {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Get Philippine date info (UTC+8) for receipt number generation.
+ * Issue the next continuous, non-resetting invoice serial for a branch.
+ * The counter document is read + incremented within this serializable mutation,
+ * so concurrent sales can't collide and the series never resets (BIR requirement).
  */
-function getPhilippineDate(): { datePart: string; startOfDayMs: number } {
-  const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
-  const nowMs = Date.now();
-  const phtDate = new Date(nowMs + PHT_OFFSET_MS);
-  const year = phtDate.getUTCFullYear();
-  const month = String(phtDate.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(phtDate.getUTCDate()).padStart(2, "0");
-  const datePart = `${year}${month}${day}`;
-  const startOfDayUTC =
-    Date.UTC(year, phtDate.getUTCMonth(), phtDate.getUTCDate()) -
-    PHT_OFFSET_MS;
-  return { datePart, startOfDayMs: startOfDayUTC };
+async function nextInvoiceNumber(
+  ctx: MutationCtx,
+  branchId: Id<"branches">
+): Promise<string> {
+  const counter = await ctx.db
+    .query("invoiceCounters")
+    .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+    .unique();
+
+  let seq: number;
+  if (counter) {
+    seq = counter.nextSeq;
+    await ctx.db.patch(counter._id, { nextSeq: seq + 1, updatedAt: Date.now() });
+  } else {
+    seq = 1;
+    await ctx.db.insert("invoiceCounters", {
+      branchId,
+      nextSeq: 2,
+      updatedAt: Date.now(),
+    });
+  }
+
+  return `SI-${String(seq).padStart(9, "0")}`;
 }
 
 // ─── Create Transaction ─────────────────────────────────────────────────────
@@ -58,6 +72,13 @@ export const createTransaction = mutation({
       amountCentavos: v.number(),
     })),
     fashionAssistantId: v.optional(v.id("fashionAssistants")),
+    // BIR Sold-To + SC/PWD details (optional, captured at checkout)
+    customerName: v.optional(v.string()),
+    customerTin: v.optional(v.string()),
+    customerAddress: v.optional(v.string()),
+    customerBusinessStyle: v.optional(v.string()),
+    scPwdName: v.optional(v.string()),
+    scPwdIdNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // 1. Auth gate
@@ -311,19 +332,8 @@ export const createTransaction = mutation({
       }
     }
 
-    // 8. Generate receipt number (sequential per branch per day)
-    // NOTE (M2): .collect() loads all today's transactions to count them.
-    // Convex lacks a native .count() — acceptable for typical branch volumes
-    // (~200/day). Consider a counter document if volume exceeds 500+/day.
-    const { datePart, startOfDayMs } = getPhilippineDate();
-    const todayTransactions = await ctx.db
-      .query("transactions")
-      .withIndex("by_branch_date", (q) =>
-        q.eq("branchId", branchId).gte("createdAt", startOfDayMs)
-      )
-      .collect();
-    const seq = (todayTransactions.length + 1).toString().padStart(4, "0");
-    const receiptNumber = `${datePart}-${seq}`;
+    // 8. Generate a continuous, non-resetting invoice number (per branch).
+    const receiptNumber = await nextInvoiceNumber(ctx, branchId);
 
     // 9. Insert transaction record
     const cashPortion = args.splitPayment
@@ -354,6 +364,12 @@ export const createTransaction = mutation({
           ? args.amountTenderedCentavos
           : undefined,
       changeCentavos,
+      customerName: args.customerName?.trim() || undefined,
+      customerTin: args.customerTin?.trim() || undefined,
+      customerAddress: args.customerAddress?.trim() || undefined,
+      customerBusinessStyle: args.customerBusinessStyle?.trim() || undefined,
+      scPwdName: args.scPwdName?.trim() || undefined,
+      scPwdIdNumber: args.scPwdIdNumber?.trim() || undefined,
       isOffline: false,
       createdAt: Date.now(),
     });

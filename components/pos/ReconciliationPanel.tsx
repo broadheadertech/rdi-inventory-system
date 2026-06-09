@@ -7,6 +7,7 @@ import { ConvexError } from "convex/values";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/formatters";
 import { ReadingReport, type ReadingData } from "@/components/pos/ReadingReport";
+import { friendlyError } from "@/lib/errors";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -63,6 +64,7 @@ export function ReconciliationPanel() {
   const submitReconciliation = useMutation(
     api.pos.reconciliation.submitReconciliation
   );
+  const finalizeZ = useMutation(api.pos.readings.finalizeZReading);
 
   const [physicalCashInput, setPhysicalCashInput] = useState("");
   const [notes, setNotes] = useState("");
@@ -70,6 +72,19 @@ export function ReconciliationPanel() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ReconciliationResult | null>(null);
   const [showZReading, setShowZReading] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
+
+  async function handleFinalizeZ() {
+    setFinalizing(true);
+    setError(null);
+    try {
+      await finalizeZ({});
+    } catch (err) {
+      setError(friendlyError(err, "Couldn't finalize the Z-reading."));
+    } finally {
+      setFinalizing(false);
+    }
+  }
 
   // Compute difference as user types
   const physicalCashCentavos = useMemo(() => {
@@ -189,7 +204,12 @@ export function ReconciliationPanel() {
               </button>
               {showZReading && (
                 <div className="mt-3">
-                  <ReadingReport data={zReading as ReadingData} showPrint />
+                  <ReadingReport
+                    data={zReading as ReadingData}
+                    showPrint
+                    onFinalize={handleFinalizeZ}
+                    finalizing={finalizing}
+                  />
                 </div>
               )}
             </div>
@@ -241,7 +261,12 @@ export function ReconciliationPanel() {
           </button>
           {showZReading && (
             <div className="mt-3 rounded-lg border p-4">
-              <ReadingReport data={zReading as ReadingData} showPrint />
+              <ReadingReport
+                data={zReading as ReadingData}
+                showPrint
+                onFinalize={handleFinalizeZ}
+                finalizing={finalizing}
+              />
             </div>
           )}
         </div>

@@ -106,6 +106,42 @@ export default function BirVatReportPage() {
     dateStart,
     dateEnd,
   });
+  const journal = useQuery(api.dashboards.birReports.getSalesJournal, {
+    dateStart,
+    dateEnd,
+  });
+
+  function pesos(c: number): string {
+    return (c / 100).toFixed(2);
+  }
+  function journalDateTime(ms: number): string {
+    const pht = new Date(ms + 8 * 60 * 60 * 1000);
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${pht.getUTCFullYear()}-${p(pht.getUTCMonth() + 1)}-${p(pht.getUTCDate())} ${p(pht.getUTCHours())}:${p(pht.getUTCMinutes())}`;
+  }
+
+  function handleDownloadJournal() {
+    if (!journal) return;
+    const header = [
+      "SI No.", "Date/Time (PHT)", "Branch", "Cashier", "Status",
+      "Gross", "VATable", "VAT-Exempt", "VAT (12%)", "Discount", "Discount Type", "Payment",
+    ];
+    const body = journal.map((r) => [
+      r.siNumber,
+      journalDateTime(r.createdAt),
+      r.branch,
+      r.cashier,
+      r.status,
+      pesos(r.grossCentavos),
+      pesos(r.vatableCentavos),
+      pesos(r.vatExemptCentavos),
+      pesos(r.vatCentavos),
+      pesos(r.discountCentavos),
+      r.discountType,
+      r.paymentMethod,
+    ]);
+    downloadCsv(`BIR-Sales-Journal-${dateStart}-${dateEnd}.csv`, [header, ...body]);
+  }
 
   function handleDownloadCsv() {
     if (!summary) return;
@@ -166,6 +202,14 @@ export default function BirVatReportPage() {
             >
               <Download className="h-4 w-4" />
               Download CSV
+            </button>
+            <button
+              onClick={handleDownloadJournal}
+              disabled={!journal || journal.length === 0}
+              className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              Export Sales Journal (e-journal)
             </button>
             <button
               onClick={() => window.print()}

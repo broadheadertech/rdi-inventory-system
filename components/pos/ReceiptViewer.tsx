@@ -110,8 +110,19 @@ function ReceiptViewerInner({
 
   const { transaction: txn, items, branch, business, businessAddress, cashierName } =
     receiptData;
+  const bir = receiptData.bir ?? {};
+  const customer = receiptData.customer ?? {};
+  const scPwd = receiptData.scPwd ?? {};
   const isDiscounted =
     txn.discountType === "senior" || txn.discountType === "pwd";
+
+  // Mirror ReceiptPDF: accredited only when a PTU / Accreditation No. exists.
+  const accredited = !!(bir.accreditationNumber || bir.ptuNumber);
+  const vatableSales = isDiscounted ? 0 : txn.subtotalCentavos;
+  const vatExemptSales = isDiscounted ? txn.subtotalCentavos - txn.vatAmountCentavos : 0;
+  const vatAmount = isDiscounted ? 0 : txn.vatAmountCentavos;
+  const vatRegTin = bir.tin || business.tin;
+  const fieldOrBlank = (v?: string) => (v && v.trim() ? v : "__________");
 
   return (
     <div className="absolute inset-0 z-20 flex flex-col bg-background">
@@ -135,7 +146,7 @@ function ReceiptViewerInner({
           )}
         >
           <Receipt className="h-4 w-4" />
-          Official Receipt
+          Receipt
         </button>
         <button
           onClick={() => setTab("gift")}
@@ -154,32 +165,32 @@ function ReceiptViewerInner({
       {/* Scrollable receipt preview */}
       <div className="flex-1 overflow-y-auto p-4">
         {tab === "receipt" ? (
-          /* ── Official Receipt ── */
+          /* ── Sales Invoice / Order Slip ── */
           <div className="mx-auto w-full max-w-[320px] rounded-md border bg-white p-4 font-mono text-xs shadow-sm">
             {/* Header */}
             <div className="text-center">
-              <p className="text-sm font-bold">
-                {business.name || "RedBox Apparel"}
-              </p>
-              {business.tin && (
-                <p className="text-[10px] text-gray-600">TIN: {business.tin}</p>
-              )}
+              <p className="text-sm font-bold">{business.name || "RedBox Apparel"}</p>
               <p className="text-[10px] text-gray-600">
                 {businessAddress || branch.address}
               </p>
-              {businessAddress && businessAddress !== branch.address && (
-                <p className="text-[10px] text-gray-600">
-                  Branch: {branch.name} - {branch.address}
-                </p>
-              )}
+              <p className="text-[10px] text-gray-600">
+                VAT REG TIN: {vatRegTin || "__________"}
+              </p>
+              <p className="text-[10px] text-gray-600">
+                {branch.name}{branch.address ? ` — ${branch.address}` : ""}
+              </p>
             </div>
+
+            <p className="my-2 text-center text-sm font-bold tracking-widest">
+              {accredited ? "SALES INVOICE" : "ORDER SLIP"}
+            </p>
 
             <hr className="my-2 border-dashed" />
 
             {/* Metadata */}
             <div className="space-y-0.5">
               <div className="flex justify-between">
-                <span className="text-gray-500">Receipt #:</span>
+                <span className="text-gray-500">SI No.:</span>
                 <span className="font-bold">{txn.receiptNumber}</span>
               </div>
               <div className="flex justify-between">
@@ -192,6 +203,16 @@ function ReceiptViewerInner({
                 <span className="text-gray-500">Cashier:</span>
                 <span className="font-bold">{cashierName}</span>
               </div>
+            </div>
+
+            <hr className="my-2 border-dashed" />
+
+            {/* Sold To */}
+            <div className="space-y-0.5">
+              <p className="font-bold">Sold To:</p>
+              <p>Name: {fieldOrBlank(customer.name)}</p>
+              <p>TIN: {fieldOrBlank(customer.tin)}</p>
+              <p>Address: {fieldOrBlank(customer.address)}</p>
             </div>
 
             <hr className="my-2 border-dashed" />
@@ -217,64 +238,64 @@ function ReceiptViewerInner({
 
             <hr className="my-2 border-dashed" />
 
-            {/* Tax breakdown */}
-            {isDiscounted ? (
-              <div className="space-y-0.5">
-                <div className="flex justify-between">
-                  <span>Subtotal (VAT-Inclusive):</span>
-                  <span>{formatCurrency(txn.subtotalCentavos)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Less: VAT:</span>
-                  <span>-{formatCurrency(txn.vatAmountCentavos)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>VAT-Exempt Amount:</span>
-                  <span>
-                    {formatCurrency(
-                      txn.subtotalCentavos - txn.vatAmountCentavos
-                    )}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span>
-                    Less: {txn.discountType === "senior" ? "SC" : "PWD"} Discount
-                    (20%):
-                  </span>
-                  <span>-{formatCurrency(txn.discountAmountCentavos)}</span>
-                </div>
-                <hr className="my-1 border-dashed" />
-                <div className="flex justify-between text-sm font-bold">
-                  <span>TOTAL:</span>
-                  <span>{formatCurrency(txn.totalCentavos)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>VAT Amount:</span>
-                  <span>₱0.00</span>
-                </div>
-                <div className="flex justify-between font-bold text-green-600">
-                  <span>You Save:</span>
-                  <span>
-                    {formatCurrency(txn.subtotalCentavos - txn.totalCentavos)}
-                  </span>
-                </div>
+            {/* VAT summary box (BIR) */}
+            <div className="space-y-0.5">
+              <div className="flex justify-between">
+                <span>VATable Sales:</span>
+                <span>{formatCurrency(vatableSales)}</span>
               </div>
-            ) : (
-              <div className="space-y-0.5">
-                <div className="flex justify-between">
-                  <span>Subtotal:</span>
-                  <span>{formatCurrency(txn.subtotalCentavos)}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>VAT (12%):</span>
-                  <span>{formatCurrency(txn.vatAmountCentavos)}</span>
-                </div>
-                <hr className="my-1 border-dashed" />
-                <div className="flex justify-between text-sm font-bold">
-                  <span>TOTAL:</span>
-                  <span>{formatCurrency(txn.totalCentavos)}</span>
-                </div>
+              <div className="flex justify-between">
+                <span>VAT-Exempt Sales:</span>
+                <span>{formatCurrency(vatExemptSales)}</span>
               </div>
+              <div className="flex justify-between">
+                <span>Zero-Rated Sales:</span>
+                <span>{formatCurrency(0)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>VAT Amount (12%):</span>
+                <span>{formatCurrency(vatAmount)}</span>
+              </div>
+              <hr className="my-1 border-dashed" />
+              <div className="flex justify-between">
+                <span>Total Sales (VAT Inclusive):</span>
+                <span>{formatCurrency(txn.subtotalCentavos)}</span>
+              </div>
+              {isDiscounted && (
+                <>
+                  <div className="flex justify-between">
+                    <span>Less: VAT</span>
+                    <span>-{formatCurrency(txn.vatAmountCentavos)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>
+                      Less: {txn.discountType === "senior" ? "SC" : "PWD"} Discount (20%)
+                    </span>
+                    <span>-{formatCurrency(txn.discountAmountCentavos)}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between text-sm font-bold">
+                <span>TOTAL AMOUNT DUE:</span>
+                <span>{formatCurrency(txn.totalCentavos)}</span>
+              </div>
+            </div>
+
+            {isDiscounted && (
+              <>
+                <hr className="my-2 border-dashed" />
+                <div className="space-y-0.5">
+                  <p className="font-bold">
+                    {txn.discountType === "senior" ? "Senior Citizen" : "PWD"} Details:
+                  </p>
+                  <p>Name: {fieldOrBlank(scPwd.name)}</p>
+                  <p>
+                    {txn.discountType === "senior" ? "OSCA/SC ID" : "PWD ID"} No.:{" "}
+                    {fieldOrBlank(scPwd.idNumber)}
+                  </p>
+                  <p>Signature: __________</p>
+                </div>
+              </>
             )}
 
             <hr className="my-2 border-dashed" />
@@ -331,12 +352,32 @@ function ReceiptViewerInner({
 
             <hr className="my-2 border-dashed" />
 
-            {/* Footer */}
-            <div className="text-center">
-              <p>Thank you for your purchase!</p>
-              <p className="mt-1 font-bold">
-                THIS SERVES AS YOUR OFFICIAL RECEIPT
+            {/* Footer — two modes mirror the PDF */}
+            <div className="text-center space-y-0.5">
+              <p>
+                {bir.softwareName || "RedBox POS"}
+                {bir.softwareVersion ? ` v${bir.softwareVersion}` : ""}
               </p>
+              {accredited ? (
+                <>
+                  <p>MIN: {fieldOrBlank(bir.minNumber)}</p>
+                  <p>Serial No.: {fieldOrBlank(bir.serialNumber)}</p>
+                  <p>Accreditation No.: {fieldOrBlank(bir.accreditationNumber)}</p>
+                  {bir.ptuNumber && <p>PTU No.: {bir.ptuNumber}</p>}
+                  <p className="mt-1 font-bold">THIS SERVES AS YOUR SALES INVOICE</p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-1 font-bold">THIS IS NOT AN OFFICIAL RECEIPT</p>
+                  <p className="text-[10px] text-gray-500">
+                    Not valid for claim of input tax.
+                  </p>
+                  <p className="text-[10px] text-gray-500">
+                    Please request your BIR-registered Sales Invoice.
+                  </p>
+                </>
+              )}
+              <p>Thank you for your purchase!</p>
             </div>
           </div>
         ) : (
@@ -419,7 +460,7 @@ function ReceiptViewerInner({
         )}
       </div>
 
-      {/* Digital receipt sending — only on official receipt tab */}
+      {/* Digital receipt sending — only on the invoice tab */}
       {tab === "receipt" && (
         <div className="border-t p-4">
           <p className="mb-2 text-sm font-medium">Send Digital Receipt</p>

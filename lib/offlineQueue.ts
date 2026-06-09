@@ -21,6 +21,12 @@ export interface CreateTransactionArgs {
   paymentMethod: "cash" | "gcash" | "maya";
   discountType: "senior" | "pwd" | "none";
   amountTenderedCentavos?: number;
+  // BIR Sold-To + SC/PWD details captured at checkout (optional)
+  customerName?: string;
+  customerTin?: string;
+  customerAddress?: string;
+  scPwdName?: string;
+  scPwdIdNumber?: string;
 }
 
 export interface OfflineCartItem {

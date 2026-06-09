@@ -97,6 +97,12 @@ type ZReading = BaseReading & {
     differenceCentavos: number;
     submittedAt: number;
   } | null;
+  // BIR accumulated grand total context
+  zCounterNext?: number;
+  alreadyFinalized?: boolean;
+  finalizedZCounter?: number | null;
+  previousGrandTotalCentavos?: number;
+  projectedGrandTotalCentavos?: number;
 };
 
 export type ReadingData = XReading | YReading | ZReading;
@@ -140,10 +146,14 @@ export function ReadingReport({
   data,
   onClose,
   showPrint = true,
+  onFinalize,
+  finalizing = false,
 }: {
   data: ReadingData;
   onClose?: () => void;
   showPrint?: boolean;
+  onFinalize?: () => void;
+  finalizing?: boolean;
 }) {
   const label = READING_LABELS[data.readingType];
 
@@ -253,6 +263,53 @@ export function ReadingReport({
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Z-Reading: BIR Accumulated Grand Total */}
+      {data.readingType === "Z" && (
+        <div className="rounded-lg border p-3 space-y-2">
+          <h3 className="text-sm font-semibold flex items-center gap-1.5">
+            <Hash className="h-4 w-4 text-muted-foreground" />
+            Accumulated Grand Total (BIR)
+          </h3>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Z-Counter</span>
+              <span className="font-medium">
+                #{data.alreadyFinalized ? data.finalizedZCounter : data.zCounterNext}
+                {data.alreadyFinalized ? " (finalized)" : " (pending)"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Previous Grand Total</span>
+              <span>{formatCurrency(data.previousGrandTotalCentavos ?? 0)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Today&apos;s Sales</span>
+              <span>{formatCurrency(data.totalSalesCentavos)}</span>
+            </div>
+            <div className="flex justify-between border-t pt-1.5 font-bold">
+              <span>New Accumulated Grand Total</span>
+              <span>
+                {formatCurrency(data.projectedGrandTotalCentavos ?? data.totalSalesCentavos)}
+              </span>
+            </div>
+          </div>
+          {onFinalize && !data.alreadyFinalized && (
+            <button
+              onClick={onFinalize}
+              disabled={finalizing}
+              className="mt-2 w-full rounded-lg bg-red-600 py-2.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 print:hidden"
+            >
+              {finalizing ? "Finalizing…" : "Finalize Z-Reading"}
+            </button>
+          )}
+          {data.alreadyFinalized && (
+            <p className="text-xs text-green-600 print:hidden">
+              ✓ Z-reading finalized for this date.
+            </p>
+          )}
         </div>
       )}
 

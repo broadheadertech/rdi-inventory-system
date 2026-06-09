@@ -7,7 +7,9 @@
       "Bash(netstat -ano)",
       "PowerShell(Get-CimInstance Win32_Process -Filter \"ProcessId = 23956\" | Select-Object ProcessId, CommandLine | Format-List; $p = \\(Get-CimInstance Win32_Process -Filter \"ParentProcessId = 23956\"\\); $p | Select-Object ProcessId, CommandLine | Format-List)",
       "PowerShell($child = Get-CimInstance Win32_Process -Filter \"ProcessId = 23956\"; \"Parent PID: $\\($child.ParentProcessId\\)\"; $parent = Get-CimInstance Win32_Process -Filter \"ProcessId = $\\($child.ParentProcessId\\)\"; $parent | Select-Object ProcessId, CommandLine | Format-List)",
-      "Bash(grep -nE \"^#{1,3} \" docs/Features.md)"
+      "Bash(grep -nE \"^#{1,3} \" docs/Features.md)",
+      "WebSearch",
+      "WebFetch(domain:help.tagrain.com)"
     ]
   }
 }

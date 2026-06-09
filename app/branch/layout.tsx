@@ -25,6 +25,7 @@ import {
   Sparkles,
   ChevronDown,
   Users,
+  Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -54,6 +55,7 @@ const operationsNavItems: NavItem[] = [
   { href: "/branch/invoices", label: "Invoices", icon: FileText },
   { href: "/branch/reservations", label: "Reservations", icon: CalendarCheck },
   { href: "/branch/quarantine", label: "Quarantine", icon: ShieldAlert },
+  { href: "/branch/bir-registration", label: "BIR Registration", icon: Receipt },
 ];
 
 const insightsNavItems: NavItem[] = [

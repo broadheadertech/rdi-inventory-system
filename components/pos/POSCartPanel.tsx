@@ -993,6 +993,14 @@ function PaymentPanel({
   const [error, setError] = useState<string | null>(null);
   const [selectedFaId, setSelectedFaId] = useState<string>("none");
 
+  // BIR Sold-To + SC/PWD capture (optional)
+  const [customerName, setCustomerName] = useState("");
+  const [customerTin, setCustomerTin] = useState("");
+  const [customerAddress, setCustomerAddress] = useState("");
+  const [scPwdName, setScPwdName] = useState("");
+  const [scPwdId, setScPwdId] = useState("");
+  const isDiscounted = discountType === "senior" || discountType === "pwd";
+
   // Split payment state
   const [isSplit, setIsSplit] = useState(false);
   const [splitMethod, setSplitMethod] = useState<PaymentMethod>("gcash");
@@ -1078,6 +1086,11 @@ function PaymentPanel({
           discountType,
           amountTenderedCentavos: paymentMethod === "cash" ? amountTendered! : undefined,
           splitPayment: splitPaymentArg,
+          customerName: customerName.trim() || undefined,
+          customerTin: customerTin.trim() || undefined,
+          customerAddress: customerAddress.trim() || undefined,
+          scPwdName: isDiscounted ? scPwdName.trim() || undefined : undefined,
+          scPwdIdNumber: isDiscounted ? scPwdId.trim() || undefined : undefined,
         };
         const encryptedPayload = await encrypt(JSON.stringify(payload));
         const branchId = String(currentUser?.branchId ?? "unknown");
@@ -1124,6 +1137,11 @@ function PaymentPanel({
         fashionAssistantId: selectedFaId !== "none"
           ? (selectedFaId as Id<"fashionAssistants">)
           : undefined,
+        customerName: customerName.trim() || undefined,
+        customerTin: customerTin.trim() || undefined,
+        customerAddress: customerAddress.trim() || undefined,
+        scPwdName: isDiscounted ? scPwdName.trim() || undefined : undefined,
+        scPwdIdNumber: isDiscounted ? scPwdId.trim() || undefined : undefined,
       });
 
       onComplete({
@@ -1184,6 +1202,56 @@ function PaymentPanel({
         <p className="text-sm text-muted-foreground">Amount Due</p>
         <p className="text-2xl font-bold">{formatCurrency(totalCentavos)}</p>
       </div>
+
+      {/* Customer / BIR details (optional; SC/PWD required for discounted sales) */}
+      <details className="mb-3 rounded-md border p-2">
+        <summary className="cursor-pointer text-sm font-medium">
+          {isDiscounted ? "Sold To & SC/PWD details" : "Sold To details (optional)"}
+        </summary>
+        <div className="mt-2 space-y-2">
+          <input
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Customer name"
+            disabled={isProcessing}
+            className="w-full rounded border px-2 py-1.5 text-sm"
+          />
+          <div className="flex gap-2">
+            <input
+              value={customerTin}
+              onChange={(e) => setCustomerTin(e.target.value)}
+              placeholder="TIN"
+              disabled={isProcessing}
+              className="w-1/2 rounded border px-2 py-1.5 text-sm"
+            />
+            <input
+              value={customerAddress}
+              onChange={(e) => setCustomerAddress(e.target.value)}
+              placeholder="Address"
+              disabled={isProcessing}
+              className="w-1/2 rounded border px-2 py-1.5 text-sm"
+            />
+          </div>
+          {isDiscounted && (
+            <div className="flex gap-2">
+              <input
+                value={scPwdName}
+                onChange={(e) => setScPwdName(e.target.value)}
+                placeholder={discountType === "senior" ? "Senior name" : "PWD name"}
+                disabled={isProcessing}
+                className="w-1/2 rounded border px-2 py-1.5 text-sm"
+              />
+              <input
+                value={scPwdId}
+                onChange={(e) => setScPwdId(e.target.value)}
+                placeholder={discountType === "senior" ? "OSCA/SC ID No." : "PWD ID No."}
+                disabled={isProcessing}
+                className="w-1/2 rounded border px-2 py-1.5 text-sm"
+              />
+            </div>
+          )}
+        </div>
+      </details>
 
       {/* Payment method selector */}
       <div className="mb-2 flex gap-1 rounded-md border p-1">

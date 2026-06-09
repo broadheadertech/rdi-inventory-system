@@ -310,6 +310,76 @@ export const getBirVatSummary = query({
   },
 });
 
+// ─── getSalesJournal (e-journal export) ──────────────────────────────────────
+// Per-transaction rows for the BIR electronic sales journal / audit data file.
+
+export const getSalesJournal = query({
+  args: {
+    dateStart: v.string(), // YYYYMMDD
+    dateEnd: v.string(), // YYYYMMDD
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const { startMs } = getPhilippineDateRange(args.dateStart);
+    const { endMs } = getPhilippineDateRange(args.dateEnd);
+
+    const branches = await ctx.db.query("branches").collect();
+    const branchName = new Map(branches.map((b) => [b._id as string, b.name]));
+    const cashierName = new Map<string, string>();
+
+    const rows: Array<{
+      siNumber: string;
+      createdAt: number;
+      branch: string;
+      cashier: string;
+      status: string;
+      grossCentavos: number;
+      vatableCentavos: number;
+      vatExemptCentavos: number;
+      vatCentavos: number;
+      discountCentavos: number;
+      discountType: string;
+      paymentMethod: string;
+    }> = [];
+
+    for (const branch of branches) {
+      const txns = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branch._id).gte("createdAt", startMs).lte("createdAt", endMs)
+        )
+        .collect();
+
+      for (const t of txns) {
+        const cKey = t.cashierId as string;
+        if (!cashierName.has(cKey)) {
+          const c = await ctx.db.get(t.cashierId);
+          cashierName.set(cKey, c?.name ?? "Unknown");
+        }
+        const isDisc = t.discountType === "senior" || t.discountType === "pwd";
+        rows.push({
+          siNumber: t.receiptNumber,
+          createdAt: t.createdAt,
+          branch: branchName.get(t.branchId as string) ?? "Unknown",
+          cashier: cashierName.get(cKey) ?? "Unknown",
+          status: t.status ?? "completed",
+          grossCentavos: t.totalCentavos,
+          vatableCentavos: isDisc ? 0 : t.subtotalCentavos,
+          vatExemptCentavos: isDisc ? t.subtotalCentavos - t.vatAmountCentavos : 0,
+          vatCentavos: isDisc ? 0 : t.vatAmountCentavos,
+          discountCentavos: t.discountAmountCentavos,
+          discountType: t.discountType ?? "none",
+          paymentMethod: t.paymentMethod,
+        });
+      }
+    }
+
+    rows.sort((a, b) => (a.siNumber < b.siNumber ? -1 : a.siNumber > b.siNumber ? 1 : 0));
+    return rows;
+  },
+});
+
 // ─── getWarehouseInvoiceSummary ──────────────────────────────────────────────
 // Internal invoice (transfer) revenue summary for a date range.
 // Aggregates per destination branch — how much each branch was charged.

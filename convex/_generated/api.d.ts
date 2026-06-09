@@ -18,6 +18,7 @@ import type * as _helpers_transferStock from "../_helpers/transferStock.js";
 import type * as _helpers_withBranchScope from "../_helpers/withBranchScope.js";
 import type * as admin_announcements from "../admin/announcements.js";
 import type * as admin_banners from "../admin/banners.js";
+import type * as admin_birRegistration from "../admin/birRegistration.js";
 import type * as admin_cashierAccounts from "../admin/cashierAccounts.js";
 import type * as admin_cashierAccountsActions from "../admin/cashierAccountsActions.js";
 import type * as admin_cashierReports from "../admin/cashierReports.js";
@@ -169,6 +170,7 @@ declare const fullApi: ApiFromModules<{
   "_helpers/withBranchScope": typeof _helpers_withBranchScope;
   "admin/announcements": typeof admin_announcements;
   "admin/banners": typeof admin_banners;
+  "admin/birRegistration": typeof admin_birRegistration;
   "admin/cashierAccounts": typeof admin_cashierAccounts;
   "admin/cashierAccountsActions": typeof admin_cashierAccountsActions;
   "admin/cashierReports": typeof admin_cashierReports;

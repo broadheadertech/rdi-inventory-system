@@ -72,6 +72,14 @@ export const getReceiptData = query({
       .withIndex("by_key", (q) => q.eq("key", "businessAddress"))
       .unique();
 
+    // 6b. Load the branch's approved (active) BIR registration — drives the
+    //     official Sales Invoice vs non-accredited Order Slip on the receipt.
+    const birReg = await ctx.db
+      .query("birRegistrations")
+      .withIndex("by_branch", (q) => q.eq("branchId", transaction.branchId))
+      .unique();
+    const birActive = birReg?.active ?? null;
+
     // 7. Load cashier name
     const cashier = await ctx.db.get(transaction.cashierId);
 
@@ -105,12 +113,29 @@ export const getReceiptData = query({
         address: branch?.address ?? "",
       },
       business: {
-        name: businessNameSetting?.value ?? "RedBox Apparel",
-        tin: tinSetting?.value ?? "",
+        // Approved BIR registration values take precedence over generic settings.
+        name: birActive?.businessName || businessNameSetting?.value || "RedBox Apparel",
+        tin: birActive?.tin || tinSetting?.value || "",
       },
       businessAddress:
-        businessAddressSetting?.value ?? branch?.address ?? "",
+        birActive?.businessAddress ||
+        businessAddressSetting?.value ||
+        branch?.address ||
+        "",
       cashierName: cashier?.name ?? "Unknown",
+      // BIR machine/accreditation details — null until a registration is approved.
+      bir: birActive,
+      // Sold-To customer + SC/PWD details captured at checkout (optional).
+      customer: {
+        name: transaction.customerName ?? undefined,
+        tin: transaction.customerTin ?? undefined,
+        address: transaction.customerAddress ?? undefined,
+        businessStyle: transaction.customerBusinessStyle ?? undefined,
+      },
+      scPwd: {
+        name: transaction.scPwdName ?? undefined,
+        idNumber: transaction.scPwdIdNumber ?? undefined,
+      },
     };
   },
 });
