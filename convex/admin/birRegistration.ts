@@ -20,6 +20,7 @@ const birConfigArg = v.object({
   businessName: v.optional(v.string()),
   tin: v.optional(v.string()),
   businessAddress: v.optional(v.string()),
+  storeCode: v.optional(v.string()),
   terminalNumber: v.optional(v.string()),
   minNumber: v.optional(v.string()),
   serialNumber: v.optional(v.string()),

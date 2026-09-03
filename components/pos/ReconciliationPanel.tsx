@@ -7,6 +7,7 @@ import { ConvexError } from "convex/values";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/formatters";
 import { ReadingReport, type ReadingData } from "@/components/pos/ReadingReport";
+import { BirReadingViewer } from "@/components/pos/BirReadingViewer";
 import { friendlyError } from "@/lib/errors";
 import Link from "next/link";
 import {
@@ -72,6 +73,7 @@ export function ReconciliationPanel() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ReconciliationResult | null>(null);
   const [showZReading, setShowZReading] = useState(false);
+  const [showBirZ, setShowBirZ] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
 
   async function handleFinalizeZ() {
@@ -271,6 +273,25 @@ export function ReconciliationPanel() {
           )}
         </div>
       )}
+
+      {/* BIR Z-Read — printable stub */}
+      <div className="mb-6">
+        <button
+          onClick={() => setShowBirZ(!showBirZ)}
+          className="flex w-full items-center justify-between rounded-lg border p-3 text-sm font-medium hover:bg-muted transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <FileBarChart className="h-4 w-4 text-red-600" />
+            BIR Z-Read (printable)
+          </span>
+          {showBirZ ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+        </button>
+        {showBirZ && (
+          <div className="mt-3 rounded-lg border p-4">
+            <BirReadingViewer readingType="Z" date={todayDate} />
+          </div>
+        )}
+      </div>
 
       {/* Daily Summary */}
       <div className="mb-6 space-y-3">

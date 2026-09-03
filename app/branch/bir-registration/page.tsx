@@ -15,6 +15,7 @@ const FIELDS: { key: string; label: string; placeholder?: string }[] = [
   { key: "businessName", label: "Registered Business Name" },
   { key: "tin", label: "VAT Reg TIN", placeholder: "000-000-000-00000" },
   { key: "businessAddress", label: "Business Address" },
+  { key: "storeCode", label: "Store Code", placeholder: "e.g. 001" },
   { key: "terminalNumber", label: "POS / Terminal No." },
   { key: "minNumber", label: "MIN (Machine ID No.)" },
   { key: "serialNumber", label: "Machine Serial No." },

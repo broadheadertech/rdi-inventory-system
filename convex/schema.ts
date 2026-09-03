@@ -6,6 +6,7 @@ const birConfig = v.object({
   businessName: v.optional(v.string()),
   tin: v.optional(v.string()),
   businessAddress: v.optional(v.string()),
+  storeCode: v.optional(v.string()),
   terminalNumber: v.optional(v.string()),
   minNumber: v.optional(v.string()),
   serialNumber: v.optional(v.string()),
@@ -47,6 +48,26 @@ export default defineSchema({
   })
     .index("by_branch", ["branchId"])
     .index("by_branch_date", ["branchId", "date"]),
+
+  // ─── Drawer operations (No Sale / Cash Pay-In / Pay-Out) ──────────────────
+  drawerOperations: defineTable({
+    branchId: v.id("branches"),
+    cashierId: v.id("users"),
+    type: v.union(v.literal("noSale"), v.literal("payIn"), v.literal("payOut")),
+    amountCentavos: v.number(), // 0 for noSale
+    reason: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_branch_date", ["branchId", "createdAt"]),
+
+  // ─── Receipt reprints (BIR reprint counters) ──────────────────────────────
+  receiptReprints: defineTable({
+    transactionId: v.id("transactions"),
+    branchId: v.id("branches"),
+    reprintedById: v.id("users"),
+    createdAt: v.number(),
+  })
+    .index("by_branch_date", ["branchId", "createdAt"])
+    .index("by_transaction", ["transactionId"]),
 
   // ─── Continuous (non-resetting) invoice number counter, per branch ─────────
   invoiceCounters: defineTable({

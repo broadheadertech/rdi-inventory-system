@@ -1,7 +1,7 @@
 "use client";
 
 import { Component, useState, type ReactNode } from "react";
-import { useQuery } from "convex/react";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { Loader2, X, AlertCircle, Gift, Receipt } from "lucide-react";
@@ -95,6 +95,16 @@ function ReceiptViewerInner({
   const receiptData = useQuery(api.pos.receipts.getReceiptData, {
     transactionId,
   });
+  const logReprint = useMutation(api.pos.receipts.logReprint);
+
+  async function handleReprint() {
+    try {
+      await logReprint({ transactionId });
+    } catch {
+      // non-blocking — still let them print
+    }
+    window.print();
+  }
 
   // Loading state
   if (receiptData === undefined) {
@@ -469,9 +479,17 @@ function ReceiptViewerInner({
       )}
 
       {/* Bottom actions */}
-      <div className="border-t p-4">
+      <div className="border-t p-4 space-y-2">
         {tab === "receipt" ? (
-          <DownloadPDFSection receiptData={receiptData} />
+          <>
+            <DownloadPDFSection receiptData={receiptData} />
+            <button
+              onClick={handleReprint}
+              className="w-full rounded-lg border py-2.5 text-sm font-medium hover:bg-muted transition-colors"
+            >
+              Reprint Receipt
+            </button>
+          </>
         ) : (
           <DownloadGiftPDFSection receiptData={receiptData} />
         )}

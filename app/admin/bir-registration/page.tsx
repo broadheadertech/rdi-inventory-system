@@ -11,6 +11,7 @@ const FIELD_LABELS: Record<string, string> = {
   businessName: "Business Name",
   tin: "VAT Reg TIN",
   businessAddress: "Business Address",
+  storeCode: "Store Code",
   terminalNumber: "Terminal No.",
   minNumber: "MIN",
   serialNumber: "Serial No.",

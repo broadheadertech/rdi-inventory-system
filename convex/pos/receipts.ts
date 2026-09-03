@@ -140,6 +140,31 @@ export const getReceiptData = query({
   },
 });
 
+// ─── Log Receipt Reprint (BIR reprint counter) ────────────────────────────
+
+export const logReprint = mutation({
+  args: { transactionId: v.id("transactions") },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+    const transaction = await ctx.db.get(args.transactionId);
+    if (!transaction) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transaction not found" });
+    }
+    if (!scope.canAccessAllBranches && transaction.branchId !== scope.branchId) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+    await ctx.db.insert("receiptReprints", {
+      transactionId: args.transactionId,
+      branchId: transaction.branchId,
+      reprintedById: scope.userId,
+      createdAt: Date.now(),
+    });
+  },
+});
+
 // ─── Send Digital Receipt ─────────────────────────────────────────────────
 
 export const sendDigitalReceipt = mutation({
