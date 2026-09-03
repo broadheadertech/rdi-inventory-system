@@ -12,6 +12,8 @@ import { BarcodeScanner } from "@/components/shared/BarcodeScanner";
 import { ScanConfirmation, type ScanResult } from "@/components/pos/ScanConfirmation";
 import { ReadingReport, type ReadingData } from "@/components/pos/ReadingReport";
 import { POSCartProvider, usePOSCart } from "@/components/providers/POSCartProvider";
+import { TerminalEnrollment } from "@/components/pos/TerminalEnrollment";
+import { getDeviceToken, clearDeviceToken } from "@/lib/deviceToken";
 import { useConnectionStatus } from "@/components/shared/ConnectionIndicator";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { DiscountType } from "@/lib/constants";
@@ -96,6 +98,30 @@ function ShiftGate({
   const openShift = useMutation(api.pos.shifts.openShift);
   const verifyCashierLogin = useAction(api.cashier.authActions.verifyCashierLogin);
 
+  // Device binding — read once on mount so SSR and the first client render agree.
+  const [deviceToken, setDeviceTokenState] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setDeviceTokenState(getDeviceToken());
+  }, []);
+
+  const terminal = useQuery(
+    api.pos.terminals.whoAmI,
+    deviceToken === undefined ? "skip" : { deviceToken: deviceToken ?? undefined }
+  );
+
+  // Server rejected the stored token (revoked, or moved to another branch) —
+  // drop it so this device falls back to the enrollment screen.
+  useEffect(() => {
+    if (terminal && !terminal.enrolled && deviceToken) {
+      clearDeviceToken();
+      setDeviceTokenState(null);
+    }
+  }, [terminal, deviceToken]);
+
+  // Lets a manager dismiss enrollment on a register that is still running
+  // unbound, before POS_REQUIRE_TERMINAL is switched on.
+  const [enrollmentSkipped, setEnrollmentSkipped] = useState(false);
+
   const [step, setStep] = useState<ShiftGateStep>("login");
   const [verifiedAccount, setVerifiedAccount] = useState<VerifiedAccount | null>(null);
 
@@ -111,11 +137,23 @@ function ShiftGate({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Loading
-  if (shift === undefined) {
+  if (shift === undefined || deviceToken === undefined || terminal === undefined) {
     return (
       <div className="flex h-screen items-center justify-center">
         <p className="text-muted-foreground">Loading shift...</p>
       </div>
+    );
+  }
+
+  // Unregistered device — enroll before any cashier can sign in. Until
+  // POS_REQUIRE_TERMINAL is switched on this is dismissible, so registers can be
+  // enrolled one at a time without taking unenrolled lanes offline.
+  if (!terminal.enrolled && !(enrollmentSkipped && !terminal.enforced)) {
+    return (
+      <TerminalEnrollment
+        onEnrolled={() => setDeviceTokenState(getDeviceToken())}
+        onSkip={terminal.enforced ? undefined : () => setEnrollmentSkipped(true)}
+      />
     );
   }
 
@@ -135,9 +173,9 @@ function ShiftGate({
     setLoginError("");
     try {
       const account = await verifyCashierLogin({
-        branchId,
         username: username.trim(),
         password,
+        deviceToken: deviceToken ?? undefined,
       });
       setVerifiedAccount(account);
       // Go to handover step if there's a prev shift, otherwise straight to funds
@@ -163,6 +201,7 @@ function ShiftGate({
     try {
       await openShift({
         cashierAccountId: verifiedAccount.cashierAccountId,
+        deviceToken: deviceToken ?? undefined,
         changeFundCentavos: changeCents,
         cashFundCentavos: cashCents,
         prevShiftId: prevHandover?.shiftId ?? undefined,

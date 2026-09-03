@@ -711,6 +711,66 @@ export default defineSchema({
     .index("by_branch_variant_received", ["branchId", "variantId", "receivedAt"])
     .index("by_branch_variant", ["branchId", "variantId"]),
 
+  // ─── Registered POS terminals (device binding) ────────────────────────────
+  // One row per physical register. A device is enrolled once by a manager or
+  // admin, receives a high-entropy deviceToken stored in its localStorage, and
+  // must present that token on every POS operation. A cashier signing in from
+  // an unenrolled device (phone, home PC) has no token and is refused.
+  //
+  // The token is stored raw and indexed rather than hashed: it is 256-bit
+  // random (not a guessable secret), it is only ever transmitted to Convex over
+  // TLS, and an attacker holding a database dump already has full access by
+  // other means. Indexing it keeps validation to a single lookup inside
+  // ordinary queries/mutations, with no crypto in the hot path.
+  //
+  // BIR: registration values are per-machine (each register has its own MIN,
+  // serial and PTU), which is why they live here rather than on the branch.
+  posTerminals: defineTable({
+    branchId: v.id("branches"),
+    label: v.string(),              // human name, e.g. "Lane 1"
+    terminalNumber: v.string(),     // BIR terminal number, unique per branch
+    deviceToken: v.string(),        // 256-bit random, held by the enrolled device
+    // Clerk account this register signs in as. The device token is exchanged for
+    // a Clerk sign-in ticket for this user, so no one ever types an email at the
+    // till. Nothing about this account is known to cashiers.
+    terminalUserId: v.id("users"),
+    terminalClerkId: v.string(),
+    isActive: v.boolean(),
+    enrolledById: v.id("users"),
+    enrolledAt: v.number(),
+    lastSeenAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    // Per-terminal BIR registration
+    minNumber: v.optional(v.string()),
+    serialNumber: v.optional(v.string()),
+    ptuNumber: v.optional(v.string()),
+    ptuDate: v.optional(v.string()),
+  })
+    .index("by_deviceToken", ["deviceToken"])
+    .index("by_branch", ["branchId"])
+    .index("by_branch_terminalNumber", ["branchId", "terminalNumber"]),
+
+  // ─── Terminal enrollment codes (one-time, short-lived) ────────────────────
+  // A manager generates a code in the admin/branch UI, then types it on the new
+  // register. Avoids needing the manager's own Clerk credentials on the floor.
+  terminalEnrollmentCodes: defineTable({
+    branchId: v.id("branches"),
+    code: v.string(),               // 8-char, single use
+    label: v.string(),
+    terminalNumber: v.string(),
+    // The Clerk account the enrolled register will run as, chosen by the
+    // manager when the code is generated.
+    terminalUserId: v.id("users"),
+    terminalClerkId: v.string(),
+    createdById: v.id("users"),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+    usedAt: v.optional(v.number()),
+    usedTerminalId: v.optional(v.id("posTerminals")),
+  })
+    .index("by_code", ["code"])
+    .index("by_branch", ["branchId"]),
+
   cashierAccounts: defineTable({
     branchId: v.id("branches"),
     firstName: v.string(),
@@ -718,6 +778,12 @@ export default defineSchema({
     username: v.string(),
     passwordHash: v.string(),
     passwordSalt: v.string(),
+    // Hashing scheme for passwordHash. Absent = legacy single-round SHA-256,
+    // upgraded to PBKDF2 transparently on the next successful login.
+    passwordAlgo: v.optional(v.string()),
+    // Brute-force lockout state
+    failedAttempts: v.optional(v.number()),
+    lockedUntil: v.optional(v.number()),
     isActive: v.boolean(),
     createdById: v.id("users"),
     createdAt: v.number(),
@@ -730,6 +796,8 @@ export default defineSchema({
     branchId: v.id("branches"),
     cashierId: v.id("users"),
     cashierAccountId: v.optional(v.id("cashierAccounts")),
+    // Register this shift was opened on — set once device binding is enrolled.
+    terminalId: v.optional(v.id("posTerminals")),
     changeFundCentavos: v.optional(v.number()),
     cashFundCentavos: v.number(),
     status: v.union(v.literal("open"), v.literal("closed")),

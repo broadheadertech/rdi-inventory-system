@@ -3,6 +3,7 @@ import { query, mutation, type QueryCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { POS_ROLES } from "../_helpers/permissions";
+import { requireTerminal, touchTerminal } from "../_helpers/requireTerminal";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -106,6 +107,7 @@ export const openShift = mutation({
     changeFundCentavos: v.optional(v.number()),
     cashFundCentavos: v.number(),
     cashierAccountId: v.optional(v.id("cashierAccounts")),
+    deviceToken: v.optional(v.string()),
     prevShiftId: v.optional(v.id("cashierShifts")),
     handoverCashInRegisterCentavos: v.optional(v.number()),
     handoverChangeFundCentavos: v.optional(v.number()),
@@ -127,6 +129,9 @@ export const openShift = mutation({
     const branchId = scope.branchId;
     if (!branchId) throw new ConvexError("No branch assigned");
 
+    // Device binding — a shift may only be opened from an enrolled register.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+
     // Only one open shift per branch at a time
     const existing = await ctx.db
       .query("cashierShifts")
@@ -143,6 +148,7 @@ export const openShift = mutation({
       branchId,
       cashierId: scope.userId,
       cashierAccountId: args.cashierAccountId,
+      terminalId: terminal?._id,
       changeFundCentavos: args.changeFundCentavos,
       cashFundCentavos: args.cashFundCentavos,
       status: "open",
@@ -152,6 +158,8 @@ export const openShift = mutation({
       handoverChangeFundCentavos: args.handoverChangeFundCentavos,
       handoverCashFundCentavos: args.handoverCashFundCentavos,
     });
+
+    await touchTerminal(ctx, terminal);
 
     return { shiftId };
   },

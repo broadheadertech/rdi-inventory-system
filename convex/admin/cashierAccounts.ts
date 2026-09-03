@@ -45,6 +45,7 @@ export const _insertCashierAccount = internalMutation({
     username: v.string(),
     passwordHash: v.string(),
     passwordSalt: v.string(),
+    passwordAlgo: v.string(),
     clerkSubject: v.string(),
   },
   handler: async (ctx, args) => {
@@ -72,6 +73,7 @@ export const _insertCashierAccount = internalMutation({
       username: args.username,
       passwordHash: args.passwordHash,
       passwordSalt: args.passwordSalt,
+      passwordAlgo: args.passwordAlgo,
       isActive: true,
       createdById: user._id,
       createdAt: Date.now(),
@@ -123,6 +125,7 @@ export const _updatePassword = internalMutation({
     accountId: v.id("cashierAccounts"),
     passwordHash: v.string(),
     passwordSalt: v.string(),
+    passwordAlgo: v.string(),
     clerkSubject: v.string(),
   },
   handler: async (ctx, args) => {
@@ -137,9 +140,14 @@ export const _updatePassword = internalMutation({
     const account = await ctx.db.get(args.accountId);
     if (!account) throw new ConvexError("Account not found");
 
+    // Resetting the password also clears a brute-force lockout, so a manager
+    // can unblock a locked-out cashier immediately.
     await ctx.db.patch(args.accountId, {
       passwordHash: args.passwordHash,
       passwordSalt: args.passwordSalt,
+      passwordAlgo: args.passwordAlgo,
+      failedAttempts: 0,
+      lockedUntil: undefined,
     });
   },
 });

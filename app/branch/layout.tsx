@@ -26,6 +26,7 @@ import {
   ChevronDown,
   Users,
   Receipt,
+  MonitorSmartphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -70,6 +71,7 @@ const teamNavItems: NavItem[] = [
   { href: "/branch/champions", label: "Champions", icon: Trophy },
   { href: "/branch/fashion-assistants", label: "Fashion Assistants", icon: UserCheck },
   { href: "/branch/cashiers", label: "Cashiers", icon: Users },
+  { href: "/branch/terminals", label: "POS Terminals", icon: MonitorSmartphone },
 ];
 
 function NavSection({

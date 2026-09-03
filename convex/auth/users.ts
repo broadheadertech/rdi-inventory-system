@@ -639,7 +639,19 @@ export const inviteUser = action({
     email: v.string(),
     role: v.optional(roleValidator),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
+    // Admin-only: this mints a Clerk invitation carrying public_metadata.role,
+    // so an unauthenticated caller could otherwise invite themselves as admin.
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError({ code: "UNAUTHORIZED", message: "Not authenticated" });
+
+    const caller = await ctx.runQuery(internal.auth.users.getByClerkId, {
+      clerkId: identity.subject,
+    });
+    if (!caller || !caller.isActive || caller.role !== "admin") {
+      throw new ConvexError({ code: "FORBIDDEN", message: "Admin access required" });
+    }
+
     const clerkSecret = process.env.CLERK_SECRET_KEY;
     if (!clerkSecret) {
       throw new ConvexError({ code: "CONFIG_ERROR", message: "CLERK_SECRET_KEY not set" });

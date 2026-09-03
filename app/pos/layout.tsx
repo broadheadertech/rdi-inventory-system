@@ -7,6 +7,7 @@ import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { TerminalSessionGate } from "@/components/pos/TerminalSessionGate";
 import { ConnectionIndicator } from "@/components/shared/ConnectionIndicator";
 import {
   registerServiceWorker,
@@ -23,10 +24,22 @@ import {
 import { decrypt } from "@/lib/encryption";
 import type { Id } from "@/convex/_generated/dataModel";
 import Link from "next/link";
+import { toast } from "sonner";
 
 const ALLOWED_ROLES = ["admin", "manager", "cashier", "warehouseStaff", "hqStaff"];
 
 export default function PosLayout({ children }: { children: React.ReactNode }) {
+  // The gate resolves *which register* this is before anything below runs, so
+  // no query fires — and no role redirect happens — while the device is still
+  // signing itself in.
+  return (
+    <TerminalSessionGate>
+      <PosLayoutInner>{children}</PosLayoutInner>
+    </TerminalSessionGate>
+  );
+}
+
+function PosLayoutInner({ children }: { children: React.ReactNode }) {
   const currentUser = useQuery(api.auth.users.getCurrentUser);
   const router = useRouter();
   const pathname = usePathname();
@@ -38,6 +51,35 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
   // Task 5.2: Mutations for replay and conflict flagging
   const createTransaction = useMutation(api.pos.transactions.createTransaction);
   const flagSyncConflict = useMutation(api.pos.offlineSync.flagSyncConflict);
+  const recordDrawer = useMutation(api.pos.drawer.recordDrawerOperation);
+
+  async function handleNoSale() {
+    try {
+      await recordDrawer({ type: "noSale" });
+      toast.success("No Sale recorded — drawer opened");
+    } catch {
+      toast.error("Couldn't record No Sale");
+    }
+  }
+
+  async function handleCashMovement(type: "payIn" | "payOut") {
+    const raw = window.prompt(
+      type === "payIn" ? "Cash In amount (₱):" : "Cash Out amount (₱):"
+    );
+    if (!raw) return;
+    const amountCentavos = Math.round(parseFloat(raw) * 100);
+    if (!Number.isFinite(amountCentavos) || amountCentavos <= 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+    const reason = window.prompt("Reason (optional):") ?? undefined;
+    try {
+      await recordDrawer({ type, amountCentavos, reason });
+      toast.success(type === "payIn" ? "Cash In recorded" : "Cash Out recorded");
+    } catch {
+      toast.error("Couldn't record cash movement");
+    }
+  }
 
   // H2 fix: Ref tracks latest currentUser so replayOfflineQueue always sees
   // the current value regardless of when the online event listener was registered
@@ -220,6 +262,25 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
                 Voids
               </Link>
             )}
+          {/* Drawer operations */}
+          <button
+            onClick={handleNoSale}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            No Sale
+          </button>
+          <button
+            onClick={() => handleCashMovement("payIn")}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Cash In
+          </button>
+          <button
+            onClick={() => handleCashMovement("payOut")}
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Cash Out
+          </button>
           {/* Task 5.5: Override status to "syncing" during offline queue replay */}
           <ConnectionIndicator
             status={syncStatus === "syncing" ? "syncing" : undefined}

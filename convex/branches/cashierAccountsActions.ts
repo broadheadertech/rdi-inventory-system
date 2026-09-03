@@ -2,18 +2,10 @@
 import { v, ConvexError } from "convex/values";
 import { action } from "../_generated/server";
 import { internal as _internal } from "../_generated/api";
-import { createHash, randomBytes } from "crypto";
+import { CURRENT_ALGO, generateSalt, hashPassword } from "../_helpers/passwordHash";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const internal = _internal as any;
-
-function hashPassword(password: string, salt: string): string {
-  return createHash("sha256").update(salt + password).digest("hex");
-}
-
-function generateSalt(): string {
-  return randomBytes(16).toString("hex");
-}
 
 // ─── createCashier ────────────────────────────────────────────────────────────
 
@@ -47,6 +39,7 @@ export const createCashier = action({
         username: args.username.trim().toLowerCase(),
         passwordHash,
         passwordSalt: salt,
+        passwordAlgo: CURRENT_ALGO,
         clerkSubject: identity.subject,
       }
     );
@@ -76,6 +69,7 @@ export const resetCashierPassword = action({
         accountId: args.accountId,
         passwordHash,
         passwordSalt: salt,
+        passwordAlgo: CURRENT_ALGO,
         clerkSubject: identity.subject,
       }
     );
