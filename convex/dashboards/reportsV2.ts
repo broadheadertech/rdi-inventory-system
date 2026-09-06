@@ -1,9 +1,9 @@
 // convex/dashboards/reportsV2.ts — Unified reports summary + performance dimensions
 
-import { query } from "../_generated/server";
-import { v } from "convex/values";
+import { query, type QueryCtx } from "../_generated/server";
+import { v, ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
-import { requireRole, HQ_ROLES } from "../_helpers/permissions";
+import { withBranchScope } from "../_helpers/withBranchScope";
 
 const CHANNEL_VALUES = [
   "inline",
@@ -145,14 +145,61 @@ async function fetchTxnsInRange(
 }
 
 /** Resolve list of branch IDs matching the channel/branchId filters. */
+// Roles allowed to read reports. HQ sees every branch; branch management is
+// pinned to its own store.
+const REPORT_ROLES = ["admin", "hqStaff", "manager", "viewer"] as const;
+
+export type ReportScope = {
+  branchId: Id<"branches"> | null;
+  canAccessAllBranches: boolean;
+};
+
+/**
+ * Report-specific scope check.
+ *
+ * withBranchScope admits every role that has a branch (cashiers and drivers
+ * included), so reports layer their own role gate on top of it. Admin and HQ
+ * staff get all branches; a manager or viewer gets exactly their own store and
+ * cannot widen it through the filter arguments.
+ */
+async function resolveReportScope(ctx: QueryCtx): Promise<ReportScope> {
+  const scope = await withBranchScope(ctx);
+  if (!(REPORT_ROLES as readonly string[]).includes(scope.user.role)) {
+    throw new ConvexError({ code: "UNAUTHORIZED" });
+  }
+
+  // Reports deliberately keep HQ on the whole org even while "View as Branch"
+  // is active. The reports page has its own branch and channel filters, and
+  // silently pinning the query would make those dropdowns look broken. For HQ,
+  // narrowing here is a filter choice; for everyone else it is a scope
+  // boundary, and withBranchScope has already guaranteed they have a branch.
+  const isHq = scope.user.role === "admin" || scope.user.role === "hqStaff";
+
+  return {
+    branchId: isHq ? null : scope.branchId,
+    canAccessAllBranches: isHq,
+  };
+}
+
 async function resolveAllowedBranches(
   ctx: any,
-  opts: { branchId?: Id<"branches">; channel?: Channel }
+  opts: { branchId?: Id<"branches">; channel?: Channel; scope: ReportScope }
 ): Promise<{ ids: Id<"branches">[]; byId: Map<string, Doc<"branches">> }> {
   const branches = await ctx.db.query("branches").collect();
   const byId = new Map<string, Doc<"branches">>(
     branches.map((b: Doc<"branches">) => [b._id as string, b])
   );
+
+  // A branch-scoped caller only ever sees their own store. The branchId and
+  // channel filter arguments come from the client, so they must not be able to
+  // widen the scope — they are ignored entirely on this path.
+  if (!opts.scope.canAccessAllBranches) {
+    const own = branches.filter(
+      (b: Doc<"branches">) => (b._id as string) === (opts.scope.branchId as string)
+    );
+    return { ids: own.map((b: Doc<"branches">) => b._id), byId };
+  }
+
   let filtered = branches.filter((b: Doc<"branches">) => b.isActive);
   if (opts.channel) filtered = filtered.filter((b: Doc<"branches">) => b.channel === opts.channel);
   if (opts.branchId) filtered = filtered.filter((b: Doc<"branches">) => b._id === opts.branchId);
@@ -166,19 +213,25 @@ async function resolveAllowedBranches(
 export const getReportsSummary = query({
   args: filterArgs,
   handler: async (ctx, args) => {
-    await requireRole(ctx, HQ_ROLES);
+    const scope = await resolveReportScope(ctx);
 
     const startMs = ymdToMs(args.dateStart);
     const endMs = ymdToMs(args.dateEnd, true);
 
     // Target reads from settings and is independent of the branch/txn filter.
+    // It is an ORG-WIDE figure, so comparing it against a single store's sales
+    // would read as a huge shortfall that means nothing. Branch-scoped callers
+    // get no target at all rather than a misleading one; targetAvailable tells
+    // the UI to hide the card. Per-branch targets would need a new setting.
     const rangeDays = Math.max(1, Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)));
-    const monthlyTarget = await readOrgMonthlyTargetCentavos(ctx);
+    const targetAvailable = scope.canAccessAllBranches;
+    const monthlyTarget = targetAvailable ? await readOrgMonthlyTargetCentavos(ctx) : 0;
     const targetCentavos = targetForPeriod(monthlyTarget, rangeDays, args.periodKind);
 
     const { ids: allowedIds } = await resolveAllowedBranches(ctx, {
       branchId: args.branchId,
       channel: args.channel,
+      scope,
     });
 
     if (allowedIds.length === 0) {
@@ -187,6 +240,7 @@ export const getReportsSummary = query({
         unitsSold: 0,
         targetCentavos,
         targetPercent: 0,
+        targetAvailable,
         lyRevenueCentavos: 0,
         lyPercent: 0,
         projectedCentavos: 0,
@@ -288,6 +342,7 @@ export const getReportsSummary = query({
       unitsSold,
       targetCentavos,
       targetPercent,
+      targetAvailable,
       lyRevenueCentavos,
       lyPercent,
       projectedCentavos,
@@ -320,13 +375,14 @@ export const getPerformanceByDimension = query({
     ),
   },
   handler: async (ctx, args) => {
-    await requireRole(ctx, HQ_ROLES);
+    const scope = await resolveReportScope(ctx);
 
     const startMs = ymdToMs(args.dateStart);
     const endMs = ymdToMs(args.dateEnd, true);
     const { ids: allowedIds } = await resolveAllowedBranches(ctx, {
       branchId: args.branchId,
       channel: args.channel,
+      scope,
     });
 
     if (allowedIds.length === 0) return [];
@@ -810,13 +866,14 @@ async function resolveVariantBrand(
 export const getMovementsSummary = query({
   args: filterArgs,
   handler: async (ctx, args) => {
-    await requireRole(ctx, HQ_ROLES);
+    const scope = await resolveReportScope(ctx);
 
     const startMs = ymdToMs(args.dateStart);
     const endMs = ymdToMs(args.dateEnd, true);
     const { ids: allowedIds, byId } = await resolveAllowedBranches(ctx, {
       branchId: args.branchId,
       channel: args.channel,
+      scope,
     });
     const allowedSet = new Set(allowedIds.map((id) => id as string));
 
@@ -1051,13 +1108,14 @@ export const getMovementsSummary = query({
 export const getPromotionContributions = query({
   args: filterArgs,
   handler: async (ctx, args) => {
-    await requireRole(ctx, HQ_ROLES);
+    const scope = await resolveReportScope(ctx);
 
     const startMs = ymdToMs(args.dateStart);
     const endMs = ymdToMs(args.dateEnd, true);
     const { ids: allowedIds } = await resolveAllowedBranches(ctx, {
       branchId: args.branchId,
       channel: args.channel,
+      scope,
     });
     const allowedSet = new Set(allowedIds.map((id) => id as string));
 

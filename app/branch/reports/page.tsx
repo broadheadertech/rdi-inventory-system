@@ -37,6 +37,16 @@ function getPresetMs(preset: DatePreset): { startMs: number; endMs: number; labe
   return { startMs: Date.UTC(d.getUTCFullYear(), 0, 1) - PHT, endMs: nowMs, label: "This Year" };
 }
 
+/** reportsV2 filters on YYYYMMDD in PHT; this page tracks epoch ms. */
+function toYmdPht(ms: number): string {
+  const d = new Date(ms + PHT);
+  return (
+    `${d.getUTCFullYear()}` +
+    String(d.getUTCMonth() + 1).padStart(2, "0") +
+    String(d.getUTCDate()).padStart(2, "0")
+  );
+}
+
 const DATE_PRESETS: { value: DatePreset; label: string }[] = [
   { value: "today", label: "Today" },
   { value: "weekly", label: "This Week" },
@@ -45,6 +55,9 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 ];
 
 type ReportKey =
+  | "itemPerformance"
+  | "storePerformance"
+  | "promotions"
   | "inventoryHealth"
   | "restockVsLayLow"
   | "productMovement"
@@ -52,6 +65,9 @@ type ReportKey =
   | "transferEfficiency";
 
 const REPORT_OPTIONS: { key: ReportKey; label: string; description: string }[] = [
+  { key: "itemPerformance",     label: "Item Performance",       description: "Sales, units and stock on hand per SKU" },
+  { key: "storePerformance",    label: "Store Performance",      description: "This store's sales and units for the period" },
+  { key: "promotions",          label: "Promotion Contributions", description: "Sales and share of total per promotion" },
   { key: "inventoryHealth",     label: "Inventory Health",       description: "In-stock, low-stock, out-of-stock snapshot" },
   { key: "restockVsLayLow",     label: "Restock vs Lay Low",     description: "Verdict per SKU — what to restock or reduce" },
   { key: "productMovement",     label: "Product Movement Index", description: "Fast, medium, slow, and dead stock" },
@@ -111,7 +127,30 @@ export default function BranchReportsPage() {
 
   const branchCtx = useQuery(api.dashboards.branchDashboard.getBranchContext);
 
+  // reportsV2 is branch-scoped server-side: a manager always gets their own
+  // store regardless of what these filter args say.
+  const perfArgs = useMemo(
+    () => ({ dateStart: toYmdPht(startMs), dateEnd: toYmdPht(endMs) }),
+    [startMs, endMs]
+  );
+
   // All queries — only active after "Generate" is clicked
+  const itemPerformance = useQuery(
+    api.dashboards.reportsV2.getPerformanceByDimension,
+    generated && selected.has("itemPerformance")
+      ? { ...perfArgs, dimension: "sku" as const }
+      : "skip"
+  );
+  const storePerformance = useQuery(
+    api.dashboards.reportsV2.getPerformanceByDimension,
+    generated && selected.has("storePerformance")
+      ? { ...perfArgs, dimension: "store" as const }
+      : "skip"
+  );
+  const promotions = useQuery(
+    api.dashboards.reportsV2.getPromotionContributions,
+    generated && selected.has("promotions") ? perfArgs : "skip"
+  );
   const inventoryHealth = useQuery(
     api.dashboards.branchAnalytics.getInventoryHealth,
     generated && selected.has("inventoryHealth") ? {} : "skip"
@@ -148,6 +187,9 @@ export default function BranchReportsPage() {
   }, [generated]);
 
   const allLoaded = generated && [
+    !selected.has("itemPerformance") || itemPerformance !== undefined,
+    !selected.has("storePerformance") || storePerformance !== undefined,
+    !selected.has("promotions") || promotions !== undefined,
     !selected.has("inventoryHealth") || inventoryHealth !== undefined,
     !selected.has("restockVsLayLow") || restockVsLayLow !== undefined,
     !selected.has("productMovement") || velocity !== undefined,
@@ -258,6 +300,128 @@ export default function BranchReportsPage() {
             </p>
             <p className="text-xs text-gray-400 mt-1">Generated {generatedAt} &middot; {selected.size} section{selected.size !== 1 ? "s" : ""}</p>
           </div>
+
+          {/* ── Store Performance ─────────────────────────────────────── */}
+          {selected.has("storePerformance") && storePerformance && storePerformance.length > 0 && (
+            <section>
+              <SectionHeader
+                title="Store Performance"
+                description={`Sales and units for this store — ${periodLabel}`}
+              />
+              <PrintTable>
+                <thead>
+                  <tr><Th>Store</Th><Th right>Sales</Th><Th right>Units Sold</Th><Th right>Avg / Unit</Th></tr>
+                </thead>
+                <tbody>
+                  {storePerformance.map((row) => (
+                    <tr key={row.key}>
+                      <Td>{row.label}</Td>
+                      <Td right>{fmt(row.revenueCentavos)}</Td>
+                      <Td right>{row.unitsSold.toLocaleString("en-PH")}</Td>
+                      <Td right muted>
+                        {row.unitsSold > 0 ? fmt(Math.round(row.revenueCentavos / row.unitsSold)) : "—"}
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </PrintTable>
+            </section>
+          )}
+
+          {/* ── Item Performance ──────────────────────────────────────── */}
+          {selected.has("itemPerformance") && itemPerformance && itemPerformance.length > 0 && (
+            <section>
+              <SectionHeader
+                title="Item Performance"
+                description={`Sales, units and stock on hand per SKU — ${periodLabel}`}
+              />
+              {(() => {
+                const totalRevenue = itemPerformance.reduce((sum, r) => sum + r.revenueCentavos, 0);
+                return (
+                  <PrintTable>
+                    <thead>
+                      <tr>
+                        <Th>#</Th><Th>SKU</Th><Th right>Sales</Th><Th right>Units Sold</Th>
+                        <Th right>% of Sales</Th><Th right>SOH</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {itemPerformance.map((row, i) => (
+                        <tr key={row.key}>
+                          <Td muted>{i + 1}</Td>
+                          <Td>{row.label}</Td>
+                          <Td right>{fmt(row.revenueCentavos)}</Td>
+                          <Td right>{row.unitsSold.toLocaleString("en-PH")}</Td>
+                          <Td right muted>
+                            {totalRevenue > 0
+                              ? `${((row.revenueCentavos / totalRevenue) * 100).toFixed(1)}%`
+                              : "—"}
+                          </Td>
+                          <Td right muted>
+                            {row.currentSohUnits !== undefined ? row.currentSohUnits.toLocaleString("en-PH") : "—"}
+                          </Td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </PrintTable>
+                );
+              })()}
+            </section>
+          )}
+
+          {/* ── Promotion Contributions ───────────────────────────────── */}
+          {selected.has("promotions") && promotions && (
+            <section>
+              <SectionHeader
+                title="Promotion Contributions"
+                description={`Sales driven by each promotion — ${periodLabel}`}
+              />
+              {promotions.promotions.length === 0 ? (
+                <p className="text-xs text-gray-500">
+                  No promotions ran in this period.
+                </p>
+              ) : (
+                <PrintTable>
+                  <thead>
+                    <tr>
+                      <Th>Promotion</Th><Th right>Sales</Th>
+                      <Th right>% of Store Sales</Th><Th right>Redemptions</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {promotions.promotions.map((p) => (
+                      <tr key={p.promotionId}>
+                        <Td>{p.offer}</Td>
+                        <Td right>{fmt(p.salesCentavos)}</Td>
+                        <Td right muted>{p.sharePercent.toFixed(1)}%</Td>
+                        <Td right>{p.redemptions.toLocaleString("en-PH")}</Td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <Td><span className="font-semibold">Total promoted</span></Td>
+                      <Td right>
+                        <span className="font-semibold">
+                          {fmt(promotions.promotions.reduce((sum, p) => sum + p.salesCentavos, 0))}
+                        </span>
+                      </Td>
+                      <Td right muted>
+                        {promotions.totalSalesCentavos > 0
+                          ? `${(
+                              (promotions.promotions.reduce((sum, p) => sum + p.salesCentavos, 0) /
+                                promotions.totalSalesCentavos) *
+                              100
+                            ).toFixed(1)}%`
+                          : "—"}
+                      </Td>
+                      <Td right muted>
+                        {promotions.promotions.reduce((sum, p) => sum + p.redemptions, 0).toLocaleString("en-PH")}
+                      </Td>
+                    </tr>
+                  </tbody>
+                </PrintTable>
+              )}
+            </section>
+          )}
 
           {/* ── Top Sellers ───────────────────────────────────────────── */}
           {selected.has("topSellers") && topSellers && topSellers.length > 0 && (
