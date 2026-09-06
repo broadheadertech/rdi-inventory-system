@@ -175,6 +175,80 @@ export default defineSchema({
     .index("by_branch_period", ["branchId", "periodYm"])
     .index("by_branch", ["branchId"]),
 
+  // ─── Branch ordering cycles ───────────────────────────────────────────────
+  // A recurring window in which a store places its replenishment order.
+  //
+  // Deliberately NOT an auto-order. When a cycle comes due the system prepares
+  // a DRAFT sized from actual demand and nothing leaves it until a person
+  // submits. Lines carry the signals needed to judge whether an item is still
+  // worth reordering — an item that stopped selling is surfaced but excluded by
+  // default, so stale stock has to be consciously opted back in.
+  orderingCycles: defineTable({
+    branchId: v.id("branches"),
+    name: v.string(),                     // "Weekly Replenishment"
+    frequency: v.union(
+      v.literal("weekly"),
+      v.literal("biweekly"),
+      v.literal("monthly")
+    ),
+    anchorDate: v.string(),               // YYYYMMDD (PHT) of the first ordering day
+    leadTimeDays: v.number(),             // warehouse → shelf, used to size cover
+    // No sale in this many days ⇒ the line is excluded from the draft by default.
+    staleAfterDays: v.number(),
+    isActive: v.boolean(),
+    createdById: v.id("users"),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_branch", ["branchId"]),
+
+  // One occurrence of a cycle. periodKey is the occurrence's due date (YYYYMMDD),
+  // which makes re-preparing the same cycle idempotent.
+  orderingCycleRuns: defineTable({
+    cycleId: v.id("orderingCycles"),
+    branchId: v.id("branches"),
+    periodKey: v.string(),                // YYYYMMDD of this occurrence
+    status: v.union(
+      v.literal("draft"),
+      v.literal("submitted"),
+      v.literal("skipped")
+    ),
+    dueAt: v.number(),
+    coverDays: v.number(),                // cycle length + lead time, for sizing
+    preparedAt: v.number(),
+    preparedById: v.id("users"),
+    submittedAt: v.optional(v.number()),
+    submittedById: v.optional(v.id("users")),
+    transferId: v.optional(v.id("transfers")),   // the request this became
+    skippedReason: v.optional(v.string()),
+    notes: v.optional(v.string()),
+  })
+    .index("by_cycle_period", ["cycleId", "periodKey"])
+    .index("by_branch_status", ["branchId", "status"])
+    .index("by_branch", ["branchId"]),
+
+  // A snapshot line. Figures are frozen at preparation time so the numbers a
+  // manager assessed are the numbers they submitted against.
+  orderingCycleLines: defineTable({
+    runId: v.id("orderingCycleRuns"),
+    branchId: v.id("branches"),
+    variantId: v.id("variants"),
+    sku: v.string(),
+    label: v.string(),                    // style name · size · colour
+    suggestedQuantity: v.number(),
+    orderedQuantity: v.number(),          // manager-editable
+    included: v.boolean(),                // manager-editable
+    // Assessment snapshot
+    onHandQuantity: v.number(),
+    incomingQuantity: v.number(),
+    unitsSold30d: v.number(),
+    daysSinceLastSale: v.optional(v.number()),   // absent = never sold here
+    stockAgeDays: v.optional(v.number()),
+    flags: v.array(v.string()),           // "noRecentSales" | "slowMoving" | "agedStock"
+    reviewNote: v.optional(v.string()),
+  })
+    .index("by_run", ["runId"])
+    .index("by_run_variant", ["runId", "variantId"]),
+
   brands: defineTable({
     name: v.string(),
     code: v.optional(v.string()),

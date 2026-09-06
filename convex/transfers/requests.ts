@@ -1,7 +1,7 @@
-import { query, mutation } from "../_generated/server";
+import { query, mutation, type MutationCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
-import { withBranchScope } from "../_helpers/withBranchScope";
+import { withBranchScope, type BranchScope } from "../_helpers/withBranchScope";
 import { HQ_ROLES, BRANCH_MANAGEMENT_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { releaseHeldStock } from "../_helpers/transferStock";
@@ -40,27 +40,26 @@ export const getWarehouseBranch = query({
   },
 });
 
-export const createTransferRequest = mutation({
+// ─── createTransferForRequester ───────────────────────────────────────────────
+// The shared body of a transfer request: direction rules, SKU resolution, stock
+// holding at the source (reserve + FIFO batch consumption), the transfer rows,
+// the audit entry and the notification.
+//
+// Extracted so the branch ordering cycle can submit a prepared draft through
+// exactly this path — holding stock and reserving batches is far too easy to get
+// subtly wrong in a second copy. Callers must have already authenticated and
+// checked the caller's role.
+export async function createTransferForRequester(
+  ctx: MutationCtx,
+  scope: BranchScope,
   args: {
-    fromBranchId: v.id("branches"),
-    toBranchId: v.id("branches"),
-    type: v.optional(v.union(v.literal("stockRequest"), v.literal("return"), v.literal("interBranch"))),
-    notes: v.optional(v.string()),
-    // M3 fix: accept sku string — resolve to variantId inside handler
-    items: v.array(
-      v.object({
-        sku: v.string(),
-        requestedQuantity: v.number(),
-      })
-    ),
-  },
-  handler: async (ctx, args) => {
-    const scope = await withBranchScope(ctx);
-
-    if (!TRANSFER_CREATE_ROLES.includes(scope.user.role)) {
-      throw new ConvexError({ code: "UNAUTHORIZED" });
-    }
-
+    fromBranchId: Id<"branches">;
+    toBranchId: Id<"branches">;
+    type?: "stockRequest" | "return" | "interBranch";
+    notes?: string;
+    items: { sku: string; requestedQuantity: number }[];
+  }
+): Promise<Id<"transfers">> {
     const transferType = args.type ?? "stockRequest";
 
     if (args.items.length === 0) {
@@ -260,7 +259,31 @@ export const createTransferRequest = mutation({
       transferId: newTransferId,
     });
 
-    return newTransferId;
+    return newTransferId;;
+}
+
+export const createTransferRequest = mutation({
+  args: {
+    fromBranchId: v.id("branches"),
+    toBranchId: v.id("branches"),
+    type: v.optional(v.union(v.literal("stockRequest"), v.literal("return"), v.literal("interBranch"))),
+    notes: v.optional(v.string()),
+    // M3 fix: accept sku string — resolve to variantId inside handler
+    items: v.array(
+      v.object({
+        sku: v.string(),
+        requestedQuantity: v.number(),
+      })
+    ),
+  },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+
+    if (!TRANSFER_CREATE_ROLES.includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    return await createTransferForRequester(ctx, scope, args);
   },
 });
 

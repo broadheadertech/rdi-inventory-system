@@ -83,6 +83,7 @@ import type * as inventory_autoReplenish from "../inventory/autoReplenish.js";
 import type * as inventory_batches from "../inventory/batches.js";
 import type * as inventory_cycleCounts from "../inventory/cycleCounts.js";
 import type * as inventory_ghostStock from "../inventory/ghostStock.js";
+import type * as inventory_orderingCycles from "../inventory/orderingCycles.js";
 import type * as inventory_putAway from "../inventory/putAway.js";
 import type * as inventory_quarantine from "../inventory/quarantine.js";
 import type * as inventory_sizeCurveAlerts from "../inventory/sizeCurveAlerts.js";
@@ -242,6 +243,7 @@ declare const fullApi: ApiFromModules<{
   "inventory/batches": typeof inventory_batches;
   "inventory/cycleCounts": typeof inventory_cycleCounts;
   "inventory/ghostStock": typeof inventory_ghostStock;
+  "inventory/orderingCycles": typeof inventory_orderingCycles;
   "inventory/putAway": typeof inventory_putAway;
   "inventory/quarantine": typeof inventory_quarantine;
   "inventory/sizeCurveAlerts": typeof inventory_sizeCurveAlerts;

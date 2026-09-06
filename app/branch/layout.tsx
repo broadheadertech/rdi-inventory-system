@@ -27,6 +27,7 @@ import {
   Users,
   Receipt,
   MonitorSmartphone,
+  CalendarClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -51,6 +52,7 @@ const overviewNavItems: NavItem[] = [
 
 const operationsNavItems: NavItem[] = [
   { href: "/branch/stock", label: "Stock", icon: Package },
+  { href: "/branch/ordering", label: "Ordering Cycle", icon: CalendarClock },
   { href: "/branch/transfers", label: "Transfers", icon: ArrowRightLeft },
   { href: "/branch/box-receiving", label: "Receiving", icon: QrCode },
   { href: "/branch/invoices", label: "Invoices", icon: FileText },
