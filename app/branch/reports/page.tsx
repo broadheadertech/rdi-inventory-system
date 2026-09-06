@@ -55,6 +55,7 @@ const DATE_PRESETS: { value: DatePreset; label: string }[] = [
 ];
 
 type ReportKey =
+  | "salesVsGoal"
   | "itemPerformance"
   | "storePerformance"
   | "promotions"
@@ -65,6 +66,7 @@ type ReportKey =
   | "transferEfficiency";
 
 const REPORT_OPTIONS: { key: ReportKey; label: string; description: string }[] = [
+  { key: "salesVsGoal",         label: "Sales vs Goal",          description: "This store's sales against its monthly goal" },
   { key: "itemPerformance",     label: "Item Performance",       description: "Sales, units and stock on hand per SKU" },
   { key: "storePerformance",    label: "Store Performance",      description: "This store's sales and units for the period" },
   { key: "promotions",          label: "Promotion Contributions", description: "Sales and share of total per promotion" },
@@ -135,6 +137,12 @@ export default function BranchReportsPage() {
   );
 
   // All queries — only active after "Generate" is clicked
+  const salesSummary = useQuery(
+    api.dashboards.reportsV2.getReportsSummary,
+    generated && selected.has("salesVsGoal")
+      ? { ...perfArgs, periodKind: datePreset === "today" ? ("daily" as const) : (datePreset as "weekly" | "monthly" | "yearly") }
+      : "skip"
+  );
   const itemPerformance = useQuery(
     api.dashboards.reportsV2.getPerformanceByDimension,
     generated && selected.has("itemPerformance")
@@ -187,6 +195,7 @@ export default function BranchReportsPage() {
   }, [generated]);
 
   const allLoaded = generated && [
+    !selected.has("salesVsGoal") || salesSummary !== undefined,
     !selected.has("itemPerformance") || itemPerformance !== undefined,
     !selected.has("storePerformance") || storePerformance !== undefined,
     !selected.has("promotions") || promotions !== undefined,
@@ -300,6 +309,83 @@ export default function BranchReportsPage() {
             </p>
             <p className="text-xs text-gray-400 mt-1">Generated {generatedAt} &middot; {selected.size} section{selected.size !== 1 ? "s" : ""}</p>
           </div>
+
+          {/* ── Sales vs Goal ─────────────────────────────────────────── */}
+          {selected.has("salesVsGoal") && salesSummary && (
+            <section>
+              <SectionHeader
+                title="Sales vs Goal"
+                description={`This store's performance against its monthly goal — ${periodLabel}`}
+              />
+              {!salesSummary.targetAvailable ? (
+                <p className="text-xs text-gray-500">
+                  No monthly goal has been set for this store. Ask HQ to set one under
+                  Admin &rarr; Branch Goals, and this section will show progress against it.
+                </p>
+              ) : (
+                <PrintTable>
+                  <thead>
+                    <tr>
+                      <Th>Measure</Th><Th right>Actual</Th>
+                      <Th right>Goal</Th><Th right>Achieved</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <Td>Sales</Td>
+                      <Td right>{fmt(salesSummary.salesCentavos)}</Td>
+                      <Td right>{fmt(salesSummary.targetCentavos)}</Td>
+                      <Td right>
+                        <span
+                          className={cn(
+                            "font-semibold",
+                            salesSummary.targetPercent >= 100
+                              ? "text-green-700"
+                              : salesSummary.targetPercent >= 90
+                                ? "text-amber-600"
+                                : "text-red-600"
+                          )}
+                        >
+                          {salesSummary.targetPercent.toFixed(1)}%
+                        </span>
+                      </Td>
+                    </tr>
+                    <tr>
+                      <Td>Gap to goal</Td>
+                      <Td right muted>
+                        {salesSummary.salesCentavos >= salesSummary.targetCentavos
+                          ? `${fmt(salesSummary.salesCentavos - salesSummary.targetCentavos)} ahead`
+                          : `${fmt(salesSummary.targetCentavos - salesSummary.salesCentavos)} short`}
+                      </Td>
+                      <Td right muted>—</Td>
+                      <Td right muted>—</Td>
+                    </tr>
+                    <tr>
+                      <Td>Units sold</Td>
+                      <Td right>{salesSummary.unitsSold.toLocaleString("en-PH")}</Td>
+                      <Td right muted>—</Td>
+                      <Td right muted>—</Td>
+                    </tr>
+                    <tr>
+                      <Td>Same period last year</Td>
+                      <Td right>{fmt(salesSummary.lyRevenueCentavos)}</Td>
+                      <Td right muted>—</Td>
+                      <Td right muted>
+                        {salesSummary.lyRevenueCentavos > 0
+                          ? `${salesSummary.lyPercent.toFixed(1)}%`
+                          : "no data"}
+                      </Td>
+                    </tr>
+                  </tbody>
+                </PrintTable>
+              )}
+              {salesSummary.targetAvailable && salesSummary.targetScope === "org" && (
+                <p className="mt-2 text-xs text-gray-500">
+                  Measured against the org-wide target — this store has no goal of its own yet.
+                </p>
+              )}
+            </section>
+          )}
 
           {/* ── Store Performance ─────────────────────────────────────── */}
           {selected.has("storePerformance") && storePerformance && storePerformance.length > 0 && (

@@ -142,6 +142,10 @@ export default defineSchema({
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
+    // Default monthly sales goal for this store, in centavos. A month-specific
+    // row in branchTargets overrides it; absent both, the store has no goal and
+    // reports show no target rather than an org-wide one that means nothing.
+    monthlyTargetCentavos: v.optional(v.number()),
     configuration: v.optional(
       v.object({
         timezone: v.optional(v.string()),
@@ -156,6 +160,20 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   }),
+
+  // ─── Per-month sales goals per branch ─────────────────────────────────────
+  // Retail is seasonal, so a single default rarely fits December and February
+  // alike. A row here overrides branches.monthlyTargetCentavos for one month.
+  // Set by admin/HQ only — a store setting its own goal defeats the point.
+  branchTargets: defineTable({
+    branchId: v.id("branches"),
+    periodYm: v.string(),                 // "YYYYMM" in PHT
+    monthlyTargetCentavos: v.number(),
+    setById: v.id("users"),
+    updatedAt: v.number(),
+  })
+    .index("by_branch_period", ["branchId", "periodYm"])
+    .index("by_branch", ["branchId"]),
 
   brands: defineTable({
     name: v.string(),

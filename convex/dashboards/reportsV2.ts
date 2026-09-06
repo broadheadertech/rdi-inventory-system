@@ -4,6 +4,7 @@ import { query, type QueryCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { resolveBranchMonthlyTarget, ymdToPeriodYm } from "./branchTargets";
 
 const CHANNEL_VALUES = [
   "inline",
@@ -218,21 +219,45 @@ export const getReportsSummary = query({
     const startMs = ymdToMs(args.dateStart);
     const endMs = ymdToMs(args.dateEnd, true);
 
-    // Target reads from settings and is independent of the branch/txn filter.
-    // It is an ORG-WIDE figure, so comparing it against a single store's sales
-    // would read as a huge shortfall that means nothing. Branch-scoped callers
-    // get no target at all rather than a misleading one; targetAvailable tells
-    // the UI to hide the card. Per-branch targets would need a new setting.
-    const rangeDays = Math.max(1, Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)));
-    const targetAvailable = scope.canAccessAllBranches;
-    const monthlyTarget = targetAvailable ? await readOrgMonthlyTargetCentavos(ctx) : 0;
-    const targetCentavos = targetForPeriod(monthlyTarget, rangeDays, args.periodKind);
-
     const { ids: allowedIds } = await resolveAllowedBranches(ctx, {
       branchId: args.branchId,
       channel: args.channel,
       scope,
     });
+
+    // Which target to measure against depends on what the report covers.
+    //
+    //   one store  → that store's own monthly goal (branchTargets, else the
+    //                branch default). This is the only honest comparison for a
+    //                single store, and the only one a manager ever sees.
+    //   many stores → the org-wide setting, as before.
+    //
+    // HQ filtered down to one store that has no goal set yet falls back to the
+    // org figure so nothing disappears from /admin/reports mid-rollout;
+    // targetScope tells the UI to label it as an org number rather than pass
+    // it off as the store's. A branch-scoped caller never gets that fallback —
+    // an org target against one store's sales is a meaningless shortfall.
+    const rangeDays = Math.max(1, Math.round((endMs - startMs) / (24 * 60 * 60 * 1000)));
+
+    let monthlyTarget = 0;
+    let targetScope: "branch" | "org" | "none" = "none";
+
+    if (allowedIds.length === 1) {
+      monthlyTarget = await resolveBranchMonthlyTarget(
+        ctx,
+        allowedIds[0],
+        ymdToPeriodYm(args.dateStart)
+      );
+      if (monthlyTarget > 0) targetScope = "branch";
+    }
+
+    if (targetScope === "none" && scope.canAccessAllBranches) {
+      monthlyTarget = await readOrgMonthlyTargetCentavos(ctx);
+      if (monthlyTarget > 0) targetScope = "org";
+    }
+
+    const targetCentavos = targetForPeriod(monthlyTarget, rangeDays, args.periodKind);
+    const targetAvailable = targetScope !== "none";
 
     if (allowedIds.length === 0) {
       return {
@@ -241,6 +266,7 @@ export const getReportsSummary = query({
         targetCentavos,
         targetPercent: 0,
         targetAvailable,
+        targetScope,
         lyRevenueCentavos: 0,
         lyPercent: 0,
         projectedCentavos: 0,
@@ -343,6 +369,7 @@ export const getReportsSummary = query({
       targetCentavos,
       targetPercent,
       targetAvailable,
+      targetScope,
       lyRevenueCentavos,
       lyPercent,
       projectedCentavos,

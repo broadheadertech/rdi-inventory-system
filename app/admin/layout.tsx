@@ -27,6 +27,7 @@ import {
   Timer,
   CalendarDays,
   ChevronDown,
+  Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -48,6 +49,7 @@ type NavItem = {
 const adminNavItems: NavItem[] = [
   { href: "/admin/users", label: "Users", icon: Users, roles: ["admin"] },
   { href: "/admin/branches", label: "Branches", icon: Building2, roles: ["admin"] },
+  { href: "/admin/branch-goals", label: "Branch Goals", icon: Target, roles: ["admin"] },
   { href: "/admin/catalog", label: "Catalog", icon: Package, roles: ["admin"] },
   { href: "/admin/inventory", label: "Inventory", icon: PackageSearch, roles: ["admin"] },
   { href: "/admin/settings", label: "Settings", icon: Settings, roles: ["admin"] },

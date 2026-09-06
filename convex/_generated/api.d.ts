@@ -65,6 +65,7 @@ import type * as crons from "../crons.js";
 import type * as dashboards_birReports from "../dashboards/birReports.js";
 import type * as dashboards_branchAnalytics from "../dashboards/branchAnalytics.js";
 import type * as dashboards_branchDashboard from "../dashboards/branchDashboard.js";
+import type * as dashboards_branchTargets from "../dashboards/branchTargets.js";
 import type * as dashboards_comparisonAnalytics from "../dashboards/comparisonAnalytics.js";
 import type * as dashboards_demandIntelligence from "../dashboards/demandIntelligence.js";
 import type * as dashboards_hqAnalytics from "../dashboards/hqAnalytics.js";
@@ -223,6 +224,7 @@ declare const fullApi: ApiFromModules<{
   "dashboards/birReports": typeof dashboards_birReports;
   "dashboards/branchAnalytics": typeof dashboards_branchAnalytics;
   "dashboards/branchDashboard": typeof dashboards_branchDashboard;
+  "dashboards/branchTargets": typeof dashboards_branchTargets;
   "dashboards/comparisonAnalytics": typeof dashboards_comparisonAnalytics;
   "dashboards/demandIntelligence": typeof dashboards_demandIntelligence;
   "dashboards/hqAnalytics": typeof dashboards_hqAnalytics;
