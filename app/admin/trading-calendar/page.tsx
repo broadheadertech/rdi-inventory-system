@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { ChevronLeft, ChevronRight, Plus, X, CalendarDays } from "lucide-react";
+import { ChevronLeft, ChevronRight, Plus, X, CalendarDays, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -13,6 +13,9 @@ const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+
+// Philippine time offset — the calendar is reckoned in PHT throughout.
+const PHT_MS = 8 * 60 * 60 * 1000;
 
 const DAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -297,6 +300,17 @@ export default function TradingCalendarPage() {
                   </span>
                 )}
 
+                {/* Promotions running this day */}
+                {data.promotions.length > 0 && (
+                  <span
+                    className="mt-1 inline-flex w-fit items-center gap-1 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-medium leading-none text-violet-700"
+                    title={data.promotions.map((p) => `${p.name} — ${p.offer}`).join("\n")}
+                  >
+                    <Tag className="h-2.5 w-2.5" />
+                    {data.promotions.length}
+                  </span>
+                )}
+
                 {/* Event dots */}
                 {allDots.length > 0 && (
                   <div className="mt-auto flex flex-wrap gap-0.5 pt-1">
@@ -309,6 +323,68 @@ export default function TradingCalendarPage() {
             );
           })}
         </div>
+
+        {/* ── Promotion timeline ──────────────────────────────────────── */}
+        {calendarData.promotions.length > 0 && (
+          <div className="mt-4 space-y-2 rounded-lg border bg-card p-4">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Promotions this month
+              </p>
+              <p className="text-xs text-muted-foreground">
+                running on {calendarData.daysWithPromotions} of {calendarData.daysInMonth} days
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              {calendarData.promotions.map((p) => {
+                // Clamp the run to this month so the bar always fits the grid.
+                // A promo that began before this month starts at day 1; one with
+                // no end date, or ending later, runs to the last day.
+                const lastDay = calendarData.daysInMonth;
+                const dayInThisMonth = (ms: number): number | null => {
+                  const d = new Date(ms + PHT_MS);
+                  return d.getUTCFullYear() === calendarData.year &&
+                    d.getUTCMonth() === calendarData.month - 1
+                    ? d.getUTCDate()
+                    : null;
+                };
+                const startDay = dayInThisMonth(p.startDate) ?? 1;
+                const endDay =
+                  p.endDate === null ? lastDay : (dayInThisMonth(p.endDate) ?? lastDay);
+                const leftPct = ((startDay - 1) / lastDay) * 100;
+                const widthPct = ((endDay - startDay + 1) / lastDay) * 100;
+
+                return (
+                  <div key={p.id} className="flex items-center gap-3">
+                    <div className="w-40 shrink-0">
+                      <p className="truncate text-xs font-medium" title={p.name}>
+                        {p.name}
+                      </p>
+                      <p className="truncate text-[10px] text-muted-foreground">
+                        {p.offer}
+                        {p.allBranches ? " · all branches" : ` · ${p.branchNames.length} branch${p.branchNames.length === 1 ? "" : "es"}`}
+                      </p>
+                    </div>
+                    <div className="relative h-4 flex-1 rounded bg-muted/50">
+                      <div
+                        className={cn(
+                          "absolute top-0 h-4 rounded",
+                          p.isActive ? "bg-violet-500" : "bg-gray-300"
+                        )}
+                        style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                        title={`${p.name}: day ${startDay}–${endDay}${p.endDate === null ? " (open-ended)" : ""}`}
+                      />
+                    </div>
+                    <span className="w-16 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
+                      {startDay}–{endDay}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Detail panel ────────────────────────────────────────────────── */}
@@ -345,6 +421,37 @@ export default function TradingCalendarPage() {
                       </span>
                     </div>
                     <span className={cn("h-2 w-2 rounded-full shrink-0 mt-1.5", IMPACT_DOT[ev.demandImpact])} title={ev.demandImpact} />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Promotions running on this day */}
+            {selectedDay.promotions.length > 0 && (
+              <div className="rounded-lg border bg-card p-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Promotions
+                </p>
+                {selectedDay.promotions.map((p) => (
+                  <div key={p.id} className="space-y-0.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium leading-snug">{p.name}</p>
+                      {!p.isActive && (
+                        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600">
+                          paused
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs font-medium text-violet-700">{p.offer}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {p.allBranches
+                        ? "All branches"
+                        : p.branchNames.length <= 2
+                          ? p.branchNames.join(", ")
+                          : `${p.branchNames.slice(0, 2).join(", ")} +${p.branchNames.length - 2} more`}
+                      {p.isStart && " · starts today"}
+                      {p.isEnd && " · ends today"}
+                    </p>
                   </div>
                 ))}
               </div>

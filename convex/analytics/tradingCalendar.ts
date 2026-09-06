@@ -45,6 +45,46 @@ function toYYYYMMDD(year: number, month: number, day: number): string {
   return `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
 }
 
+// ─── Promotion display ────────────────────────────────────────────────────────
+
+type PromoDoc = {
+  promoType: string;
+  percentageValue?: number;
+  fixedAmountCentavos?: number;
+  buyQuantity?: number;
+  getQuantity?: number;
+  minSpendCentavos?: number;
+  tieredDiscountCentavos?: number;
+  pwpRewardPriceCentavos?: number;
+};
+
+/** Short human summary of the offer, e.g. "20% off" or "Buy 2 Get 1". */
+function describeOffer(p: PromoDoc): string {
+  const peso = (c: number) => `₱${(c / 100).toLocaleString("en-PH")}`;
+  switch (p.promoType) {
+    case "percentage":
+      return p.percentageValue ? `${p.percentageValue}% off` : "Percentage off";
+    case "fixedAmount":
+      return p.fixedAmountCentavos ? `${peso(p.fixedAmountCentavos)} off` : "Amount off";
+    case "buyXGetY":
+      return p.buyQuantity && p.getQuantity
+        ? `Buy ${p.buyQuantity} Get ${p.getQuantity}`
+        : "Buy X Get Y";
+    case "tiered":
+      return p.minSpendCentavos && p.tieredDiscountCentavos
+        ? `${peso(p.tieredDiscountCentavos)} off ${peso(p.minSpendCentavos)}+`
+        : "Tiered discount";
+    case "crossSell":
+      return "Cross-sell offer";
+    case "pwp":
+      return p.pwpRewardPriceCentavos
+        ? `Purchase with purchase at ${peso(p.pwpRewardPriceCentavos)}`
+        : "Purchase with purchase";
+    default:
+      return "Promotion";
+  }
+}
+
 // ─── getCalendarMonth ─────────────────────────────────────────────────────────
 // Returns daily revenue + static + custom events for every day in the month.
 
@@ -110,6 +150,33 @@ export const getCalendarMonth = query({
       customByDay.set(ev.date, arr);
     }
 
+    // Promotions overlapping this month. endDate absent means open-ended.
+    const allPromos = await ctx.db.query("promotions").collect();
+    const monthPromos = allPromos.filter((p) => {
+      const promoEnd = p.endDate ?? Number.MAX_SAFE_INTEGER;
+      return p.startDate < endMs && promoEnd >= startMs;
+    });
+
+    // Resolve branch names once so a day can say where a promo runs.
+    const branchNameById = new Map<string, string>(
+      allBranches.map((b) => [b._id as string, b.name])
+    );
+
+    const promoMeta = monthPromos.map((p) => ({
+      id: p._id as string,
+      name: p.name,
+      promoType: p.promoType,
+      offer: describeOffer(p),
+      isActive: p.isActive,
+      priority: p.priority,
+      startDate: p.startDate,
+      endDate: p.endDate ?? null,
+      allBranches: p.branchIds.length === 0,
+      branchNames: p.branchIds
+        .map((id) => branchNameById.get(id as string))
+        .filter((n): n is string => Boolean(n)),
+    }));
+
     // Build static holiday index for this month
     const staticByDay = new Map<string, StaticEvent[]>();
     for (const ev of PH_EVENTS) {
@@ -127,6 +194,16 @@ export const getCalendarMonth = query({
       const d = i + 1;
       const key = toYYYYMMDD(year, month, d);
       const rev = revenueByDay.get(key);
+
+      // A promotion counts for a day when its range covers any part of that
+      // PHT day, so a promo ending at noon still marks the day it ran.
+      const dayStart = Date.UTC(year, month - 1, d) - PHT;
+      const dayEnd = dayStart + 24 * 60 * 60 * 1000 - 1;
+      const dayPromos = promoMeta.filter((p) => {
+        const promoEnd = p.endDate ?? Number.MAX_SAFE_INTEGER;
+        return p.startDate <= dayEnd && promoEnd >= dayStart;
+      });
+
       return {
         date: key,
         day: d,
@@ -143,6 +220,19 @@ export const getCalendarMonth = query({
           type: e.type,
           notes: e.notes,
         })),
+        promotions: dayPromos.map((p) => ({
+          id: p.id,
+          name: p.name,
+          promoType: p.promoType,
+          offer: p.offer,
+          isActive: p.isActive,
+          allBranches: p.allBranches,
+          branchNames: p.branchNames,
+          // Lets the UI draw a run as a bar rather than repeating a dot.
+          isStart: p.startDate >= dayStart && p.startDate <= dayEnd,
+          isEnd:
+            p.endDate !== null && p.endDate >= dayStart && p.endDate <= dayEnd,
+        })),
       };
     });
 
@@ -155,6 +245,9 @@ export const getCalendarMonth = query({
       // 0=Sun, 1=Mon … 6=Sat — used by frontend to compute grid offset
       firstDayOfWeek: new Date(year, month - 1, 1).getDay(),
       days,
+      // Every promotion touching this month, for the timeline strip below the grid.
+      promotions: promoMeta.sort((a, b) => a.startDate - b.startDate),
+      daysWithPromotions: days.filter((d) => d.promotions.length > 0).length,
       totalRevenueCentavos: days.reduce((s, d) => s + d.revenueCentavos, 0),
       maxDayRevenueCentavos: maxDayRevenue,
     };
