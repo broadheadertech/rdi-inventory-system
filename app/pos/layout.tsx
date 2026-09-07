@@ -49,6 +49,23 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
   // logged out, so the strip must not offer them.
   const activeShift = useQuery(api.pos.shifts.getActiveShift);
   const hasOpenShift = activeShift !== undefined && activeShift !== null;
+
+  // On an enrolled register, signing out is a no-op the user can see: the device
+  // token is still there, so TerminalSessionGate signs straight back in as the
+  // terminal and the screen returns to where it was. Offering a button that
+  // visibly does nothing is worse than not offering it. Ending a cashier's
+  // session is "End Shift"; retiring the machine is revoking the terminal in
+  // the back office. Unbound devices — a manager on a laptop — still need a way
+  // out, so they keep it.
+  const [posDeviceToken, setPosDeviceToken] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setPosDeviceToken(getDeviceToken());
+  }, []);
+  const terminal = useQuery(
+    api.pos.terminals.whoAmI,
+    posDeviceToken === undefined ? "skip" : { deviceToken: posDeviceToken ?? undefined }
+  );
+  const isEnrolledTerminal = terminal?.enrolled === true;
   const router = useRouter();
   const pathname = usePathname();
   const { getToken } = useAuth();
@@ -325,7 +342,9 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
           {/* On an enrolled register this hands the machine back to its terminal
               identity: the device token stays, so TerminalSessionGate signs
               straight back in as the register rather than showing a login. */}
-          <SignOutButton className="w-auto border-0 px-2 py-0 text-xs" redirectTo="/pos" />
+          {!isEnrolledTerminal && (
+            <SignOutButton className="w-auto border-0 px-2 py-0 text-xs" />
+          )}
         </div>
         {children}
       </div>

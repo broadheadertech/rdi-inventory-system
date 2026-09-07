@@ -206,3 +206,52 @@
     background: #fff !important;
   }
 }
+
+/* ─── Thermal receipts (80mm) ───────────────────────────────────────────────
+   Sales receipts and BIR X/Y/Z readings are printed on the register's 80mm
+   thermal printer, not on A4. Without a @page size the browser lays them out
+   for a letter sheet, which is what made the Z-read come out as a narrow
+   column sliced across page breaks.
+
+   72mm is the printable width of a standard 80mm roll — the remaining 8mm is
+   the unprintable margin either side. */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 0;
+  }
+
+  /* Only the receipt prints. Everything else is screen furniture. */
+  body:has(.thermal-receipt) > *:not(:has(.thermal-receipt)) {
+    display: none !important;
+  }
+
+  .thermal-receipt {
+    width: 72mm !important;
+    max-width: 72mm !important;
+    margin: 0 !important;
+    padding: 2mm 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    background: #fff !important;
+    color: #000 !important;
+    /* Thermal heads render hairlines poorly; keep type crisp and dark. */
+    font-size: 10px !important;
+    line-height: 1.35 !important;
+  }
+
+  /* A receipt is one continuous roll — never paginate inside it. */
+  .thermal-receipt,
+  .thermal-receipt * {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Tailwind's borders print as grey; thermal printers only do black. */
+  .thermal-receipt .border,
+  .thermal-receipt .border-t,
+  .thermal-receipt .border-b,
+  .thermal-receipt .border-dashed {
+    border-color: #000 !important;
+  }
+}

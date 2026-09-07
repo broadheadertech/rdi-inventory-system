@@ -16,7 +16,7 @@ export type BirReadingData = {
     minNumber: string;
   };
   counters: {
-    resetCounter: string;
+    resetCounter: number;
     zCounter: number | null;
     storeCode: string;
     terminalNo: string;
@@ -113,7 +113,7 @@ export function BirReadingStub({ data }: { data: BirReadingData }) {
   const vat = data.vatComputations;
 
   return (
-    <div className="mx-auto w-[320px] bg-white p-4 font-mono text-[11px] leading-snug text-black">
+    <div className="thermal-receipt mx-auto w-[320px] bg-white p-4 font-mono text-[11px] leading-snug text-black">
       {/* Header */}
       <div className="text-center">
         <p className="font-bold uppercase">{data.header.businessName}</p>
@@ -129,7 +129,7 @@ export function BirReadingStub({ data }: { data: BirReadingData }) {
 
       {/* Counters */}
       <div className="space-y-0.5">
-        <Row label="Reset Counter No." value={c.resetCounter} />
+        <Row label="Reset Counter No." value={String(c.resetCounter).padStart(8, "0")} />
         {data.readingType === "Z" && (
           <Row label="Z-Counter" value={String(c.zCounter ?? "").padStart(8, "0")} />
         )}

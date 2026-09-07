@@ -176,7 +176,7 @@ function ReceiptViewerInner({
       <div className="flex-1 overflow-y-auto p-4">
         {tab === "receipt" ? (
           /* ── Sales Invoice / Order Slip ── */
-          <div className="mx-auto w-full max-w-[320px] rounded-md border bg-white p-4 font-mono text-xs shadow-sm">
+          <div className="thermal-receipt mx-auto w-full max-w-[320px] rounded-md border bg-white p-4 font-mono text-xs shadow-sm">
             {/* Header */}
             <div className="text-center">
               <p className="text-sm font-bold">{business.name || "RedBox Apparel"}</p>
@@ -392,7 +392,7 @@ function ReceiptViewerInner({
           </div>
         ) : (
           /* ── Gift Receipt ── */
-          <div className="mx-auto w-full max-w-[320px] rounded-md border bg-white p-4 font-mono text-xs shadow-sm">
+          <div className="thermal-receipt mx-auto w-full max-w-[320px] rounded-md border bg-white p-4 font-mono text-xs shadow-sm">
             {/* Header */}
             <div className="text-center">
               <p className="text-sm font-bold">

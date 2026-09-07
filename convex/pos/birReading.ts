@@ -268,7 +268,12 @@ export const getBirReading = query({
         minNumber: bir.minNumber || "",
       },
       counters: {
-        resetCounter: "Non-Resettable",
+        // BIR expects a numeric Reset Counter: the number of times the
+        // accumulated grand total has been reset. This system never resets it
+        // (the grand total is cumulative for the life of the machine), so it is
+        // always 0 — printed zero-padded like the Z-counter, per the standard,
+        // rather than as the words some vendors substitute.
+        resetCounter: 0,
         zCounter,
         storeCode: bir.storeCode || "001",
         terminalNo: bir.terminalNumber || "1",
