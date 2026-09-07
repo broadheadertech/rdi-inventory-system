@@ -3,6 +3,7 @@
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useRouter } from "next/navigation";
+import { SignOutButton } from "@/components/shared/SignOutButton";
 import { useEffect } from "react";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 
@@ -39,7 +40,12 @@ export default function DriverLayout({
 
   return (
     <ErrorBoundary>
-      <div className="theme-driver min-h-screen bg-background">{children}</div>
+      <div className="theme-driver min-h-screen bg-background">
+        <div className="flex justify-end px-4 py-2">
+          <SignOutButton className="w-auto" />
+        </div>
+        {children}
+      </div>
     </ErrorBoundary>
   );
 }

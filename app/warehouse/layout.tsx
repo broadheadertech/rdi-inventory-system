@@ -26,6 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
+import { SignOutButton } from "@/components/shared/SignOutButton";
 import { ViewAsBranchPicker } from "@/components/shared/ViewAsBranchPicker";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
@@ -163,6 +164,9 @@ export default function WarehouseLayout({
             <div className="flex items-center justify-between mt-1">
               <p className="text-sm text-muted-foreground">{currentUser.name}</p>
               <StaffNotificationBell />
+            </div>
+            <div className="mt-2">
+              <SignOutButton />
             </div>
             {FULL_NAV_ROLES.includes(currentUser.role) && (
               <div className="mt-3">

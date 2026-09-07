@@ -35,6 +35,7 @@ import { useState } from "react";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
+import { SignOutButton } from "@/components/shared/SignOutButton";
 import { ViewAsBranchPicker } from "@/components/shared/ViewAsBranchPicker";
 
 const ALLOWED_ROLES = ["admin"] as const;
@@ -199,6 +200,9 @@ export default function AdminLayout({
             </div>
             <div className="mt-3">
               <ViewAsBranchPicker />
+            </div>
+            <div className="mt-2">
+              <SignOutButton />
             </div>
           </div>
           <Separator />

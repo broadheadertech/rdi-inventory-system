@@ -34,6 +34,7 @@ import { Separator } from "@/components/ui/separator";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
+import { SignOutButton } from "@/components/shared/SignOutButton";
 
 const ALLOWED_ROLES = ["admin", "manager", "viewer", "warehouseStaff"];
 
@@ -182,6 +183,9 @@ export default function BranchLayout({
             <div className="flex items-center justify-between mt-1">
               <p className="text-sm text-muted-foreground">{currentUser.name}</p>
               <StaffNotificationBell />
+            </div>
+            <div className="mt-2">
+              <SignOutButton />
             </div>
           </div>
           <Separator />

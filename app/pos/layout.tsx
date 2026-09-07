@@ -8,6 +8,7 @@ import { useAuth } from "@clerk/nextjs";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { TerminalSessionGate } from "@/components/pos/TerminalSessionGate";
+import { SignOutButton } from "@/components/shared/SignOutButton";
 import { ConnectionIndicator } from "@/components/shared/ConnectionIndicator";
 import {
   registerServiceWorker,
@@ -285,6 +286,10 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
           <ConnectionIndicator
             status={syncStatus === "syncing" ? "syncing" : undefined}
           />
+          {/* On an enrolled register this hands the machine back to its terminal
+              identity: the device token stays, so TerminalSessionGate signs
+              straight back in as the register rather than showing a login. */}
+          <SignOutButton className="w-auto border-0 px-2 py-0 text-xs" redirectTo="/pos" />
         </div>
         {children}
       </div>
