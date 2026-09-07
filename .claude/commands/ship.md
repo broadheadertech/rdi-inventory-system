@@ -18,16 +18,35 @@ Read the actual diff of what changed (`git diff`, `git diff --cached`). You are
 writing a description of this work, so you need to know what it does — never
 describe a change you have not read.
 
-## 2. Regenerate before verifying
+## 2. Deploy the backend — codegen is NOT a deploy
 
 If anything under `convex/` changed:
 
 ```
-npx convex codegen
+npx convex dev --once
 ```
 
-`convex/_generated/api.d.ts` is committed, so it must match the functions being
-shipped. A stale generated file breaks the build for whoever pulls next.
+**This step is not optional and `npx convex codegen` does not replace it.** Codegen
+writes `_generated/api.d.ts` locally and typechecks against the deployment; it does
+not publish your functions. Skip this and everything typechecks, lints and builds
+green while the backend is still missing — the deployed frontend then calls
+functions that do not exist and dies inside an ErrorBoundary at runtime.
+
+`_generated/api.d.ts` is committed, so it must also match what you are shipping.
+
+**Verify the push actually landed** — do not trust the command's own output:
+
+```
+npx convex function-spec | grep -E "<one function you just added>"
+```
+
+If the new function is not listed, it did not deploy. Fix that before going further.
+
+**Which deployment.** `.env.local`'s `CONVEX_DEPLOYMENT` is what `npx convex dev`
+targets, and it is what the hosted site talks to. `npx convex deploy` targets
+*production*, which is a different deployment with its own env vars and its own
+(possibly empty) data — never assume the two are interchangeable, and never push to
+prod without the user explicitly asking for prod.
 
 ## 3. Verify — all three must pass
 
@@ -36,6 +55,10 @@ npx tsc --noEmit
 npx eslint <the files you changed>
 npx next build
 ```
+
+A green build says the *frontend compiles*. It says nothing about whether the
+backend those files call is deployed — that is step 2's job, and the two failures
+look identical from here.
 
 Lint only the changed files: the repo has pre-existing warnings elsewhere, and a
 full-repo lint buries real problems in noise. If any of the three fails, **fix it
