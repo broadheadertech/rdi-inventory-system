@@ -14,6 +14,9 @@ import {
   ShieldCheck,
   Copy,
   Check,
+  AlertTriangle,
+  Lock,
+  Users,
 } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -270,6 +273,7 @@ export default function BranchTerminalsPage() {
   const terminals = useQuery(api.pos.terminals.listTerminals, {
     includeInactive: showInactive,
   });
+  const flags = useQuery(api.pos.terminalSecurity.getSecurityFlags);
 
   if (branchCtx === undefined || terminals === undefined) {
     return (
@@ -309,6 +313,62 @@ export default function BranchTerminalsPage() {
           terminal also carries its own BIR machine registration (MIN, serial and PTU).
         </span>
       </p>
+
+      {/* ── Security flags ────────────────────────────────────────────── */}
+      {flags &&
+        (flags.duplicateTerminals.length > 0 ||
+          flags.sharedCashiers.length > 0 ||
+          flags.lockedAccounts.length > 0) && (
+          <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <h2 className="text-sm font-semibold">Needs a look</h2>
+            </div>
+
+            {flags.duplicateTerminals.map((d) => (
+              <div key={d.terminalId} className="text-sm">
+                <p className="font-medium">
+                  {d.label} has been used from {d.installCount} different browsers
+                  {d.concurrent && " — two of them at the same time"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {d.concurrent
+                    ? "Concurrent use strongly suggests the device token was copied. Revoke this terminal and re-register it on the real machine."
+                    : "This is normal after a reimage or a browser reset. If neither happened, treat the token as copied and re-register."}
+                </p>
+              </div>
+            ))}
+
+            {flags.sharedCashiers.map((c) => (
+              <div key={c.cashierAccountId} className="text-sm">
+                <p className="flex items-center gap-1.5 font-medium">
+                  <Users className="h-3.5 w-3.5" />
+                  {c.name} ({c.username}) is active on {c.terminalLabels.length} terminals
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {c.terminalLabels.join(", ")} — one person cannot be on two registers at
+                  once. Their login is likely being shared; reset the password.
+                </p>
+              </div>
+            ))}
+
+            {flags.lockedAccounts.map((a) => (
+              <div key={a.cashierAccountId} className="text-sm">
+                <p className="flex items-center gap-1.5 font-medium">
+                  <Lock className="h-3.5 w-3.5" />
+                  {a.name} ({a.username}) is locked out
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {a.failedAttempts} failed attempts. Unlocks{" "}
+                  {new Date(a.lockedUntil).toLocaleTimeString("en-PH", {
+                    timeStyle: "short",
+                  })}
+                  , or reset their password to clear it now.
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
 
       {adding && <GenerateCodeForm onDone={() => setAdding(false)} />}
 

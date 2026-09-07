@@ -175,6 +175,29 @@ export default defineSchema({
     .index("by_branch_period", ["branchId", "periodYm"])
     .index("by_branch", ["branchId"]),
 
+  // ─── POS terminal sessions (duplicate-use detection) ──────────────────────
+  // One row per browser install per terminal, upserted on activity rather than
+  // appended, so the table stays proportional to the number of tills.
+  //
+  // The device token is a bearer credential — a copy is indistinguishable from
+  // the original, and no server-side check can reject it. What the server CAN
+  // see is the same terminal reporting two different installIds, or one cashier
+  // account active in two places at once. Neither is proof, both are worth a
+  // manager's attention, so they surface as flags rather than blocks.
+  posTerminalSessions: defineTable({
+    terminalId: v.id("posTerminals"),
+    branchId: v.id("branches"),
+    installId: v.string(),              // per-browser, generated client-side
+    userId: v.id("users"),              // staff account the machine is signed in as
+    lastCashierAccountId: v.optional(v.id("cashierAccounts")),
+    firstSeenAt: v.number(),
+    lastSeenAt: v.number(),
+  })
+    .index("by_terminal", ["terminalId"])
+    .index("by_terminal_install", ["terminalId", "installId"])
+    .index("by_branch", ["branchId"])
+    .index("by_cashier", ["lastCashierAccountId"]),
+
   // ─── Branch ordering cycles ───────────────────────────────────────────────
   // A recurring window in which a store places its replenishment order.
   //

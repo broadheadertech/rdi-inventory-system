@@ -110,6 +110,7 @@ import type * as pos_receipts from "../pos/receipts.js";
 import type * as pos_reconciliation from "../pos/reconciliation.js";
 import type * as pos_returns from "../pos/returns.js";
 import type * as pos_shifts from "../pos/shifts.js";
+import type * as pos_terminalSecurity from "../pos/terminalSecurity.js";
 import type * as pos_terminals from "../pos/terminals.js";
 import type * as pos_terminalsActions from "../pos/terminalsActions.js";
 import type * as pos_transactions from "../pos/transactions.js";
@@ -270,6 +271,7 @@ declare const fullApi: ApiFromModules<{
   "pos/reconciliation": typeof pos_reconciliation;
   "pos/returns": typeof pos_returns;
   "pos/shifts": typeof pos_shifts;
+  "pos/terminalSecurity": typeof pos_terminalSecurity;
   "pos/terminals": typeof pos_terminals;
   "pos/terminalsActions": typeof pos_terminalsActions;
   "pos/transactions": typeof pos_transactions;

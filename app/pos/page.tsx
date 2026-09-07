@@ -13,7 +13,7 @@ import { ScanConfirmation, type ScanResult } from "@/components/pos/ScanConfirma
 import { ReadingReport, type ReadingData } from "@/components/pos/ReadingReport";
 import { POSCartProvider, usePOSCart } from "@/components/providers/POSCartProvider";
 import { TerminalEnrollment } from "@/components/pos/TerminalEnrollment";
-import { getDeviceToken, clearDeviceToken } from "@/lib/deviceToken";
+import { getDeviceToken, clearDeviceToken, getInstallId } from "@/lib/deviceToken";
 import { useConnectionStatus } from "@/components/shared/ConnectionIndicator";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { DiscountType } from "@/lib/constants";
@@ -97,6 +97,7 @@ function ShiftGate({
   const prevHandover = useQuery(api.cashier.auth.getPrevShiftHandover);
   const openShift = useMutation(api.pos.shifts.openShift);
   const verifyCashierLogin = useAction(api.cashier.authActions.verifyCashierLogin);
+  const recordActivity = useMutation(api.pos.terminalSecurity.recordActivity);
 
   // Device binding — read once on mount so SSR and the first client render agree.
   const [deviceToken, setDeviceTokenState] = useState<string | null | undefined>(undefined);
@@ -178,6 +179,17 @@ function ShiftGate({
         deviceToken: deviceToken ?? undefined,
       });
       setVerifiedAccount(account);
+
+      // Stamp the session with who just signed in, so the same cashier account
+      // appearing on two terminals at once can be flagged.
+      const installId = getInstallId();
+      if (installId && deviceToken) {
+        recordActivity({
+          deviceToken,
+          installId,
+          cashierAccountId: account.cashierAccountId,
+        }).catch(() => {});
+      }
       // Go to handover step if there's a prev shift, otherwise straight to funds
       if (prevHandover) {
         setStep("handover");

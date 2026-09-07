@@ -8,6 +8,7 @@ import { useAuth } from "@clerk/nextjs";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SignOutButton } from "@/components/shared/SignOutButton";
+import { getDeviceToken, getInstallId } from "@/lib/deviceToken";
 import { ConnectionIndicator } from "@/components/shared/ConnectionIndicator";
 import {
   registerServiceWorker,
@@ -41,6 +42,30 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
   const createTransaction = useMutation(api.pos.transactions.createTransaction);
   const flagSyncConflict = useMutation(api.pos.offlineSync.flagSyncConflict);
   const recordDrawer = useMutation(api.pos.drawer.recordDrawerOperation);
+  const recordActivity = useMutation(api.pos.terminalSecurity.recordActivity);
+
+  // Terminal heartbeat — lets the server notice one terminal being used from two
+  // browsers at once, which is what a copied device token looks like in practice.
+  // Slow on purpose: this is for spotting duplicates, not presence.
+  useEffect(() => {
+    const installId = getInstallId();
+    if (!installId) return;
+
+    let cancelled = false;
+    const beat = () => {
+      const deviceToken = getDeviceToken();
+      if (!deviceToken || cancelled) return;
+      // Best-effort — never let telemetry interrupt a sale.
+      recordActivity({ deviceToken, installId }).catch(() => {});
+    };
+
+    beat();
+    const timer = setInterval(beat, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [recordActivity]);
 
   async function handleNoSale() {
     try {
