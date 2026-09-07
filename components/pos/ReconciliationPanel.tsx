@@ -60,6 +60,7 @@ type ReconciliationResult = {
 export function ReconciliationPanel() {
   const todayDate = useMemo(() => getTodayPHT(), []);
   const summary = useQuery(api.pos.reconciliation.getDailySummary, {
+    deviceToken: getDeviceToken() ?? undefined,
     date: todayDate,
   });
   const zReading = useQuery(api.pos.readings.getZReading, { date: todayDate });
@@ -113,6 +114,7 @@ export function ReconciliationPanel() {
         date: todayDate,
         actualCashCentavos: physicalCashCentavos,
         notes: notes.trim() || undefined,
+        deviceToken: getDeviceToken() ?? undefined,
       });
       setResult(res);
     } catch (err) {

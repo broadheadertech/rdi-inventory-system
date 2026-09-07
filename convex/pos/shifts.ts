@@ -5,6 +5,18 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { POS_ROLES } from "../_helpers/permissions";
 import { requireTerminal, touchTerminal } from "../_helpers/requireTerminal";
 
+const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/** Today's business date in PHT, as YYYYMMDD — the key zReadings are filed under. */
+function todayPht(): string {
+  const d = new Date(Date.now() + PHT_OFFSET_MS);
+  return (
+    `${d.getUTCFullYear()}` +
+    String(d.getUTCMonth() + 1).padStart(2, "0") +
+    String(d.getUTCDate()).padStart(2, "0")
+  );
+}
+
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 async function computeShiftCash(
@@ -183,6 +195,36 @@ export const openShift = mutation({
         terminal
           ? `A shift is already open on ${terminal.label}. Close it first.`
           : "A shift is already open for this branch. Close it first."
+      );
+    }
+
+    // A Z-reading closes that machine's trading day. Selling after one is
+    // finalised would produce sales that appear in no Z-reading at all —
+    // finalizeZReading refuses to run twice for the same date, so they could
+    // never be reported. Blocked here rather than at the point of sale, so the
+    // cashier finds out before serving a customer.
+    const today = todayPht();
+    const closedToday = terminal
+      ? await ctx.db
+          .query("zReadings")
+          .withIndex("by_terminal_date", (q) =>
+            q.eq("terminalId", terminal._id).eq("date", today)
+          )
+          .first()
+      : (
+          await ctx.db
+            .query("zReadings")
+            .withIndex("by_branch_date", (q) =>
+              q.eq("branchId", branchId).eq("date", today)
+            )
+            .collect()
+        ).find((r) => r.terminalId === undefined);
+
+    if (closedToday) {
+      throw new ConvexError(
+        `The Z-reading for today has already been finalised${
+          terminal ? ` on ${terminal.label}` : ""
+        } (Z-counter ${String(closedToday.zCounter).padStart(8, "0")}). No further sales can be recorded today — the next shift starts tomorrow.`
       );
     }
 

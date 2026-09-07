@@ -1,6 +1,7 @@
 import { v, ConvexError } from "convex/values";
 import { query, mutation, QueryCtx, MutationCtx } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import type { Id } from "../_generated/dataModel";
@@ -46,19 +47,26 @@ function getPhilippineDateRange(dateStr: string): {
 async function _computeDailySummary(
   ctx: QueryCtx | MutationCtx,
   branchId: Id<"branches">,
-  dateStr: string
+  dateStr: string,
+  terminalId: Id<"posTerminals"> | null
 ) {
   const { startMs, endMs } = getPhilippineDateRange(dateStr);
 
-  const transactions = await ctx.db
-    .query("transactions")
-    .withIndex("by_branch_date", (q) =>
-      q
-        .eq("branchId", branchId)
-        .gte("createdAt", startMs)
-        .lte("createdAt", endMs)
-    )
-    .collect();
+  const transactions = (
+    await ctx.db
+      .query("transactions")
+      .withIndex("by_branch_date", (q) =>
+        q
+          .eq("branchId", branchId)
+          .gte("createdAt", startMs)
+          .lte("createdAt", endMs)
+      )
+      .collect()
+  ).filter((t) =>
+    // A reconciliation counts one drawer. Summing the branch would show Lane 1
+    // Lane 2's takings as well and make every count read as short.
+    terminalId ? t.terminalId === terminalId : t.terminalId === undefined
+  );
 
   let transactionCount = 0;
   let totalSalesCentavos = 0;
@@ -88,11 +96,15 @@ async function _computeDailySummary(
     }
   }
 
-  // Sum cash funds from all shifts that overlap this day
-  const allShifts = await ctx.db
-    .query("cashierShifts")
-    .withIndex("by_branch_status", (q) => q.eq("branchId", branchId))
-    .collect();
+  // Cash funds from this register's shifts that overlap the day.
+  const allShifts = (
+    await ctx.db
+      .query("cashierShifts")
+      .withIndex("by_branch_status", (q) => q.eq("branchId", branchId))
+      .collect()
+  ).filter((sh) =>
+    terminalId ? sh.terminalId === terminalId : sh.terminalId === undefined
+  );
 
   let totalCashFundCentavos = 0;
   for (const shift of allShifts) {
@@ -122,6 +134,7 @@ async function _computeDailySummary(
 export const getDailySummary = query({
   args: {
     date: v.string(),
+    deviceToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
@@ -131,7 +144,8 @@ export const getDailySummary = query({
 
     validateDateFormat(args.date);
     const branchId = scope.branchId!;
-    return _computeDailySummary(ctx, branchId, args.date);
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    return _computeDailySummary(ctx, branchId, args.date, terminal?._id ?? null);
   },
 });
 
@@ -142,6 +156,7 @@ export const submitReconciliation = mutation({
     date: v.string(),
     actualCashCentavos: v.number(),
     notes: v.optional(v.string()),
+    deviceToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
@@ -160,8 +175,15 @@ export const submitReconciliation = mutation({
 
     const branchId = scope.branchId!;
 
-    // Server-authoritative: independently calculate expected cash from transactions
-    const summary = await _computeDailySummary(ctx, branchId, args.date);
+    // Server-authoritative: independently calculate expected cash from
+    // transactions — for THIS register, matching what the cashier counted.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    const summary = await _computeDailySummary(
+      ctx,
+      branchId,
+      args.date,
+      terminal?._id ?? null
+    );
     const {
       transactionCount,
       totalSalesCentavos,
