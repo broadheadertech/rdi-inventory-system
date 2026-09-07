@@ -93,17 +93,24 @@ function ShiftGate({
   children: React.ReactNode;
   branchId: string | null | undefined;
 }) {
-  const shift = useQuery(api.pos.shifts.getActiveShift);
-  const prevHandover = useQuery(api.cashier.auth.getPrevShiftHandover);
-  const openShift = useMutation(api.pos.shifts.openShift);
-  const verifyCashierLogin = useAction(api.cashier.authActions.verifyCashierLogin);
-  const recordActivity = useMutation(api.pos.terminalSecurity.recordActivity);
-
   // Device binding — read once on mount so SSR and the first client render agree.
   const [deviceToken, setDeviceTokenState] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     setDeviceTokenState(getDeviceToken());
   }, []);
+
+  // A shift belongs to a register, so this query needs the token. Without it the
+  // server correctly reports "no shift on this terminal" and the gate keeps
+  // showing Open Shift even though the shift opened — the api-as-any cast in
+  // this file hides the missing argument from the typechecker.
+  const shift = useQuery(
+    api.pos.shifts.getActiveShift,
+    deviceToken === undefined ? "skip" : { deviceToken: deviceToken ?? undefined }
+  );
+  const prevHandover = useQuery(api.cashier.auth.getPrevShiftHandover);
+  const openShift = useMutation(api.pos.shifts.openShift);
+  const verifyCashierLogin = useAction(api.cashier.authActions.verifyCashierLogin);
+  const recordActivity = useMutation(api.pos.terminalSecurity.recordActivity);
 
   const terminal = useQuery(
     api.pos.terminals.whoAmI,
@@ -221,8 +228,10 @@ function ShiftGate({
         handoverChangeFundCentavos: prevHandover?.changeFundCentavos ?? undefined,
         handoverCashFundCentavos: prevHandover?.cashFundCentavos ?? undefined,
       });
-    } catch {
-      // handled by Convex
+    } catch (err) {
+      // Previously swallowed: a refusal here (a shift already open on this
+      // register, say) left the screen unchanged with no explanation at all.
+      setLoginError(getErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -363,6 +372,9 @@ function ShiftGate({
                 <p className="mt-1 text-xs text-muted-foreground">Petty cash for store expenses</p>
               </div>
             </div>
+            {loginError && (
+              <p className="text-center text-xs text-red-500">{loginError}</p>
+            )}
             <button
               onClick={handleOpenShift}
               disabled={isSubmitting}
@@ -475,8 +487,15 @@ function PosPageContent() {
       : "skip"
   );
 
-  // Shift data for cash balance display
-  const shift = useQuery(api.pos.shifts.getActiveShift);
+  // Shift data for cash balance display — terminal-scoped, same as the gate.
+  const [posDeviceToken, setPosDeviceToken] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setPosDeviceToken(getDeviceToken());
+  }, []);
+  const shift = useQuery(
+    api.pos.shifts.getActiveShift,
+    posDeviceToken === undefined ? "skip" : { deviceToken: posDeviceToken ?? undefined }
+  );
   const closeShiftMut = useMutation(api.pos.shifts.closeShift);
 
   // X-Reading / Y-Reading modals
