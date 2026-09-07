@@ -43,11 +43,9 @@ function formatDate(ms: number | null): string {
 
 function GenerateCodeForm({ onDone }: { onDone: () => void }) {
   const createEnrollmentCode = useAction(api.pos.terminalsActions.createEnrollmentCode);
-  const accounts = useQuery(api.pos.terminals.listTerminalAccounts);
 
   const [label, setLabel] = useState("");
   const [terminalNumber, setTerminalNumber] = useState("");
-  const [terminalUserId, setTerminalUserId] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [issued, setIssued] = useState<{ code: string; expiresAt: number } | null>(null);
@@ -57,7 +55,6 @@ function GenerateCodeForm({ onDone }: { onDone: () => void }) {
     const errs: Record<string, string> = {};
     if (!label.trim()) errs.label = "Required";
     if (!terminalNumber.trim()) errs.terminalNumber = "Required";
-    if (!terminalUserId) errs.terminalUserId = "Pick the account this register runs as";
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
       return;
@@ -69,7 +66,6 @@ function GenerateCodeForm({ onDone }: { onDone: () => void }) {
       const result = await createEnrollmentCode({
         label: label.trim(),
         terminalNumber: terminalNumber.trim(),
-        terminalUserId: terminalUserId as Id<"users">,
       });
       setIssued(result);
     } catch (err) {
@@ -170,41 +166,6 @@ function GenerateCodeForm({ onDone }: { onDone: () => void }) {
           )}
         </div>
       </div>
-
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">
-          Signs in as
-        </label>
-        <select
-          value={terminalUserId}
-          onChange={(e) => setTerminalUserId(e.target.value)}
-          className={cn(
-            "w-full rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary",
-            errors.terminalUserId ? "border-red-400" : "border-input"
-          )}
-        >
-          <option value="">Select a terminal account…</option>
-          {(accounts ?? []).map((a) => (
-            <option key={a._id} value={a._id}>
-              {a.name} ({a.email}){a.inUse ? " — already on another register" : ""}
-            </option>
-          ))}
-        </select>
-        {errors.terminalUserId && (
-          <p className="text-xs text-red-500">{errors.terminalUserId}</p>
-        )}
-        <p className="text-xs text-muted-foreground">
-          The register signs in as this account by itself and never signs out. Cashiers
-          never see it. Create one cashier-role account per register under Admin → Users.
-        </p>
-      </div>
-
-      {accounts !== undefined && accounts.length === 0 && (
-        <p className="rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-500">
-          This branch has no cashier-role accounts yet. Ask an admin to create one per
-          register (for example “Lane 1 — Makati”) before registering a terminal.
-        </p>
-      )}
 
       {errors.form && <p className="text-sm text-red-500">{errors.form}</p>}
 
@@ -343,8 +304,9 @@ export default function BranchTerminalsPage() {
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           Only registered terminals can open a shift or process sales. A cashier signing in
-          from a phone or an unregistered computer will be refused. Each terminal also
-          carries its own BIR machine registration (MIN, serial and PTU).
+          from a phone or an unregistered computer will be refused. A manager still signs
+          the machine in; registering identifies <em>which</em> register it is. Each
+          terminal also carries its own BIR machine registration (MIN, serial and PTU).
         </span>
       </p>
 

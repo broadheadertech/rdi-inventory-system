@@ -88,51 +88,6 @@ export const listTerminals = query({
   },
 });
 
-// ─── listTerminalAccounts ─────────────────────────────────────────────────────
-// Clerk accounts at this branch that a register can sign in as. These are
-// created by an admin like any other user; the manager picks one when
-// generating an enrollment code. Cashiers never see these credentials.
-
-export const listTerminalAccounts = query({
-  args: {},
-  handler: async (ctx) => {
-    const scope = await withBranchScope(ctx);
-    if (!(BRANCH_MANAGEMENT_ROLES as readonly string[]).includes(scope.user.role)) {
-      throw new ConvexError({ code: "UNAUTHORIZED" });
-    }
-
-    const branchId = scope.branchId;
-    if (!branchId) return [];
-
-    const users = await ctx.db
-      .query("users")
-      .withIndex("by_branch", (q) => q.eq("branchId", branchId))
-      .collect();
-
-    // Registers run as cashier-role accounts — the same role the POS routes allow.
-    const eligible = users.filter((u) => u.isActive && u.role === "cashier");
-
-    // Flag the ones already tied to a live register so the manager can tell
-    // which account is free.
-    const terminals = await ctx.db
-      .query("posTerminals")
-      .withIndex("by_branch", (q) => q.eq("branchId", branchId))
-      .collect();
-    const inUse = new Set(
-      terminals.filter((t) => t.isActive).map((t) => String(t.terminalUserId))
-    );
-
-    return eligible
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .map((u) => ({
-        _id: u._id,
-        name: u.name,
-        email: u.email,
-        inUse: inUse.has(String(u._id)),
-      }));
-  },
-});
-
 // ─── setTerminalActive ────────────────────────────────────────────────────────
 // Revoking a terminal immediately locks out the device holding its token.
 
@@ -190,7 +145,6 @@ export const _insertEnrollmentCode = internalMutation({
     code: v.string(),
     label: v.string(),
     terminalNumber: v.string(),
-    terminalUserId: v.id("users"),
     clerkSubject: v.string(),
   },
   handler: async (ctx, args) => {
@@ -217,23 +171,12 @@ export const _insertEnrollmentCode = internalMutation({
     if (duplicate && duplicate.isActive)
       throw new ConvexError(`Terminal number ${args.terminalNumber} is already in use at this branch`);
 
-    // The account the register will run as must belong to this branch.
-    const terminalUser = await ctx.db.get(args.terminalUserId);
-    if (!terminalUser || !terminalUser.isActive)
-      throw new ConvexError("Terminal account not found or deactivated");
-    if (terminalUser.branchId !== branchId)
-      throw new ConvexError("That account belongs to a different branch");
-    if (terminalUser.role !== "cashier")
-      throw new ConvexError("A register must run as a cashier-role account");
-
     const now = Date.now();
     await ctx.db.insert("terminalEnrollmentCodes", {
       branchId,
       code: args.code,
       label: args.label,
       terminalNumber: args.terminalNumber,
-      terminalUserId: terminalUser._id,
-      terminalClerkId: terminalUser.clerkId,
       createdById: user._id,
       createdAt: now,
       expiresAt: now + ENROLLMENT_CODE_TTL_MS,
@@ -259,12 +202,19 @@ export const _redeemEnrollmentCode = internalMutation({
   args: {
     code: v.string(),
     deviceToken: v.string(),
+    clerkSubject: v.string(),
   },
   handler: async (ctx, args) => {
-    // Deliberately unauthenticated: a fresh register has no Clerk session yet —
-    // getting one is the whole point of enrolling. The enrollment code is the
-    // credential, and it is single use, expires in 15 minutes, and can only be
-    // minted by an authenticated manager.
+    // A person is signing the machine in anyway, so enrolment requires a valid
+    // staff session on top of the code.
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkSubject))
+      .unique();
+    if (!user || !user.isActive) throw new ConvexError({ code: "UNAUTHORIZED" });
+    if (!(POS_ROLES as readonly string[]).includes(user.role))
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+
     const record = await ctx.db
       .query("terminalEnrollmentCodes")
       .withIndex("by_code", (q) => q.eq("code", args.code))
@@ -275,17 +225,11 @@ export const _redeemEnrollmentCode = internalMutation({
     if (record.expiresAt < Date.now())
       throw new ConvexError("This enrollment code has expired. Ask your manager for a new one.");
 
-    const terminalUser = await ctx.db.get(record.terminalUserId);
-    if (!terminalUser || !terminalUser.isActive)
-      throw new ConvexError("The terminal account for this code has been deactivated");
-
     const terminalId = await ctx.db.insert("posTerminals", {
       branchId: record.branchId,
       label: record.label,
       terminalNumber: record.terminalNumber,
       deviceToken: args.deviceToken,
-      terminalUserId: record.terminalUserId,
-      terminalClerkId: record.terminalClerkId,
       isActive: true,
       enrolledById: record.createdById,
       enrolledAt: Date.now(),
@@ -294,50 +238,6 @@ export const _redeemEnrollmentCode = internalMutation({
     // Burn the code before returning — a redeemed code is never reusable.
     await ctx.db.patch(record._id, { usedAt: Date.now(), usedTerminalId: terminalId });
 
-    return {
-      terminalId,
-      label: record.label,
-      terminalNumber: record.terminalNumber,
-      terminalClerkId: record.terminalClerkId,
-    };
-  },
-});
-
-// ─── _resolveTerminalSession (internal) ───────────────────────────────────────
-// Exchanges a device token for the Clerk account the register runs as. Backs
-// the silent sign-in that replaces the email/password screen at the till.
-
-export const _resolveTerminalSession = internalQuery({
-  args: { deviceToken: v.string() },
-  handler: async (ctx, args) => {
-    const terminal = await ctx.db
-      .query("posTerminals")
-      .withIndex("by_deviceToken", (q) => q.eq("deviceToken", args.deviceToken))
-      .unique();
-
-    if (!terminal) return { ok: false as const, reason: "NOT_ENROLLED" };
-    if (!terminal.isActive) return { ok: false as const, reason: "REVOKED" };
-
-    const user = await ctx.db.get(terminal.terminalUserId);
-    if (!user || !user.isActive) return { ok: false as const, reason: "ACCOUNT_DISABLED" };
-
-    return {
-      ok: true as const,
-      terminalClerkId: terminal.terminalClerkId,
-      label: terminal.label,
-    };
-  },
-});
-
-// ─── _touchTerminalByToken (internal) ─────────────────────────────────────────
-
-export const _touchTerminalByToken = internalMutation({
-  args: { deviceToken: v.string() },
-  handler: async (ctx, args) => {
-    const terminal = await ctx.db
-      .query("posTerminals")
-      .withIndex("by_deviceToken", (q) => q.eq("deviceToken", args.deviceToken))
-      .unique();
-    if (terminal) await ctx.db.patch(terminal._id, { lastSeenAt: Date.now() });
+    return { terminalId, label: record.label, terminalNumber: record.terminalNumber };
   },
 });

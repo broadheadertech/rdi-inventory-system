@@ -809,6 +809,9 @@ export default defineSchema({
   // must present that token on every POS operation. A cashier signing in from
   // an unenrolled device (phone, home PC) has no token and is refused.
   //
+  // A terminal has no account of its own: a manager or admin signs the machine
+  // in, and the device token proves *which register* the request came from.
+  //
   // The token is stored raw and indexed rather than hashed: it is 256-bit
   // random (not a guessable secret), it is only ever transmitted to Convex over
   // TLS, and an attacker holding a database dump already has full access by
@@ -822,11 +825,6 @@ export default defineSchema({
     label: v.string(),              // human name, e.g. "Lane 1"
     terminalNumber: v.string(),     // BIR terminal number, unique per branch
     deviceToken: v.string(),        // 256-bit random, held by the enrolled device
-    // Clerk account this register signs in as. The device token is exchanged for
-    // a Clerk sign-in ticket for this user, so no one ever types an email at the
-    // till. Nothing about this account is known to cashiers.
-    terminalUserId: v.id("users"),
-    terminalClerkId: v.string(),
     isActive: v.boolean(),
     enrolledById: v.id("users"),
     enrolledAt: v.number(),
@@ -850,10 +848,6 @@ export default defineSchema({
     code: v.string(),               // 8-char, single use
     label: v.string(),
     terminalNumber: v.string(),
-    // The Clerk account the enrolled register will run as, chosen by the
-    // manager when the code is generated.
-    terminalUserId: v.id("users"),
-    terminalClerkId: v.string(),
     createdById: v.id("users"),
     createdAt: v.number(),
     expiresAt: v.number(),

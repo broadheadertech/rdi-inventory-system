@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useAction } from "convex/react";
-import { useAuth, useSignIn } from "@clerk/nextjs";
 import { api } from "@/convex/_generated/api";
 import { setDeviceToken } from "@/lib/deviceToken";
 import { AlertTriangle, MonitorSmartphone, ShieldCheck } from "lucide-react";
@@ -28,12 +27,6 @@ function getErrorMessage(err: unknown): string {
  * `onSkip` is supplied only while POS_REQUIRE_TERMINAL is off, so registers can be
  * enrolled one at a time without the unenrolled ones being locked out mid-rollout.
  * Once the flag is on there is no skip and this screen is a hard gate.
- *
- * Enrollment needs no existing session: on a fresh register it also redeems the
- * returned Clerk ticket, so the device signs itself in as its terminal account
- * without anyone typing an email. When somebody is *already* signed in (a
- * manager binding a register mid-rollout) the ticket is left unredeemed so
- * their own session is not swapped out from under them.
  */
 export function TerminalEnrollment({
   onEnrolled,
@@ -45,8 +38,6 @@ export function TerminalEnrollment({
   notice?: string;
 }) {
   const enrollTerminal = useAction(api.pos.terminalsActions.enrollTerminal);
-  const { isSignedIn } = useAuth();
-  const { signIn, setActive } = useSignIn();
 
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
@@ -71,15 +62,6 @@ export function TerminalEnrollment({
         );
         return;
       }
-      // Fresh register — redeem the ticket so it is signed in as its terminal
-      // account straight away, with no sign-in screen in between.
-      if (!isSignedIn && result.ticket && signIn && setActive) {
-        const attempt = await signIn.create({ strategy: "ticket", ticket: result.ticket });
-        if (attempt.status === "complete" && attempt.createdSessionId) {
-          await setActive({ session: attempt.createdSessionId });
-        }
-      }
-
       onEnrolled();
     } catch (err) {
       setError(getErrorMessage(err));
