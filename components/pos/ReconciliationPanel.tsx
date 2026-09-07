@@ -140,7 +140,7 @@ export function ReconciliationPanel() {
     const isOver = result.differenceCentavos > 0;
 
     return (
-      <div className="flex min-h-screen items-center justify-center p-4">
+      <div className="pos-report flex min-h-screen items-center justify-center p-4">
         <div className="w-full max-w-md space-y-6 text-center">
           <CheckCircle2 className="mx-auto h-16 w-16 text-green-600" />
           <h1 className="text-2xl font-bold">Reconciliation Complete</h1>
@@ -230,7 +230,7 @@ export function ReconciliationPanel() {
 
   // ─── Main Form ──────────────────────────────────────────────────────────
   return (
-    <div className="mx-auto max-w-lg p-4">
+    <div className="pos-report mx-auto max-w-lg p-4">
       {/* Navigation */}
       <div className="mb-6">
         <Link

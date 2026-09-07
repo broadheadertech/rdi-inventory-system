@@ -43,6 +43,12 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
 
 function PosLayoutInner({ children }: { children: React.ReactNode }) {
   const currentUser = useQuery(api.auth.users.getCurrentUser);
+  // Every action in the top strip belongs to an open shift: a drawer operation
+  // with no shift has no cashier to attribute it to, and returns and demand
+  // logging are shift work too. With no shift open the cashier is effectively
+  // logged out, so the strip must not offer them.
+  const activeShift = useQuery(api.pos.shifts.getActiveShift);
+  const hasOpenShift = activeShift !== undefined && activeShift !== null;
   const router = useRouter();
   const pathname = usePathname();
   const { getToken } = useAuth();
@@ -261,7 +267,7 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
       <div className="theme-pos min-h-screen">
         <div className="flex items-center justify-end gap-4 px-4 py-1">
           {/* Demand log quick-access link — hidden when already on that page */}
-          {pathname !== "/pos/demand" && (
+          {hasOpenShift && pathname !== "/pos/demand" && (
             <Link
               href="/pos/demand"
               className="text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -270,7 +276,7 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
           {/* Returns quick-access link — hidden when already on that page */}
-          {pathname !== "/pos/returns" && (
+          {hasOpenShift && pathname !== "/pos/returns" && (
             <Link
               href="/pos/returns"
               className="text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -279,7 +285,8 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
           {/* Voids — manager/admin only */}
-          {(currentUser?.role === "admin" || currentUser?.role === "manager") &&
+          {hasOpenShift &&
+            (currentUser?.role === "admin" || currentUser?.role === "manager") &&
             pathname !== "/pos/voids" && (
               <Link
                 href="/pos/voids"
@@ -288,25 +295,29 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
                 Voids
               </Link>
             )}
-          {/* Drawer operations */}
-          <button
-            onClick={handleNoSale}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            No Sale
-          </button>
-          <button
-            onClick={() => handleCashMovement("payIn")}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Cash In
-          </button>
-          <button
-            onClick={() => handleCashMovement("payOut")}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Cash Out
-          </button>
+          {/* Drawer operations — only meaningful while a shift is open */}
+          {hasOpenShift && (
+            <>
+              <button
+                onClick={handleNoSale}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                No Sale
+              </button>
+              <button
+                onClick={() => handleCashMovement("payIn")}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cash In
+              </button>
+              <button
+                onClick={() => handleCashMovement("payOut")}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Cash Out
+              </button>
+            </>
+          )}
           {/* Task 5.5: Override status to "syncing" during offline queue replay */}
           <ConnectionIndicator
             status={syncStatus === "syncing" ? "syncing" : undefined}

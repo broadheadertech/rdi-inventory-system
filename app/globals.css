@@ -155,3 +155,54 @@
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* ─── Printing POS reports ──────────────────────────────────────────────────
+   The Z-reading and reconciliation views are laid out as a narrow column,
+   which suits a till screen but wastes two thirds of a sheet of paper and —
+   with no page-break rules — slices cards in half across page boundaries.
+
+   These rules only apply to print, so the on-screen layout is untouched. */
+@media print {
+  /* Chrome that has no meaning on paper. */
+  nav,
+  aside,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Let the report use the full page rather than a phone-width column. */
+  .pos-report,
+  .pos-report > * {
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* min-h-screen forces a mostly blank first page when printing. */
+  .pos-report {
+    min-height: 0 !important;
+    display: block !important;
+  }
+
+  /* Keep a card, table or row whole rather than split across two pages. */
+  .pos-report section,
+  .pos-report table,
+  .pos-report thead,
+  .pos-report tr,
+  .pos-report .rounded-lg,
+  .pos-report .rounded-xl,
+  .pos-report .border {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Tinted cards and shadows cost ink and add nothing on paper. */
+  .pos-report * {
+    box-shadow: none !important;
+  }
+
+  body {
+    background: #fff !important;
+  }
+}

@@ -131,6 +131,14 @@ export const getPrevShiftHandover = query({
 
     if (!lastShift) return null;
 
+    // A handover passes the drawer from one cashier to the next mid-trading.
+    // An end-of-day close is the opposite: the Z-reading is finalised, the
+    // drawer is counted and the cash is banked. Presenting yesterday's closing
+    // balance to the next morning's cashier asks them to acknowledge money that
+    // is no longer in the till, and rolls a reconciled day forward into an
+    // unreconciled one. After endOfDay the next shift starts on its own float.
+    if (lastShift.closeType === "endOfDay") return null;
+
     // Resolve cashier name
     let cashierName = "Unknown";
     if (lastShift.cashierAccountId) {
