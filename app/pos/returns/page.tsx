@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useConvex } from "convex/react";
+import { getDeviceToken } from "@/lib/deviceToken";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
@@ -80,7 +81,15 @@ type Step = "lookup" | "select_items" | "reasons" | "type" | "confirm";
 export default function ReturnsPage() {
   const convex = useConvex();
   const processReturn = useMutation(api.pos.returns.processReturn);
-  const shift = useQuery(api.pos.shifts.getActiveShift);
+  // Returns belong to the register that is open, same as a sale.
+  const [deviceToken, setDeviceTokenState] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setDeviceTokenState(getDeviceToken());
+  }, []);
+  const shift = useQuery(
+    api.pos.shifts.getActiveShift,
+    deviceToken === undefined ? "skip" : { deviceToken: deviceToken ?? undefined }
+  );
 
   const [step, setStep] = useState<Step>("lookup");
   const [receiptInput, setReceiptInput] = useState("");

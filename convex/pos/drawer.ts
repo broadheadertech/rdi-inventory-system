@@ -3,11 +3,13 @@
 import { mutation } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 
 export const recordDrawerOperation = mutation({
   args: {
+    deviceToken: v.optional(v.string()),
     type: v.union(v.literal("noSale"), v.literal("payIn"), v.literal("payOut")),
     amountCentavos: v.optional(v.number()),
     reason: v.optional(v.string()),
@@ -34,7 +36,10 @@ export const recordDrawerOperation = mutation({
     }
 
     const now = Date.now();
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+
     const id = await ctx.db.insert("drawerOperations", {
+      terminalId: terminal?._id,
       branchId,
       cashierId: scope.userId,
       type: args.type,

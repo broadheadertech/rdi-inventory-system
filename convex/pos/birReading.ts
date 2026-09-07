@@ -7,6 +7,7 @@
 import { query, QueryCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { removeVat, calculateVat } from "../_helpers/taxCalculations";
 import type { Doc } from "../_generated/dataModel";
@@ -136,6 +137,7 @@ export const getBirReading = query({
     readingType: v.union(v.literal("X"), v.literal("Y"), v.literal("Z")),
     date: v.optional(v.string()),       // YYYYMMDD (Z)
     shiftId: v.optional(v.id("cashierShifts")), // (Y)
+    deviceToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
@@ -147,6 +149,17 @@ export const getBirReading = query({
 
     const dateStr = args.date ?? getTodayPHT();
 
+    // BIR registers machines, not stores: a reading covers ONE register. Every
+    // machine has its own MIN, PTU, Z-counter, SI series and non-resettable
+    // grand total, so folding two lanes into one reading would report figures
+    // that reconcile against neither machine's MIN.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+
+    // Sales made before terminal binding have no terminalId and can only be
+    // reported branch-wide; they are never mixed into a machine's figures.
+    const forThisTerminal = (t: Doc<"transactions">) =>
+      terminal ? t.terminalId === terminal._id : t.terminalId === undefined;
+
     // Select transactions for the reading window (and remember the window bounds)
     let txns: Doc<"transactions">[] = [];
     let winStart = 0;
@@ -155,12 +168,14 @@ export const getBirReading = query({
       const { startMs, endMs } = dateRange(dateStr);
       winStart = startMs;
       winEnd = endMs;
-      txns = await ctx.db
-        .query("transactions")
-        .withIndex("by_branch_date", (q) =>
-          q.eq("branchId", branchId).gte("createdAt", startMs).lte("createdAt", endMs)
-        )
-        .collect();
+      txns = (
+        await ctx.db
+          .query("transactions")
+          .withIndex("by_branch_date", (q) =>
+            q.eq("branchId", branchId).gte("createdAt", startMs).lte("createdAt", endMs)
+          )
+          .collect()
+      ).filter(forThisTerminal);
     } else if (args.readingType === "Y" && args.shiftId) {
       const shift = await ctx.db.get(args.shiftId);
       if (!shift) return null;
@@ -173,7 +188,9 @@ export const getBirReading = query({
           q.eq("branchId", shift.branchId).gte("createdAt", shift.openedAt).lte("createdAt", endMs)
         )
         .collect();
-      txns = all.filter((t) => (t.cashierId as string) === (shift.cashierId as string));
+      txns = all.filter(
+        (t) => (t.cashierId as string) === (shift.cashierId as string) && forThisTerminal(t)
+      );
     } else {
       // X — current open shift for this cashier
       const shift = await ctx.db
@@ -190,7 +207,9 @@ export const getBirReading = query({
           q.eq("branchId", branchId).gte("createdAt", shift.openedAt)
         )
         .collect();
-      txns = all.filter((t) => (t.cashierId as string) === (scope.userId as string));
+      txns = all.filter(
+        (t) => (t.cashierId as string) === (scope.userId as string) && forThisTerminal(t)
+      );
     }
 
     const agg = await aggregate(ctx, txns);
@@ -232,15 +251,40 @@ export const getBirReading = query({
     let oldGrandTotalCentavos: number | null = null;
     let newGrandTotalCentavos: number | null = null;
     if (args.readingType === "Z") {
-      const finalized = await ctx.db
-        .query("zReadings")
-        .withIndex("by_branch_date", (q) => q.eq("branchId", branchId).eq("date", dateStr))
-        .first();
-      const lastZ = await ctx.db
-        .query("zReadings")
-        .withIndex("by_branch", (q) => q.eq("branchId", branchId))
-        .order("desc")
-        .first();
+      // Both the Z-counter and the accumulated grand total belong to the
+      // machine. The grand total is the figure an examiner reconciles against
+      // that machine's MIN, so a branch-wide total would reconcile against
+      // nothing. Readings taken before terminals existed stay on the branch
+      // sequence and are never folded into a machine's.
+      const finalized = terminal
+        ? await ctx.db
+            .query("zReadings")
+            .withIndex("by_terminal_date", (q) =>
+              q.eq("terminalId", terminal._id).eq("date", dateStr)
+            )
+            .first()
+        : (
+            await ctx.db
+              .query("zReadings")
+              .withIndex("by_branch_date", (q) =>
+                q.eq("branchId", branchId).eq("date", dateStr)
+              )
+              .collect()
+          ).find((r) => r.terminalId === undefined) ?? null;
+
+      const lastZ = terminal
+        ? await ctx.db
+            .query("zReadings")
+            .withIndex("by_terminal", (q) => q.eq("terminalId", terminal._id))
+            .order("desc")
+            .first()
+        : (
+            await ctx.db
+              .query("zReadings")
+              .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+              .order("desc")
+              .collect()
+          ).find((r) => r.terminalId === undefined) ?? null;
       if (finalized) {
         zCounter = finalized.zCounter;
         oldGrandTotalCentavos = finalized.previousGrandTotalCentavos;
@@ -264,8 +308,10 @@ export const getBirReading = query({
         businessName: bir.businessName || "RETAIL DYNAMICS INDUSTRIES INC.",
         address: bir.businessAddress || branch?.address || "",
         vatRegTin: bir.tin || "",
-        serialNumber: bir.serialNumber || "",
-        minNumber: bir.minNumber || "",
+        // Per-machine values live on posTerminals; the branch config keeps only
+        // establishment data (name, address, TIN, store code).
+        serialNumber: terminal?.serialNumber || bir.serialNumber || "",
+        minNumber: terminal?.minNumber || bir.minNumber || "",
       },
       counters: {
         // BIR expects a numeric Reset Counter: the number of times the
@@ -276,7 +322,7 @@ export const getBirReading = query({
         resetCounter: 0,
         zCounter,
         storeCode: bir.storeCode || "001",
-        terminalNo: bir.terminalNumber || "1",
+        terminalNo: terminal?.terminalNumber || bir.terminalNumber || "1",
         date: dateStr,
         generatedAt: Date.now(),
         beginningSI: agg.beginningSI,

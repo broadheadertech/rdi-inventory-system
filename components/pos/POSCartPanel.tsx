@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
 import { api } from "@/convex/_generated/api";
+import { getDeviceToken } from "@/lib/deviceToken";
 import { toast } from "sonner";
 import {
   ShoppingCart,
@@ -1121,6 +1122,7 @@ function PaymentPanel({
 
     try {
       const result = await createTransaction({
+        deviceToken: getDeviceToken() ?? undefined,
         items: items.map((i) => ({
           variantId: i.variantId,
           quantity: i.quantity,

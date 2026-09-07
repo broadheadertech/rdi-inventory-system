@@ -4,6 +4,7 @@ import type { MutationCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES, requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { calculateTaxBreakdown } from "../_helpers/taxCalculations";
@@ -15,18 +16,30 @@ import {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
- * Issue the next continuous, non-resetting invoice serial for a branch.
- * The counter document is read + incremented within this serializable mutation,
- * so concurrent sales can't collide and the series never resets (BIR requirement).
+ * Issue the next continuous, non-resetting invoice serial.
+ *
+ * BIR assigns an SI series per registered machine, so each terminal keeps its
+ * own counter; a device with no terminal falls back to the branch series that
+ * predates terminal binding. The counter document is read and incremented
+ * inside this serializable mutation, so concurrent sales cannot collide and the
+ * series never resets.
  */
 async function nextInvoiceNumber(
   ctx: MutationCtx,
-  branchId: Id<"branches">
+  branchId: Id<"branches">,
+  terminalId: Id<"posTerminals"> | undefined
 ): Promise<string> {
-  const counter = await ctx.db
-    .query("invoiceCounters")
-    .withIndex("by_branch", (q) => q.eq("branchId", branchId))
-    .unique();
+  const counter = terminalId
+    ? await ctx.db
+        .query("invoiceCounters")
+        .withIndex("by_terminal", (q) => q.eq("terminalId", terminalId))
+        .unique()
+    : (
+        await ctx.db
+          .query("invoiceCounters")
+          .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+          .collect()
+      ).find((c) => c.terminalId === undefined);
 
   let seq: number;
   if (counter) {
@@ -36,6 +49,7 @@ async function nextInvoiceNumber(
     seq = 1;
     await ctx.db.insert("invoiceCounters", {
       branchId,
+      terminalId,
       nextSeq: 2,
       updatedAt: Date.now(),
     });
@@ -48,6 +62,7 @@ async function nextInvoiceNumber(
 
 export const createTransaction = mutation({
   args: {
+    deviceToken: v.optional(v.string()),
     items: v.array(
       v.object({
         variantId: v.id("variants"),
@@ -332,8 +347,11 @@ export const createTransaction = mutation({
       }
     }
 
-    // 8. Generate a continuous, non-resetting invoice number (per branch).
-    const receiptNumber = await nextInvoiceNumber(ctx, branchId);
+    // 8. Resolve which register rang this up, then issue that machine's next
+    //    invoice serial. The terminal is stamped on the sale so the Z-reading
+    //    can report per machine, as BIR registers them.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    const receiptNumber = await nextInvoiceNumber(ctx, branchId, terminal?._id);
 
     // 9. Insert transaction record
     const cashPortion = args.splitPayment
@@ -346,6 +364,7 @@ export const createTransaction = mutation({
 
     const transactionId = await ctx.db.insert("transactions", {
       branchId,
+      terminalId: terminal?._id,
       cashierId: scope.userId,
       receiptNumber,
       subtotalCentavos: taxBreakdown.subtotalCentavos,

@@ -499,7 +499,10 @@ function PosPageContent() {
   const handleEndShift = useCallback(async (closeType: "turnover" | "endOfDay") => {
     setIsClosingShift(true);
     try {
-      const result = await closeShiftMut({ closeType });
+      const result = await closeShiftMut({
+        closeType,
+        deviceToken: getDeviceToken() ?? undefined,
+      });
       setShowEndShiftModal(false);
       if (result?.shiftId) {
         setYReadingShiftId(result.shiftId);

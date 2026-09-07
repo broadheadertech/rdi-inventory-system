@@ -10,14 +10,25 @@ import { requireTerminal, touchTerminal } from "../_helpers/requireTerminal";
 async function computeShiftCash(
   ctx: QueryCtx,
   branchId: Id<"branches">,
-  shift: { openedAt: number; changeFundCentavos?: number; cashFundCentavos: number }
+  shift: {
+    openedAt: number;
+    changeFundCentavos?: number;
+    cashFundCentavos: number;
+    terminalId?: Id<"posTerminals">;
+  }
 ) {
-  const txns = await ctx.db
+  const all = await ctx.db
     .query("transactions")
     .withIndex("by_branch_date", (q) =>
       q.eq("branchId", branchId).gte("createdAt", shift.openedAt)
     )
     .collect();
+
+  // A drawer holds only what its own register took. Counting the branch would
+  // show Lane 1 the sum of every lane and make its cash count read as short.
+  const txns = shift.terminalId
+    ? all.filter((t) => t.terminalId === shift.terminalId)
+    : all;
 
   let cashSalesCentavos = 0;
   let gcashSalesCentavos = 0;
@@ -56,8 +67,8 @@ async function computeShiftCash(
 // Returns the currently open shift for this branch (one at a time per branch).
 
 export const getActiveShift = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { deviceToken: v.optional(v.string()) },
+  handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
       throw new ConvexError({ code: "UNAUTHORIZED" });
@@ -66,12 +77,30 @@ export const getActiveShift = query({
     const branchId = scope.branchId;
     if (!branchId) return null;
 
-    const shift = await ctx.db
-      .query("cashierShifts")
-      .withIndex("by_branch_status", (q) =>
-        q.eq("branchId", branchId).eq("status", "open")
-      )
-      .first();
+    // A shift belongs to a register, not to a store. On an enrolled terminal
+    // only that terminal's shift counts, so Lane 2 does not walk into Lane 1's
+    // open shift — which would let it trade with no cashier login and file its
+    // sales under Lane 1's cashier.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+
+    const shift = terminal
+      ? await ctx.db
+          .query("cashierShifts")
+          .withIndex("by_terminal_status", (q) =>
+            q.eq("terminalId", terminal._id).eq("status", "open")
+          )
+          .first()
+      : // Unbound device: fall back to the branch's open shift, and only ever
+        // to one that predates terminals, so an enrolled lane's shift is never
+        // picked up by a laptop.
+        (
+          await ctx.db
+            .query("cashierShifts")
+            .withIndex("by_branch_status", (q) =>
+              q.eq("branchId", branchId).eq("status", "open")
+            )
+            .collect()
+        ).find((sh) => sh.terminalId === undefined) ?? null;
 
     if (!shift) return null;
 
@@ -132,16 +161,29 @@ export const openShift = mutation({
     // Device binding — a shift may only be opened from an enrolled register.
     const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
 
-    // Only one open shift per branch at a time
-    const existing = await ctx.db
-      .query("cashierShifts")
-      .withIndex("by_branch_status", (q) =>
-        q.eq("branchId", branchId).eq("status", "open")
-      )
-      .first();
+    // One open shift per register — or per branch on an unbound device.
+    const existing = terminal
+      ? await ctx.db
+          .query("cashierShifts")
+          .withIndex("by_terminal_status", (q) =>
+            q.eq("terminalId", terminal._id).eq("status", "open")
+          )
+          .first()
+      : (
+          await ctx.db
+            .query("cashierShifts")
+            .withIndex("by_branch_status", (q) =>
+              q.eq("branchId", branchId).eq("status", "open")
+            )
+            .collect()
+        ).find((sh) => sh.terminalId === undefined);
 
     if (existing) {
-      throw new ConvexError("A shift is already open for this branch. Close it first.");
+      throw new ConvexError(
+        terminal
+          ? `A shift is already open on ${terminal.label}. Close it first.`
+          : "A shift is already open for this branch. Close it first."
+      );
     }
 
     const shiftId = await ctx.db.insert("cashierShifts", {
@@ -172,6 +214,7 @@ export const closeShift = mutation({
   args: {
     closeType: v.optional(v.union(v.literal("turnover"), v.literal("endOfDay"))),
     notes: v.optional(v.string()),
+    deviceToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
@@ -182,23 +225,41 @@ export const closeShift = mutation({
     const branchId = scope.branchId;
     if (!branchId) throw new ConvexError("No branch assigned");
 
-    const shift = await ctx.db
-      .query("cashierShifts")
-      .withIndex("by_branch_status", (q) =>
-        q.eq("branchId", branchId).eq("status", "open")
-      )
-      .first();
+    // Close this register's shift. Closing by branch would let one lane end
+    // another lane's shift and bank its float.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+
+    const shift = terminal
+      ? await ctx.db
+          .query("cashierShifts")
+          .withIndex("by_terminal_status", (q) =>
+            q.eq("terminalId", terminal._id).eq("status", "open")
+          )
+          .first()
+      : (
+          await ctx.db
+            .query("cashierShifts")
+            .withIndex("by_branch_status", (q) =>
+              q.eq("branchId", branchId).eq("status", "open")
+            )
+            .collect()
+        ).find((sh) => sh.terminalId === undefined);
 
     if (!shift) {
       throw new ConvexError("No open shift to close");
     }
 
-    const txns = await ctx.db
+    const allTxns = await ctx.db
       .query("transactions")
       .withIndex("by_branch_date", (q) =>
         q.eq("branchId", branchId).gte("createdAt", shift.openedAt)
       )
       .collect();
+    // Only this register's sales — otherwise a second lane's takings inflate
+    // this drawer's expected cash and every count comes out short.
+    const txns = shift.terminalId
+      ? allTxns.filter((t) => t.terminalId === shift.terminalId)
+      : allTxns;
 
     let cashSales = 0;
     for (const t of txns) {

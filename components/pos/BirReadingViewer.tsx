@@ -10,15 +10,18 @@ export function BirReadingViewer({
   readingType,
   date,
   shiftId,
+  deviceToken,
 }: {
   readingType: "X" | "Y" | "Z";
   date?: string;
   shiftId?: Id<"cashierShifts">;
+  deviceToken?: string;
 }) {
   const data = useQuery(api.pos.birReading.getBirReading, {
     readingType,
     ...(date ? { date } : {}),
     ...(shiftId ? { shiftId } : {}),
+    ...(deviceToken ? { deviceToken } : {}),
   });
 
   if (data === undefined) {

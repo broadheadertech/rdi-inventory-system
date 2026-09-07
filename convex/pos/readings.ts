@@ -1,6 +1,7 @@
 import { v, ConvexError } from "convex/values";
 import { query, mutation, QueryCtx } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import type { Id, Doc } from "../_generated/dataModel";
@@ -505,7 +506,7 @@ export const getRecentClosedShifts = query({
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export const finalizeZReading = mutation({
-  args: { date: v.optional(v.string()) },
+  args: { date: v.optional(v.string()), deviceToken: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
@@ -518,11 +519,27 @@ export const finalizeZReading = mutation({
 
     const dateStr = args.date ?? getTodayPHT();
 
-    // One Z-reading per day (BIR end-of-day close)
-    const existing = await ctx.db
-      .query("zReadings")
-      .withIndex("by_branch_date", (q) => q.eq("branchId", branchId).eq("date", dateStr))
-      .first();
+    // A Z-reading closes ONE machine's day: each register has its own MIN,
+    // Z-counter and non-resettable grand total, so two lanes each finalise
+    // their own. Readings from before terminal binding stay branch-wide.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+
+    // One Z-reading per machine per day (BIR end-of-day close)
+    const existing = terminal
+      ? await ctx.db
+          .query("zReadings")
+          .withIndex("by_terminal_date", (q) =>
+            q.eq("terminalId", terminal._id).eq("date", dateStr)
+          )
+          .first()
+      : (
+          await ctx.db
+            .query("zReadings")
+            .withIndex("by_branch_date", (q) =>
+              q.eq("branchId", branchId).eq("date", dateStr)
+            )
+            .collect()
+        ).find((r) => r.terminalId === undefined);
     if (existing) {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -531,12 +548,19 @@ export const finalizeZReading = mutation({
     }
 
     const { startMs, endMs } = getPhilippineDateRange(dateStr);
-    const txns = await ctx.db
-      .query("transactions")
-      .withIndex("by_branch_date", (q) =>
-        q.eq("branchId", branchId).gte("createdAt", startMs).lte("createdAt", endMs)
-      )
-      .collect();
+    const txns = (
+      await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branchId).gte("createdAt", startMs).lte("createdAt", endMs)
+        )
+        .collect()
+    ).filter((t) =>
+      // Only this machine's sales roll into this machine's grand total. Sales
+      // from before terminal binding have no terminalId and belong to the
+      // branch-wide sequence.
+      terminal ? t.terminalId === terminal._id : t.terminalId === undefined
+    );
 
     let gross = 0, vatable = 0, vatExempt = 0, vat = 0, discount = 0;
     let cash = 0, gcash = 0, maya = 0, count = 0, voided = 0;
@@ -570,12 +594,21 @@ export const finalizeZReading = mutation({
       if (!lastSI || t.receiptNumber > lastSI) lastSI = t.receiptNumber;
     }
 
-    // Roll the accumulated grand total forward + increment the Z-counter
-    const last = await ctx.db
-      .query("zReadings")
-      .withIndex("by_branch", (q) => q.eq("branchId", branchId))
-      .order("desc")
-      .first();
+    // Roll this machine's accumulated grand total forward and increment its
+    // Z-counter. The counter never resets — only the day's figures do.
+    const last = terminal
+      ? await ctx.db
+          .query("zReadings")
+          .withIndex("by_terminal", (q) => q.eq("terminalId", terminal._id))
+          .order("desc")
+          .first()
+      : (
+          await ctx.db
+            .query("zReadings")
+            .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+            .order("desc")
+            .collect()
+        ).find((r) => r.terminalId === undefined);
     const previousGrandTotalCentavos = last?.accumulatedGrandTotalCentavos ?? 0;
     const zCounter = (last?.zCounter ?? 0) + 1;
     const accumulatedGrandTotalCentavos = previousGrandTotalCentavos + gross;
@@ -583,6 +616,7 @@ export const finalizeZReading = mutation({
     const now = Date.now();
     const zId = await ctx.db.insert("zReadings", {
       branchId,
+      terminalId: terminal?._id,
       zCounter,
       date: dateStr,
       beginningSI: firstSI ?? undefined,

@@ -26,7 +26,12 @@ export default defineSchema({
   // ─── Finalized Z-readings (end-of-day, with accumulated grand total) ───────
   zReadings: defineTable({
     branchId: v.id("branches"),
-    zCounter: v.number(),          // sequential Z-reading number per branch
+    // BIR registers machines, not stores: each terminal has its own MIN, PTU,
+    // Z-counter and non-resettable grand total. Optional because readings taken
+    // before terminals existed are branch-wide and must not be folded into a
+    // machine's sequence — see the by_terminal_date index.
+    terminalId: v.optional(v.id("posTerminals")),
+    zCounter: v.number(),          // sequential Z-reading number per terminal
     date: v.string(),              // YYYYMMDD (PHT)
     beginningSI: v.optional(v.string()),
     endingSI: v.optional(v.string()),
@@ -47,11 +52,14 @@ export default defineSchema({
     generatedAt: v.number(),
   })
     .index("by_branch", ["branchId"])
-    .index("by_branch_date", ["branchId", "date"]),
+    .index("by_branch_date", ["branchId", "date"])
+    .index("by_terminal", ["terminalId"])
+    .index("by_terminal_date", ["terminalId", "date"]),
 
   // ─── Drawer operations (No Sale / Cash Pay-In / Pay-Out) ──────────────────
   drawerOperations: defineTable({
     branchId: v.id("branches"),
+    terminalId: v.optional(v.id("posTerminals")),
     cashierId: v.id("users"),
     type: v.union(v.literal("noSale"), v.literal("payIn"), v.literal("payOut")),
     amountCentavos: v.number(), // 0 for noSale
@@ -70,11 +78,16 @@ export default defineSchema({
     .index("by_transaction", ["transactionId"]),
 
   // ─── Continuous (non-resetting) invoice number counter, per branch ─────────
+  // One continuous, non-resetting SI series per machine. The branch-keyed rows
+  // that predate terminals stay valid for unbound devices.
   invoiceCounters: defineTable({
     branchId: v.id("branches"),
+    terminalId: v.optional(v.id("posTerminals")),
     nextSeq: v.number(), // next serial to issue
     updatedAt: v.number(),
-  }).index("by_branch", ["branchId"]),
+  })
+    .index("by_branch", ["branchId"])
+    .index("by_terminal", ["terminalId"]),
 
   birRegistrations: defineTable({
     branchId: v.id("branches"),
@@ -425,6 +438,9 @@ export default defineSchema({
 
   transactions: defineTable({
     branchId: v.id("branches"),
+    // The register this sale was rung on. Absent on sales made before terminal
+    // binding existed; those can only ever be reported branch-wide.
+    terminalId: v.optional(v.id("posTerminals")),
     cashierId: v.id("users"),
     receiptNumber: v.string(),
     subtotalCentavos: v.number(),
@@ -471,6 +487,7 @@ export default defineSchema({
   })
     .index("by_branch", ["branchId"])
     .index("by_branch_date", ["branchId", "createdAt"])
+    .index("by_terminal_date", ["terminalId", "createdAt"])
     .index("by_cashier", ["cashierId"])
     .index("by_receiptNumber", ["receiptNumber"]),
 
@@ -923,6 +940,7 @@ export default defineSchema({
     handoverCashFundCentavos: v.optional(v.number()),
   })
     .index("by_branch_status", ["branchId", "status"])
+    .index("by_terminal_status", ["terminalId", "status"])
     .index("by_branch_opened", ["branchId", "openedAt"])
     .index("by_cashier_status", ["cashierId", "status"])
     .index("by_cashierAccount", ["cashierAccountId"])

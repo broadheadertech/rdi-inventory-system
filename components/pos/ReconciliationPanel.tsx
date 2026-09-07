@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { getDeviceToken } from "@/lib/deviceToken";
 import { ConvexError } from "convex/values";
 import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/formatters";
@@ -80,7 +81,8 @@ export function ReconciliationPanel() {
     setFinalizing(true);
     setError(null);
     try {
-      await finalizeZ({});
+      // Closes THIS register's day: its own Z-counter and grand total.
+      await finalizeZ({ deviceToken: getDeviceToken() ?? undefined });
     } catch (err) {
       setError(friendlyError(err, "Couldn't finalize the Z-reading."));
     } finally {
@@ -288,7 +290,7 @@ export function ReconciliationPanel() {
         </button>
         {showBirZ && (
           <div className="mt-3 rounded-lg border p-4">
-            <BirReadingViewer readingType="Z" date={todayDate} />
+            <BirReadingViewer readingType="Z" date={todayDate} deviceToken={getDeviceToken() ?? undefined} />
           </div>
         )}
       </div>

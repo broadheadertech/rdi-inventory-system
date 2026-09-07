@@ -43,11 +43,21 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
 
 function PosLayoutInner({ children }: { children: React.ReactNode }) {
   const currentUser = useQuery(api.auth.users.getCurrentUser);
+
+  // Read once on mount so SSR and the first client render agree.
+  const [posDeviceToken, setPosDeviceToken] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setPosDeviceToken(getDeviceToken());
+  }, []);
+
   // Every action in the top strip belongs to an open shift: a drawer operation
   // with no shift has no cashier to attribute it to, and returns and demand
   // logging are shift work too. With no shift open the cashier is effectively
   // logged out, so the strip must not offer them.
-  const activeShift = useQuery(api.pos.shifts.getActiveShift);
+  const activeShift = useQuery(
+    api.pos.shifts.getActiveShift,
+    posDeviceToken === undefined ? "skip" : { deviceToken: posDeviceToken ?? undefined }
+  );
   const hasOpenShift = activeShift !== undefined && activeShift !== null;
 
   // On an enrolled register, signing out is a no-op the user can see: the device
@@ -57,10 +67,6 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
   // session is "End Shift"; retiring the machine is revoking the terminal in
   // the back office. Unbound devices — a manager on a laptop — still need a way
   // out, so they keep it.
-  const [posDeviceToken, setPosDeviceToken] = useState<string | null | undefined>(undefined);
-  useEffect(() => {
-    setPosDeviceToken(getDeviceToken());
-  }, []);
   const terminal = useQuery(
     api.pos.terminals.whoAmI,
     posDeviceToken === undefined ? "skip" : { deviceToken: posDeviceToken ?? undefined }
@@ -104,7 +110,7 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
 
   async function handleNoSale() {
     try {
-      await recordDrawer({ type: "noSale" });
+      await recordDrawer({ type: "noSale", deviceToken: getDeviceToken() ?? undefined });
       toast.success("No Sale recorded — drawer opened");
     } catch {
       toast.error("Couldn't record No Sale");
@@ -123,7 +129,7 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
     }
     const reason = window.prompt("Reason (optional):") ?? undefined;
     try {
-      await recordDrawer({ type, amountCentavos, reason });
+      await recordDrawer({ type, amountCentavos, reason, deviceToken: getDeviceToken() ?? undefined });
       toast.success(type === "payIn" ? "Cash In recorded" : "Cash Out recorded");
     } catch {
       toast.error("Couldn't record cash movement");
@@ -185,6 +191,9 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
 
           await createTransaction({
             ...payload,
+            // Replayed offline sales still belong to the register that took
+            // them — this device — so the Z-read attributes them correctly.
+            deviceToken: getDeviceToken() ?? undefined,
             items: payload.items.map((item) => ({
               ...item,
               variantId: item.variantId as Id<"variants">,
