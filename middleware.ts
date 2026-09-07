@@ -18,6 +18,11 @@ const PUBLIC_PREFIXES = [
   "/wishlist",
   "/account",
   "/bootstrap",
+  // The POS signs itself in from its device token (TerminalSessionGate), so a
+  // register must be able to load /pos with no session. Access is still fully
+  // enforced: the layout checks the role, and every Convex function runs
+  // requireRole/withBranchScope plus terminal binding.
+  "/pos",
 ];
 
 const ROLE_ROUTE_ACCESS: Record<string, readonly string[]> = {

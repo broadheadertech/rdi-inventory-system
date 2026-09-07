@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
@@ -17,6 +17,8 @@ import {
   AlertTriangle,
   Lock,
   Users,
+  Clock,
+  RefreshCw,
 } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -54,6 +56,15 @@ function GenerateCodeForm({ onDone }: { onDone: () => void }) {
   const [issued, setIssued] = useState<{ code: string; expiresAt: number } | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // Ticks only while a code is on screen — no timer running behind the form.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!issued) return;
+    setNowMs(Date.now());
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [issued]);
+
   async function handleSubmit() {
     const errs: Record<string, string> = {};
     if (!label.trim()) errs.label = "Required";
@@ -80,18 +91,46 @@ function GenerateCodeForm({ onDone }: { onDone: () => void }) {
 
   // Code issued — show it for the manager to carry to the register.
   if (issued) {
-    const minutes = Math.max(0, Math.round((issued.expiresAt - Date.now()) / 60000));
+    const remainingMs = Math.max(0, issued.expiresAt - nowMs);
+    const expired = remainingMs === 0;
+    const mm = Math.floor(remainingMs / 60000);
+    const ss = Math.floor((remainingMs % 60000) / 1000);
+    // Under a minute is when someone is actually racing the clock.
+    const urgent = !expired && remainingMs < 60_000;
+
     return (
       <div className="space-y-4 rounded-lg border bg-card p-5">
         <div className="space-y-1">
           <h2 className="font-semibold">Enrollment code for {label.trim()}</h2>
           <p className="text-sm text-muted-foreground">
-            Type this code on the register itself. It works once and expires in {minutes}{" "}
-            minute{minutes === 1 ? "" : "s"}.
+            Type this code on the register itself. It works once.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* Countdown — a code that has quietly expired is worse than one that
+            says so, because the failure shows up on the register instead. */}
+        <div
+          className={cn(
+            "flex items-center justify-between rounded-lg border px-3 py-2 text-sm",
+            expired
+              ? "border-red-300 bg-red-50 text-red-700"
+              : urgent
+                ? "border-amber-300 bg-amber-50 text-amber-800"
+                : "border-transparent bg-muted/50 text-muted-foreground"
+          )}
+        >
+          <span className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5" />
+            {expired ? "This code has expired" : "Expires in"}
+          </span>
+          {!expired && (
+            <span className="font-mono text-base font-semibold tabular-nums">
+              {mm}:{String(ss).padStart(2, "0")}
+            </span>
+          )}
+        </div>
+
+        <div className={cn("flex items-center gap-3", expired && "opacity-40")}>
           <code className="flex-1 rounded-lg border bg-muted/50 px-4 py-4 text-center font-mono text-3xl tracking-[0.3em]">
             {issued.code}
           </code>
@@ -118,12 +157,37 @@ function GenerateCodeForm({ onDone }: { onDone: () => void }) {
           </button>
         </div>
 
-        <button
-          onClick={onDone}
-          className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-        >
-          Done
-        </button>
+        <div className="flex gap-2">
+          {expired ? (
+            <button
+              onClick={handleSubmit}
+              disabled={saving}
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
+              {saving ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4" />
+              )}
+              Generate a new code
+            </button>
+          ) : (
+            <button
+              onClick={onDone}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Done
+            </button>
+          )}
+          {expired && (
+            <button
+              onClick={onDone}
+              className="rounded-lg border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -169,6 +233,11 @@ function GenerateCodeForm({ onDone }: { onDone: () => void }) {
           )}
         </div>
       </div>
+
+      <p className="rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
+        The register gets its own identity automatically when the code is entered. There is
+        no account to create first, and nobody signs in at the till afterwards.
+      </p>
 
       {errors.form && <p className="text-sm text-red-500">{errors.form}</p>}
 
@@ -308,9 +377,8 @@ export default function BranchTerminalsPage() {
         <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
           Only registered terminals can open a shift or process sales. A cashier signing in
-          from a phone or an unregistered computer will be refused. A manager still signs
-          the machine in; registering identifies <em>which</em> register it is. Each
-          terminal also carries its own BIR machine registration (MIN, serial and PTU).
+          from a phone or an unregistered computer will be refused. Each terminal also
+          carries its own BIR machine registration (MIN, serial and PTU).
         </span>
       </p>
 

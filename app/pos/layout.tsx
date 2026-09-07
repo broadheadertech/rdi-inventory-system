@@ -7,6 +7,7 @@ import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
+import { TerminalSessionGate } from "@/components/pos/TerminalSessionGate";
 import { SignOutButton } from "@/components/shared/SignOutButton";
 import { getDeviceToken, getInstallId } from "@/lib/deviceToken";
 import { ConnectionIndicator } from "@/components/shared/ConnectionIndicator";
@@ -30,6 +31,17 @@ import { toast } from "sonner";
 const ALLOWED_ROLES = ["admin", "manager", "cashier", "warehouseStaff", "hqStaff"];
 
 export default function PosLayout({ children }: { children: React.ReactNode }) {
+  // The gate resolves *which register* this is before anything below runs, so
+  // no query fires — and no role redirect happens — while the device is still
+  // signing itself in.
+  return (
+    <TerminalSessionGate>
+      <PosLayoutInner>{children}</PosLayoutInner>
+    </TerminalSessionGate>
+  );
+}
+
+function PosLayoutInner({ children }: { children: React.ReactNode }) {
   const currentUser = useQuery(api.auth.users.getCurrentUser);
   const router = useRouter();
   const pathname = usePathname();
@@ -299,7 +311,10 @@ export default function PosLayout({ children }: { children: React.ReactNode }) {
           <ConnectionIndicator
             status={syncStatus === "syncing" ? "syncing" : undefined}
           />
-          <SignOutButton className="w-auto border-0 px-2 py-0 text-xs" />
+          {/* On an enrolled register this hands the machine back to its terminal
+              identity: the device token stays, so TerminalSessionGate signs
+              straight back in as the register rather than showing a login. */}
+          <SignOutButton className="w-auto border-0 px-2 py-0 text-xs" redirectTo="/pos" />
         </div>
         {children}
       </div>

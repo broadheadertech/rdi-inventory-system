@@ -11,28 +11,31 @@ Two things must line up before a sale can be rung:
 | Device token | Which register is this? | The **computer**, in `localStorage` |
 | Cashier sub-account | Who is on shift? | The **cashier**, username + password |
 
-A manager or admin signs the machine in; the device token proves *which register*
-the request came from. Registers do not have accounts of their own — that was tried
-and removed, because it meant creating an email-backed Clerk account per store to
-serve no purpose but to satisfy the auth provider.
+**Nobody ever types an email address at the till.** The register's Clerk session is
+obtained from its device token, not from a person. `TerminalSessionGate` exchanges
+the token for a short-lived Clerk sign-in ticket and redeems it silently, on first
+boot and every time the session later lapses — so a lane comes back on its own after
+a reboot or a power cut.
 
 A cashier only ever holds the second row. Their credentials do nothing on a device
 that has no device token, so there is nothing to take home.
 
-**Trade-off.** Because a person signs the machine in, the till holds whatever
-privileges that account has. Sign registers in with a low-privilege account, not a
-manager's, and use kiosk mode so nobody can navigate away from the POS.
-
 ## Enrolling a register
 
-1. Manager opens **Branch → POS Terminals → Register Terminal**.
-2. Enters a name (`Lane 1`) and the BIR terminal number (`01`), and generates a code.
-3. Signed in on the register itself, open `/pos` and type the 8-character code.
-4. The device stores a 256-bit token, issued once and never returned again.
+**Prerequisite:** one Clerk account per register, created by an admin under
+Admin → Users with role `cashier` and assigned to the branch (e.g. "Lane 1 — Makati").
+The register signs in as this account by itself. No person needs its password.
 
-Codes are single use and expire after 15 minutes. Redeeming one also requires a
-valid staff session — a person is present anyway, so there is no reason for it to
-be open.
+1. Manager opens **Branch → POS Terminals → Register Terminal**.
+2. Enters a name (`Lane 1`), the BIR terminal number (`01`), and picks which account
+   the register signs in as.
+3. On the register itself, open `/pos`. With no session and no token it shows the
+   enrollment screen. Type the 8-character code.
+4. The device stores a 256-bit token and signs itself in immediately. The token is
+   issued once and never returned again.
+
+Codes are single use and expire after 15 minutes. The code is the only credential
+needed at step 3 — that is deliberate, since a fresh register has no session yet.
 
 Revoking a terminal from the same screen locks that device out immediately: its next
 session request is refused and it falls back to the enrollment screen.
@@ -63,14 +66,27 @@ Skipping step 3 will take unenrolled lanes offline the moment step 4 lands.
 While the flag is off, an *unrecognised* token is still rejected — only a *missing*
 token is tolerated. A revoked device can never fall back to working.
 
-## Cashier accounts
+## Terminal accounts vs cashier accounts
 
-Cashiers must **not** have their own Clerk logins. They get a `cashierAccounts`
-record — username and password, no email, no Clerk identity — created under
-Branch → Cashiers. It only works at the ShiftGate, on an enrolled register.
+Cashiers must **not** have their own Clerk logins. Each register gets one Clerk
+account, and nobody ever signs into it by hand:
 
-If you have existing cashier Clerk accounts for real people, deactivate them. While
-they exist, a cashier can sign in from anywhere and the model is bypassed.
+| | Clerk account | Cashier sub-account |
+|---|---|---|
+| Belongs to | The register | The person |
+| Example | `lane1.makati@…` | `jdelacruz` |
+| Signed in by | The device token, automatically | The cashier, each shift |
+| Signs out | Never | End of every shift |
+| Managed in | Admin → Users | Branch → Cashiers |
+
+Because the register authenticates from its device token, the terminal account's
+password is never typed on the shop floor. Set a long random one, store it in a
+password manager, and do not enable Google sign-in for it — the account must belong
+to the business, not to an employee.
+
+If you have existing cashier Clerk accounts for real people, deactivate them once
+their branch is on terminal accounts. While they exist, a cashier can still sign in
+from anywhere and the whole model is bypassed.
 
 ## Kiosk mode (Windows Assigned Access)
 
@@ -95,6 +111,15 @@ takes about 30 minutes per machine.
 - Disable USB storage via Group Policy if the machine is unattended.
 
 **Exiting kiosk mode:** Ctrl+Alt+Del → sign out → sign in as the admin account.
+
+## Why `/pos` is a public route in middleware
+
+`middleware.ts` lets `/pos` through without a session, because a register must be
+able to reach the enrollment and self-sign-in screens before it has one. This does
+not weaken access control — middleware is routing-only by design in this codebase
+(see the comment in `middleware.ts`), and every POS Convex function still runs
+`requireRole` / `withBranchScope` plus terminal binding. The layout also redirects
+any signed-in user whose role is not a POS role.
 
 ## What is deliberately not enforced
 
