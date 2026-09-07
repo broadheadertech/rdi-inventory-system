@@ -111,11 +111,16 @@ export const enrollTerminal = action({
 
     const terminalClerkId = await createClerkTerminalUser(terminalEmail, terminalName);
 
+    // Held in a variable, not inlined into the mutation args: the caller has to
+    // receive it. This is the only time it is ever returned, and the device is
+    // not bound until the caller persists it.
+    const deviceToken = generateDeviceToken();
+
     let result;
     try {
       result = await ctx.runMutation(internal.pos.terminals._redeemEnrollmentCode, {
         code,
-        deviceToken: generateDeviceToken(),
+        deviceToken,
         terminalClerkId,
         terminalEmail,
         terminalName,
@@ -128,7 +133,7 @@ export const enrollTerminal = action({
     }
 
     const ticket = await createSignInTicket(terminalClerkId);
-    return { ...result, ticket };
+    return { ...result, deviceToken, ticket };
   },
 });
 

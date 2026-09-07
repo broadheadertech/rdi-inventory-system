@@ -64,6 +64,17 @@ export function TerminalEnrollment({
     try {
       const result = await enrollTerminal({ code: trimmed });
 
+      // Guard against the server not returning one: localStorage.setItem would
+      // happily store the string "undefined", which then reads back as an
+      // unrecognised token and is refused on every request — while the terminal
+      // row exists server-side, so the screen just asks to register again.
+      if (typeof result.deviceToken !== "string" || result.deviceToken.length < 32) {
+        setError(
+          "The server did not return a device token, so this machine was not bound. Ask your manager to revoke this terminal and issue a new code."
+        );
+        return;
+      }
+
       // The token is returned exactly once — persist before anything else.
       if (!setDeviceToken(result.deviceToken)) {
         setError(

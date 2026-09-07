@@ -23,8 +23,19 @@ export function relativeTime(ms: number): string {
 
 export function getErrorMessage(error: unknown): string {
   if (error instanceof ConvexError) {
-    const data = error.data as { message?: string };
-    return data?.message ?? "Unknown error";
+    // ConvexError payloads come in two shapes in this codebase:
+    //   throw new ConvexError("Username already taken")        → data is a string
+    //   throw new ConvexError({ code, message })               → data is an object
+    // Only the second was handled, so every plain-string error — which is most
+    // of the user-facing ones — surfaced as "Unknown error".
+    const data = error.data;
+    if (typeof data === "string" && data.trim()) return data;
+    if (data && typeof data === "object") {
+      const { message, code } = data as { message?: string; code?: string };
+      if (message) return message;
+      if (code) return code;
+    }
+    return "Something went wrong. Please try again.";
   }
-  return error instanceof Error ? error.message : "Unknown error";
+  return error instanceof Error ? error.message : "Something went wrong. Please try again.";
 }

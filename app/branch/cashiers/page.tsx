@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { cn } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 import { Plus, Pencil, KeyRound, UserX, UserCheck, X, Check, Loader2 } from "lucide-react";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -84,8 +84,7 @@ function AddCashierForm({
       await createCashier({ branchId, firstName, lastName, username, password });
       onDone();
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErrors({ submit: msg });
+      setErrors({ submit: getErrorMessage(e) });
     } finally {
       setSaving(false);
     }
@@ -154,7 +153,7 @@ function EditCashierRow({
       await updateCashier({ accountId: cashier._id, firstName, lastName, username });
       onDone();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -225,7 +224,7 @@ function ResetPasswordRow({
       await resetPassword({ accountId: cashier._id, newPassword });
       onDone();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(getErrorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -318,8 +317,23 @@ function CashierRow({ cashier }: { cashier: Cashier }) {
             <KeyRound className="h-3.5 w-3.5" />
           </button>
           <button
-            onClick={() => toggleActive({ accountId: cashier._id, isActive: !cashier.isActive })}
-            title={cashier.isActive ? "Deactivate" : "Reactivate"}
+            onClick={() => {
+              // Deactivating is not deleting: the record stays so its shifts and
+              // receipts keep resolving, and the username stays reserved. Say so,
+              // because a red icon reads as "delete".
+              if (
+                cashier.isActive &&
+                !window.confirm(
+                  `Deactivate ${cashier.firstName} ${cashier.lastName}?
+
+They will not be able to log in. The account is kept so past shifts and receipts still show who rang them up, and the username "${cashier.username}" stays reserved.`
+                )
+              ) {
+                return;
+              }
+              toggleActive({ accountId: cashier._id, isActive: !cashier.isActive });
+            }}
+            title={cashier.isActive ? "Deactivate (keeps shift history)" : "Reactivate"}
             className={cn(
               "p-1.5 rounded transition-colors",
               cashier.isActive
@@ -344,8 +358,14 @@ export default function BranchCashiersPage() {
 
   const cashiers = useQuery(
     api.branches.cashierAccounts.listCashiers,
-    { includeInactive: showInactive }
+    { includeInactive: true }
   );
+
+  // Filtering here rather than server-side lets the count mention accounts the
+  // list is hiding — without that, "0 cashiers" alongside a "username already
+  // taken" error is impossible to make sense of.
+  const inactiveCount = (cashiers ?? []).filter((c) => !c.isActive).length;
+  const visible = showInactive ? (cashiers ?? []) : (cashiers ?? []).filter((c) => c.isActive);
 
   if (branchCtx === undefined || cashiers === undefined) {
     return (
@@ -397,12 +417,17 @@ export default function BranchCashiersPage() {
           Show inactive
         </label>
         <span className="text-xs text-muted-foreground">
-          {cashiers.length} cashier{cashiers.length !== 1 ? "s" : ""}
+          {visible.length} cashier{visible.length !== 1 ? "s" : ""}
+          {!showInactive && inactiveCount > 0 && (
+            <span className="ml-1 text-amber-700">
+              · {inactiveCount} inactive hidden
+            </span>
+          )}
         </span>
       </div>
 
       {/* Table */}
-      {cashiers.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="rounded-lg border p-10 text-center text-sm text-muted-foreground">
           {showInactive ? "No cashier accounts yet." : "No active cashiers. Add one above or show inactive accounts."}
         </div>
@@ -419,7 +444,7 @@ export default function BranchCashiersPage() {
               </tr>
             </thead>
             <tbody>
-              {cashiers.map((c) => (
+              {visible.map((c) => (
                 <CashierRow key={c._id} cashier={c} />
               ))}
             </tbody>

@@ -71,7 +71,17 @@ export const _insertCashierByManager = internalMutation({
         q.eq("branchId", args.branchId).eq("username", args.username)
       )
       .first();
-    if (existing) throw new ConvexError("Username already taken at this branch");
+    if (existing) {
+      // Usernames stay unique across deactivated accounts too — their shifts,
+      // drawer operations and receipts still point at them, so reusing the name
+      // would make the audit trail ambiguous. Say which case this is, though:
+      // "already taken" is baffling when the list is showing zero cashiers.
+      throw new ConvexError(
+        existing.isActive
+          ? "Username already taken at this branch"
+          : `That username belongs to a deactivated cashier (${existing.firstName} ${existing.lastName}). Tick "Show inactive" to reactivate them, or pick a different username.`
+      );
+    }
 
     const id = await ctx.db.insert("cashierAccounts", {
       branchId: args.branchId,
@@ -154,7 +164,17 @@ export const updateCashier = mutation({
           q.eq("branchId", account.branchId).eq("username", username)
         )
         .first();
-      if (existing) throw new ConvexError("Username already taken at this branch");
+      if (existing) {
+      // Usernames stay unique across deactivated accounts too — their shifts,
+      // drawer operations and receipts still point at them, so reusing the name
+      // would make the audit trail ambiguous. Say which case this is, though:
+      // "already taken" is baffling when the list is showing zero cashiers.
+      throw new ConvexError(
+        existing.isActive
+          ? "Username already taken at this branch"
+          : `That username belongs to a deactivated cashier (${existing.firstName} ${existing.lastName}). Tick "Show inactive" to reactivate them, or pick a different username.`
+      );
+    }
     }
 
     await ctx.db.patch(args.accountId, {
