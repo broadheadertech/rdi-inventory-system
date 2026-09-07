@@ -315,3 +315,85 @@ export const _touchTerminalByToken = internalMutation({
     if (terminal) await ctx.db.patch(terminal._id, { lastSeenAt: Date.now() });
   },
 });
+
+// ─── listOpenShifts ───────────────────────────────────────────────────────────
+// Open shifts at this branch, per register. Exists so a manager can see and
+// clear a shift that no cashier can reach — a register whose device token was
+// cleared, revoked or reimaged still has an open shift server-side, and without
+// this the till deadlocks: the POS cannot see the shift to close it, and
+// openShift refuses to start a new one because it is there.
+
+export const listOpenShifts = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await withBranchScope(ctx);
+    if (!(BRANCH_MANAGEMENT_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    const branchId = scope.branchId;
+    if (!branchId) return [];
+
+    const shifts = await ctx.db
+      .query("cashierShifts")
+      .withIndex("by_branch_status", (q) =>
+        q.eq("branchId", branchId).eq("status", "open")
+      )
+      .collect();
+
+    const out = [];
+    for (const shift of shifts) {
+      const terminal = shift.terminalId ? await ctx.db.get(shift.terminalId) : null;
+
+      let cashierName = "Unknown";
+      if (shift.cashierAccountId) {
+        const account = await ctx.db.get(shift.cashierAccountId);
+        if (account) cashierName = `${account.firstName} ${account.lastName}`;
+      } else {
+        const user = await ctx.db.get(shift.cashierId);
+        if (user) cashierName = user.name ?? "Unknown";
+      }
+
+      out.push({
+        shiftId: shift._id,
+        terminalLabel: terminal?.label ?? "Unassigned register",
+        terminalNumber: terminal?.terminalNumber ?? null,
+        cashierName,
+        openedAt: shift.openedAt,
+        changeFundCentavos: shift.changeFundCentavos ?? shift.cashFundCentavos,
+      });
+    }
+
+    return out.sort((a, b) => a.openedAt - b.openedAt);
+  },
+});
+
+// ─── forceCloseShift ──────────────────────────────────────────────────────────
+// Manager override for a stranded shift. Closes without the cash-count step, so
+// it is recorded as a turnover with an explicit reason rather than an
+// end-of-day: an EOD close would roll figures into a Z-reading nobody counted.
+
+export const forceCloseShift = mutation({
+  args: {
+    shiftId: v.id("cashierShifts"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const shift = await ctx.db.get(args.shiftId);
+    if (!shift) throw new ConvexError("Shift not found");
+
+    const scope = await requireBranchScope(ctx, shift.branchId);
+    if (!(BRANCH_MANAGEMENT_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+    if (shift.status !== "open") throw new ConvexError("That shift is already closed");
+    if (!args.reason.trim()) throw new ConvexError("Give a reason for forcing this closed");
+
+    await ctx.db.patch(args.shiftId, {
+      status: "closed",
+      closedAt: Date.now(),
+      closeType: "turnover",
+      notes: `Force-closed by ${scope.user.name}: ${args.reason.trim()}`,
+    });
+  },
+});

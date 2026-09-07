@@ -5,6 +5,7 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { cn, getErrorMessage } from "@/lib/utils";
+import { toast } from "sonner";
 import {
   Plus,
   MonitorSmartphone,
@@ -343,6 +344,8 @@ export default function BranchTerminalsPage() {
     includeInactive: showInactive,
   });
   const flags = useQuery(api.pos.terminalSecurity.getSecurityFlags);
+  const openShifts = useQuery(api.pos.terminals.listOpenShifts);
+  const forceCloseShift = useMutation(api.pos.terminals.forceCloseShift);
 
   if (branchCtx === undefined || terminals === undefined) {
     return (
@@ -437,6 +440,50 @@ export default function BranchTerminalsPage() {
             ))}
           </div>
         )}
+
+      {/* ── Open shifts ───────────────────────────────────────────────── */}
+      {openShifts && openShifts.length > 0 && (
+        <div className="space-y-2 rounded-lg border bg-card p-4">
+          <h2 className="text-sm font-semibold">Open shifts</h2>
+          <p className="text-xs text-muted-foreground">
+            Force-closing is for a shift no cashier can reach — a register whose
+            browser data was cleared, or that was revoked or reimaged while trading.
+            It records a turnover with your reason and skips the cash count, so use
+            End Shift on the register itself wherever that still works.
+          </p>
+          <div className="divide-y">
+            {openShifts.map((sh) => (
+              <div key={sh.shiftId} className="flex items-center justify-between gap-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {sh.terminalLabel}
+                    {sh.terminalNumber ? ` · Terminal ${sh.terminalNumber}` : ""}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {sh.cashierName} · opened {formatDate(sh.openedAt)}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    const reason = window.prompt(
+                      `Force-close ${sh.cashierName}'s shift on ${sh.terminalLabel}?
+
+The drawer will not be counted. Why is this needed?`
+                    );
+                    if (!reason?.trim()) return;
+                    forceCloseShift({ shiftId: sh.shiftId, reason }).catch((err) =>
+                      toast.error(getErrorMessage(err))
+                    );
+                  }}
+                  className="shrink-0 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
+                >
+                  Force close
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {adding && <GenerateCodeForm onDone={() => setAdding(false)} />}
 
