@@ -11,10 +11,12 @@ import {
   FileText,
   TrendingUp,
   Package,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
+import { downloadCsv, csvAmount, csvPercent, reportFilename } from "@/lib/csv";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -218,6 +220,14 @@ export default function HqReportsPage() {
         performancePercent?: number;
         topCalendarCode?: string | null;
         calendarCodeMix?: { code: string; revenueCentavos: number }[];
+        // Null when no line in the row carries a cost price. costCoveragePercent
+        // says how much of the row's sales the margin actually covers.
+        marginCentavos: number | null;
+        marginPercent: number | null;
+        costCoveragePercent: number | null;
+        returnedUnits: number;
+        returnsCentavos: number;
+        returnRatePercent: number;
       }[]
     | undefined;
   const promoContribs = useQuery(api.dashboards.reportsV2.getPromotionContributions, filterArgs) as
@@ -260,6 +270,54 @@ export default function HqReportsPage() {
     [performance],
   );
   const performancePagination = usePagination(performance ?? [], 10);
+
+  function handleExportPerformance() {
+    if (!performance || performance.length === 0) return;
+
+    const dimensionLabel =
+      DIMENSIONS.find((d) => d.value === dimension)?.label.replace(" Performance", "") ??
+      "Item";
+    const totalRevenue = performance.reduce((sum, r) => sum + r.revenueCentavos, 0);
+    const withMargin = dimension !== "people";
+
+    const header = [
+      dimensionLabel,
+      ...(dimension === "store" ? ["Region"] : []),
+      "Sales",
+      "Units",
+      ...(withMargin
+        ? ["Margin", "Margin %", "Cost coverage %", "Returned units", "Returns", "Return %"]
+        : []),
+      "% of total",
+      "Stock on hand",
+    ];
+
+    // Every row for the dimension, not just the page on screen — the point of
+    // exporting is to get the data Excel cannot page through.
+    const rows = performance.map((r) => [
+      r.label,
+      ...(dimension === "store" ? [r.region ?? ""] : []),
+      csvAmount(r.revenueCentavos),
+      r.unitsSold,
+      ...(withMargin
+        ? [
+            csvAmount(r.marginCentavos),
+            csvPercent(r.marginPercent),
+            csvPercent(r.costCoveragePercent),
+            r.returnedUnits,
+            csvAmount(r.returnsCentavos),
+            csvPercent(r.returnRatePercent),
+          ]
+        : []),
+      csvPercent(totalRevenue > 0 ? (r.revenueCentavos / totalRevenue) * 100 : 0),
+      r.currentSohUnits ?? "",
+    ]);
+
+    downloadCsv(
+      reportFilename(`sales-${dimension}`, filterArgs.dateStart, filterArgs.dateEnd),
+      [header, ...rows]
+    );
+  }
 
   const presets: { key: Exclude<Preset, "custom">; label: string }[] = [
     { key: "daily", label: "Daily" },
@@ -408,7 +466,7 @@ export default function HqReportsPage() {
       </div>
 
       {/* ── KPI cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiCard
           title="Sales"
           value={summary ? formatCentavos(summary.salesCentavos) : undefined}
@@ -493,6 +551,51 @@ export default function HqReportsPage() {
           }
         />
         <KpiCard
+          title="Gross Margin"
+          value={
+            summary
+              ? summary.grossMarginCentavos === null
+                ? "—"
+                : formatCentavos(summary.grossMarginCentavos)
+              : undefined
+          }
+          footer={(() => {
+            if (!summary) return undefined;
+            if (summary.grossMarginCentavos === null) return "No cost prices set";
+            const coverage = summary.costCoveragePercent ?? 0;
+            return (
+              <span className={coverage < 80 ? "text-amber-600" : undefined}>
+                {formatPercent(summary.grossMarginPercent ?? 0)} margin
+                {coverage < 99.5 && ` · on ${formatPercent(coverage)} of sales`}
+              </span>
+            );
+          })()}
+        />
+
+        <KpiCard
+          title="Transactions"
+          value={summary ? summary.transactionCount.toLocaleString("en-PH") : undefined}
+          footer={
+            summary
+              ? `${formatCentavos(summary.averageBasketCentavos)} avg basket`
+              : undefined
+          }
+        />
+
+        <KpiCard
+          title="Returns"
+          value={summary ? formatCentavos(summary.returnsCentavos) : undefined}
+          valueClassName={
+            summary && summary.returnsCentavos > 0 ? "text-red-600" : undefined
+          }
+          footer={
+            summary
+              ? `${summary.returnedUnits.toLocaleString("en-PH")} units · ${summary.returnTransactionCount.toLocaleString("en-PH")} txns`
+              : undefined
+          }
+        />
+
+        <KpiCard
           title="Projection"
           value={summary ? formatCentavos(summary.projectedCentavos) : undefined}
           footer="Straight-line run rate"
@@ -501,8 +604,16 @@ export default function HqReportsPage() {
 
       {/* ── Performance pill ── */}
       <div>
-        <div className="flex items-center justify-between gap-4 flex-wrap mb-3">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-4">
           <h2 className="text-base font-semibold">Performance</h2>
+          <button
+            onClick={handleExportPerformance}
+            disabled={!performance || performance.length === 0}
+            className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted disabled:opacity-50"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </button>
         </div>
         <div className="flex flex-wrap gap-1 mb-4">
           {DIMENSIONS.map((d) => (
@@ -545,6 +656,13 @@ export default function HqReportsPage() {
                     )}
                     <th className="pb-2 text-right font-medium">Sales</th>
                     <th className="pb-2 text-right font-medium">Units</th>
+                    {dimension !== "people" && (
+                      <>
+                        <th className="pb-2 text-right font-medium">Margin</th>
+                        <th className="pb-2 text-right font-medium">Margin %</th>
+                        <th className="pb-2 text-right font-medium">Return %</th>
+                      </>
+                    )}
                     <th className="pb-2 text-right font-medium">% of Total</th>
                     <th className="pb-2 font-medium">Calendar Code</th>
                     {dimension !== "people" && (
@@ -595,6 +713,58 @@ export default function HqReportsPage() {
                         <td className="py-2 text-right tabular-nums">
                           {row.unitsSold.toLocaleString("en-PH")}
                         </td>
+                        {dimension !== "people" && (
+                          <>
+                            <td className="py-2 text-right tabular-nums">
+                              {row.marginCentavos === null ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                formatCentavos(row.marginCentavos)
+                              )}
+                            </td>
+                            <td
+                              className="py-2 text-right tabular-nums"
+                              title={
+                                row.costCoveragePercent !== null &&
+                                row.costCoveragePercent < 99.5
+                                  ? `Costed on ${formatPercent(row.costCoveragePercent)} of this row's sales — the rest has no cost price set.`
+                                  : undefined
+                              }
+                            >
+                              {row.marginPercent === null ? (
+                                <span className="text-muted-foreground">—</span>
+                              ) : (
+                                <span
+                                  className={cn(
+                                    // Thin cost coverage makes the percentage a
+                                    // claim about part of the row, not all of it.
+                                    (row.costCoveragePercent ?? 100) < 80
+                                      ? "text-muted-foreground"
+                                      : row.marginPercent < 0
+                                        ? "font-semibold text-red-600"
+                                        : undefined,
+                                  )}
+                                >
+                                  {formatPercent(row.marginPercent)}
+                                  {(row.costCoveragePercent ?? 100) < 80 && "*"}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 text-right tabular-nums">
+                              {row.returnedUnits > 0 ? (
+                                <span
+                                  className={cn(
+                                    row.returnRatePercent >= 10 && "font-semibold text-red-600",
+                                  )}
+                                >
+                                  {formatPercent(row.returnRatePercent)}
+                                </span>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </td>
+                          </>
+                        )}
                         <td className="py-2 text-right tabular-nums text-muted-foreground">
                           {totalPerformanceRevenue > 0
                             ? `${((row.revenueCentavos / totalPerformanceRevenue) * 100).toFixed(1)}%`

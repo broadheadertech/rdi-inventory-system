@@ -267,6 +267,14 @@ export const getReportsSummary = query({
         targetPercent: 0,
         targetAvailable,
         targetScope,
+        transactionCount: 0,
+        averageBasketCentavos: 0,
+        returnTransactionCount: 0,
+        returnedUnits: 0,
+        returnsCentavos: 0,
+        grossMarginCentavos: null,
+        grossMarginPercent: null,
+        costCoveragePercent: null,
         lyRevenueCentavos: 0,
         lyPercent: 0,
         projectedCentavos: 0,
@@ -302,6 +310,16 @@ export const getReportsSummary = query({
 
     let salesCentavos = 0;
     let unitsSold = 0;
+    // Sales and units are net of returns, because returns are stored as
+    // negative lines. These track the gross activity behind that netting, plus
+    // cost for the lines that carry one.
+    let transactionCount = 0;
+    let returnTransactionCount = 0;
+    let returnedUnits = 0;
+    let returnsCentavos = 0;
+    let costCentavos = 0;
+    let costedRevenueCentavos = 0;
+
     for (const t of txns) {
       const items = await ctx.db
         .query("transactionItems")
@@ -318,6 +336,27 @@ export const getReportsSummary = query({
         anyMatched = true;
         lineSum += item.lineTotalCentavos;
         lineUnits += item.quantity;
+
+        if (item.quantity < 0) {
+          returnedUnits += -item.quantity;
+          returnsCentavos += -item.lineTotalCentavos;
+        }
+
+        const variantDoc = await ctx.db.get(item.variantId);
+        const unitCost = variantDoc?.costPriceCentavos;
+        if (unitCost !== undefined && unitCost > 0) {
+          costCentavos += unitCost * item.quantity;
+          costedRevenueCentavos += item.lineTotalCentavos;
+        }
+      }
+
+      if (anyMatched || !args.brandId) {
+        transactionCount++;
+        // A refund or exchange is booked as its own transaction with a RET-
+        // prefixed receipt number and a negative total.
+        if (t.totalCentavos < 0 || t.receiptNumber.startsWith("RET-")) {
+          returnTransactionCount++;
+        }
       }
       if (args.brandId) {
         // When filtering by brand, sum only matched line items (txn totals include other brands)
@@ -370,6 +409,23 @@ export const getReportsSummary = query({
       targetPercent,
       targetAvailable,
       targetScope,
+      transactionCount,
+      // Sales ÷ transactions — the number retail actually manages against.
+      averageBasketCentavos:
+        transactionCount > 0 ? Math.round(salesCentavos / transactionCount) : 0,
+      returnTransactionCount,
+      returnedUnits,
+      returnsCentavos,
+      grossMarginCentavos:
+        costedRevenueCentavos > 0 ? costedRevenueCentavos - costCentavos : null,
+      grossMarginPercent:
+        costedRevenueCentavos > 0
+          ? ((costedRevenueCentavos - costCentavos) / costedRevenueCentavos) * 100
+          : null,
+      // How much of sales we could actually cost. Margin is only as trustworthy
+      // as this, so the UI shows it rather than implying full coverage.
+      costCoveragePercent:
+        salesCentavos > 0 ? (costedRevenueCentavos / salesCentavos) * 100 : null,
       lyRevenueCentavos,
       lyPercent,
       projectedCentavos,
@@ -422,6 +478,16 @@ export const getPerformanceByDimension = query({
       region?: string | null;
       revenueCentavos: number;
       unitsSold: number;
+      // Cost is only counted for lines whose variant actually carries one.
+      // costedRevenueCentavos is the revenue those lines represent, so margin %
+      // is computed against what we can cost rather than against everything —
+      // a margin computed over unpriced stock is worse than no margin at all.
+      costCentavos?: number;
+      costedRevenueCentavos?: number;
+      // Returns are stored as negative lines, so revenue and units above are
+      // already net of them. These surface the gross return activity.
+      returnedUnits?: number;
+      returnsCentavos?: number;
       currentSohUnits?: number;
       targetCentavos?: number;
       performancePercent?: number;
@@ -439,6 +505,31 @@ export const getPerformanceByDimension = query({
         agg.set(key, { key, label, revenueCentavos: revenue, unitsSold: units });
       }
     };
+    /** Cost and returns for one sold (or returned) line. */
+    const bumpCost = (
+      key: string,
+      label: string,
+      item: { quantity: number; lineTotalCentavos: number },
+      unitCostCentavos: number | undefined
+    ) => {
+      let cur = agg.get(key);
+      if (!cur) {
+        cur = { key, label, revenueCentavos: 0, unitsSold: 0 };
+        agg.set(key, cur);
+      }
+      if (unitCostCentavos !== undefined && unitCostCentavos > 0) {
+        // A negative quantity is a return, which puts stock back — so it
+        // correctly reduces both cost and costed revenue.
+        cur.costCentavos = (cur.costCentavos ?? 0) + unitCostCentavos * item.quantity;
+        cur.costedRevenueCentavos =
+          (cur.costedRevenueCentavos ?? 0) + item.lineTotalCentavos;
+      }
+      if (item.quantity < 0) {
+        cur.returnedUnits = (cur.returnedUnits ?? 0) + -item.quantity;
+        cur.returnsCentavos = (cur.returnsCentavos ?? 0) + -item.lineTotalCentavos;
+      }
+    };
+
     const bumpSoh = (key: string, label: string, units: number) => {
       const cur = agg.get(key);
       if (cur) {
@@ -563,7 +654,22 @@ export const getPerformanceByDimension = query({
       }
 
       finalizeCalendarCodes();
-      return Array.from(agg.values()).sort((a, b) => b.revenueCentavos - a.revenueCentavos);
+      // Same shape as every other dimension. People performance is measured
+      // against a sales target, not margin — attributing cost to a cashier
+      // would mean scanning every line for a figure that says nothing about
+      // how they sold — so the margin and return fields are explicitly null
+      // rather than absent, and the UI hides those columns for this dimension.
+      return Array.from(agg.values())
+        .map((row) => ({
+          ...row,
+          marginCentavos: null,
+          marginPercent: null,
+          costCoveragePercent: null,
+          returnedUnits: 0,
+          returnsCentavos: 0,
+          returnRatePercent: 0,
+        }))
+        .sort((a, b) => b.revenueCentavos - a.revenueCentavos);
     }
 
     // Store dimension — group by transaction.branchId. Brand filter requires item scan.
@@ -608,6 +714,7 @@ export const getPerformanceByDimension = query({
             const bId = await resolveStyleBrandId(ctx as any, style, categoryBrandCache);
             if (bId !== args.brandId) continue;
             bump(branchKey, branchName, it.lineTotalCentavos, it.quantity);
+            bumpCost(branchKey, branchName, it, variant.costPriceCentavos);
             const code = calendarCodeForVariant(it.variantId);
             if (code) bumpCalendar(branchKey, code, it.lineTotalCentavos);
           }
@@ -619,6 +726,13 @@ export const getPerformanceByDimension = query({
           const units = items.reduce((s, it) => s + it.quantity, 0);
           bump(branchKey, branchName, t.totalCentavos, units);
           for (const it of items) {
+            // Cost needs the variant even when no brand filter forced a lookup.
+            let v = variantCache.get(it.variantId as string);
+            if (v === undefined) {
+              v = await ctx.db.get(it.variantId);
+              variantCache.set(it.variantId as string, v);
+            }
+            bumpCost(branchKey, branchName, it, v?.costPriceCentavos);
             const code = calendarCodeForVariant(it.variantId);
             if (code) bumpCalendar(branchKey, code, it.lineTotalCentavos);
           }
@@ -668,7 +782,27 @@ export const getPerformanceByDimension = query({
       }
 
       finalizeCalendarCodes();
-      return Array.from(agg.values()).sort((a, b) => b.revenueCentavos - a.revenueCentavos);
+      // Store rows carry margin and returns like every other dimension.
+      return Array.from(agg.values())
+        .map((row) => {
+          const costed = row.costedRevenueCentavos ?? 0;
+          const cost = row.costCentavos ?? 0;
+          const returned = row.returnedUnits ?? 0;
+          return {
+            ...row,
+            marginCentavos: costed > 0 ? costed - cost : null,
+            marginPercent: costed > 0 ? ((costed - cost) / costed) * 100 : null,
+            costCoveragePercent:
+              row.revenueCentavos > 0 ? (costed / row.revenueCentavos) * 100 : null,
+            returnedUnits: returned,
+            returnsCentavos: row.returnsCentavos ?? 0,
+            returnRatePercent:
+              row.unitsSold + returned > 0
+                ? (returned / (row.unitsSold + returned)) * 100
+                : 0,
+          };
+        })
+        .sort((a, b) => b.revenueCentavos - a.revenueCentavos);
     }
 
     // Item-level dimensions — iterate txn items, resolve variant/style attributes
@@ -717,14 +851,17 @@ export const getPerformanceByDimension = query({
           const label = variant.sku || "(no SKU)";
           rowKey = variant._id as string;
           bump(rowKey, label, item.lineTotalCentavos, item.quantity);
+          bumpCost(rowKey, label, item, variant.costPriceCentavos);
         } else if (args.dimension === "size") {
           const label = variant.size || "(none)";
           rowKey = label;
           bump(rowKey, label, item.lineTotalCentavos, item.quantity);
+          bumpCost(rowKey, label, item, variant.costPriceCentavos);
         } else if (args.dimension === "color") {
           const label = variant.color || "(none)";
           rowKey = label;
           bump(rowKey, label, item.lineTotalCentavos, item.quantity);
+          bumpCost(rowKey, label, item, variant.costPriceCentavos);
         } else if (args.dimension === "category") {
           // Strict: only productCategoryId (the Category set in Settings).
           // Legacy style.categoryId is intentionally ignored.
@@ -735,6 +872,7 @@ export const getPerformanceByDimension = query({
             const label = await getPC(style.productCategoryId);
             rowKey = style.productCategoryId as string;
             bump(rowKey, label, item.lineTotalCentavos, item.quantity);
+          bumpCost(rowKey, label, item, variant.costPriceCentavos);
           }
         } else if (args.dimension === "subCategory") {
           // Strict: only style.subCategoryId from Settings → Product Codes.
@@ -745,6 +883,7 @@ export const getPerformanceByDimension = query({
             const label = await getPC(style.subCategoryId);
             rowKey = style.subCategoryId as string;
             bump(rowKey, label, item.lineTotalCentavos, item.quantity);
+          bumpCost(rowKey, label, item, variant.costPriceCentavos);
           }
         } else if (args.dimension === "department") {
           // Strict: only style.departmentId (Settings → Product Codes, type=department).
@@ -755,6 +894,7 @@ export const getPerformanceByDimension = query({
             const label = await getPC(style.departmentId);
             rowKey = style.departmentId as string;
             bump(rowKey, label, item.lineTotalCentavos, item.quantity);
+          bumpCost(rowKey, label, item, variant.costPriceCentavos);
           }
         } else if (args.dimension === "fit") {
           if (!style.fitId) {
@@ -764,6 +904,7 @@ export const getPerformanceByDimension = query({
             const label = await getPC(style.fitId);
             rowKey = style.fitId as string;
             bump(rowKey, label, item.lineTotalCentavos, item.quantity);
+          bumpCost(rowKey, label, item, variant.costPriceCentavos);
           }
         }
         if (rowKey) {
@@ -843,7 +984,33 @@ export const getPerformanceByDimension = query({
     }
 
     finalizeCalendarCodes();
-    return Array.from(agg.values()).sort((a, b) => b.revenueCentavos - a.revenueCentavos);
+
+    return Array.from(agg.values())
+      .map((row) => {
+        const costed = row.costedRevenueCentavos ?? 0;
+        const cost = row.costCentavos ?? 0;
+        // Margin is stated against costed revenue only, and costCoveragePercent
+        // says how much of the row that actually is. A 62% margin covering a
+        // third of sales is a very different claim from one covering all of it,
+        // and the UI greys the figure out when coverage is thin.
+        const marginCentavos = costed > 0 ? costed - cost : null;
+        return {
+          ...row,
+          marginCentavos,
+          marginPercent: costed > 0 ? ((costed - cost) / costed) * 100 : null,
+          costCoveragePercent:
+            row.revenueCentavos > 0 ? (costed / row.revenueCentavos) * 100 : null,
+          returnedUnits: row.returnedUnits ?? 0,
+          returnsCentavos: row.returnsCentavos ?? 0,
+          // Returns as a share of gross units: units sold here are already net,
+          // so gross is net + returned.
+          returnRatePercent:
+            row.unitsSold + (row.returnedUnits ?? 0) > 0
+              ? ((row.returnedUnits ?? 0) / (row.unitsSold + (row.returnedUnits ?? 0))) * 100
+              : 0,
+        };
+      })
+      .sort((a, b) => b.revenueCentavos - a.revenueCentavos);
   },
 });
 

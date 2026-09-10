@@ -3,8 +3,9 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { Printer } from "lucide-react";
+import { Printer, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { downloadCsv, csvAmount, csvPercent, reportFilename } from "@/lib/csv";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -189,6 +190,42 @@ export default function BranchReportsPage() {
     });
   }
 
+  function handleExportItems() {
+    if (!itemPerformance || itemPerformance.length === 0) return;
+    const totalRevenue = itemPerformance.reduce((sum, r) => sum + r.revenueCentavos, 0);
+
+    const header = [
+      "SKU",
+      "Sales",
+      "Units",
+      "Margin",
+      "Margin %",
+      "Cost coverage %",
+      "Returned units",
+      "Return %",
+      "% of sales",
+      "Stock on hand",
+    ];
+
+    const rows = itemPerformance.map((r) => [
+      r.label,
+      csvAmount(r.revenueCentavos),
+      r.unitsSold,
+      csvAmount(r.marginCentavos),
+      csvPercent(r.marginPercent),
+      csvPercent(r.costCoveragePercent),
+      r.returnedUnits,
+      csvPercent(r.returnRatePercent),
+      csvPercent(totalRevenue > 0 ? (r.revenueCentavos / totalRevenue) * 100 : 0),
+      r.currentSohUnits ?? "",
+    ]);
+
+    downloadCsv(
+      reportFilename("item-performance", perfArgs.dateStart, perfArgs.dateEnd),
+      [header, ...rows]
+    );
+  }
+
   const generatedAt = useMemo(() => {
     if (!generated) return null;
     return new Date().toLocaleString("en-PH", { timeZone: "Asia/Manila" });
@@ -217,6 +254,15 @@ export default function BranchReportsPage() {
             <p className="text-sm text-muted-foreground mt-1">Select a date range and reports, then generate and print.</p>
           </div>
           {generated && allLoaded && (
+            <div className="flex gap-2">
+            <button
+              onClick={handleExportItems}
+              disabled={!itemPerformance || itemPerformance.length === 0}
+              className="flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              Export CSV
+            </button>
             <button
               onClick={() => window.print()}
               className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
@@ -224,6 +270,7 @@ export default function BranchReportsPage() {
               <Printer className="h-4 w-4" />
               Print Report
             </button>
+            </div>
           )}
         </div>
 
@@ -428,6 +475,7 @@ export default function BranchReportsPage() {
                     <thead>
                       <tr>
                         <Th>#</Th><Th>SKU</Th><Th right>Sales</Th><Th right>Units Sold</Th>
+                        <Th right>Margin</Th><Th right>Margin %</Th><Th right>Return %</Th>
                         <Th right>% of Sales</Th><Th right>SOH</Th>
                       </tr>
                     </thead>
@@ -438,6 +486,23 @@ export default function BranchReportsPage() {
                           <Td>{row.label}</Td>
                           <Td right>{fmt(row.revenueCentavos)}</Td>
                           <Td right>{row.unitsSold.toLocaleString("en-PH")}</Td>
+                          <Td right>
+                            {row.marginCentavos === null ? "—" : fmt(row.marginCentavos)}
+                          </Td>
+                          <Td right muted>
+                            {row.marginPercent === null
+                              ? "—"
+                              : `${row.marginPercent.toFixed(1)}%${
+                                  // Flag a margin that only covers part of the
+                                  // row, so it is not read as the whole picture.
+                                  (row.costCoveragePercent ?? 100) < 80 ? "*" : ""
+                                }`}
+                          </Td>
+                          <Td right muted>
+                            {row.returnedUnits > 0
+                              ? `${row.returnRatePercent.toFixed(1)}%`
+                              : "—"}
+                          </Td>
                           <Td right muted>
                             {totalRevenue > 0
                               ? `${((row.revenueCentavos / totalRevenue) * 100).toFixed(1)}%`
