@@ -19,6 +19,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import type { DiscountType } from "@/lib/constants";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { formatCurrency } from "@/lib/formatters";
 import {
   ClipboardCheck,
   ScanBarcode,
@@ -178,6 +179,12 @@ function PosPageContent() {
   );
   // X-Reading modal
   const [showXReading, setShowXReading] = useState(false);
+  // The shift's GCash, Maya and bank transfer takings, live in the header.
+  const tenders = useQuery(
+    api.pos.shifts.getShiftTenders,
+    shift ? { deviceToken: posDeviceToken ?? undefined } : "skip"
+  );
+
   const xReading = useQuery(
     api.pos.readings.getXReading,
     showXReading ? {} : "skip"
@@ -450,13 +457,37 @@ function PosPageContent() {
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {/* No running cash total here: the drawer is counted blind at End Shift. */}
+                  {/* No running cash total here: the drawer is counted blind at End Shift.
+                      Non-cash takings are shown — they are checked against the apps and
+                      the bank, not counted. */}
                   {shift && (
-                    <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-1.5 text-xs">
+                    <div className="flex items-center gap-3 whitespace-nowrap rounded-lg border bg-muted/30 px-3 py-1.5 text-xs">
                       <span className="font-medium text-foreground">{shift.cashierName}</span>
                       <span className="text-muted-foreground">
                         Txns: <span className="font-semibold text-foreground">{shift.transactionCount}</span>
                       </span>
+                      {tenders && (
+                        <span className="hidden items-center gap-3 border-l pl-3 md:flex">
+                          <span className="text-muted-foreground">
+                            GCash:{" "}
+                            <span className="font-semibold text-blue-700">
+                              {formatCurrency(tenders.gcash.amountCentavos)}
+                            </span>
+                          </span>
+                          <span className="text-muted-foreground">
+                            Maya:{" "}
+                            <span className="font-semibold text-emerald-700">
+                              {formatCurrency(tenders.maya.amountCentavos)}
+                            </span>
+                          </span>
+                          <span className="text-muted-foreground">
+                            Bank:{" "}
+                            <span className="font-semibold text-amber-700">
+                              {formatCurrency(tenders.bankTransfer.amountCentavos)}
+                            </span>
+                          </span>
+                        </span>
+                      )}
                     </div>
                   )}
                   {shift && (

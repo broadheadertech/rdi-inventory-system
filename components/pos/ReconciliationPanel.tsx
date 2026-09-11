@@ -330,15 +330,19 @@ export function ReconciliationPanel() {
           <p className="text-sm font-medium text-muted-foreground">
             Breakdown by Payment
           </p>
-          <div className="flex items-center justify-between">
-            <span className="flex items-center gap-2 text-sm">
-              <Banknote className="h-4 w-4 text-green-600" />
-              Cash
-            </span>
-            <span className="font-semibold">
-              {formatCurrency(summary.cashSalesCentavos)}
-            </span>
-          </div>
+          {/* Not while a shift is open: with the float, it would tell the
+              cashier what the blind count should come to. */}
+          {openShift === null && (
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm">
+                <Banknote className="h-4 w-4 text-green-600" />
+                Cash
+              </span>
+              <span className="font-semibold">
+                {formatCurrency(summary.cashSalesCentavos)}
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="flex items-center gap-2 text-sm">
               <Smartphone className="h-4 w-4 text-blue-600" />
@@ -380,7 +384,7 @@ export function ReconciliationPanel() {
       )}
 
       {/* Reconciliation Form — only once no shift is open */}
-      {!openShift && (
+      {openShift === null && (
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">Cash Reconciliation</h2>
 
