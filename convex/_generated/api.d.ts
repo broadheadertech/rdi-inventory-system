@@ -77,6 +77,7 @@ import type * as dashboards_productMovers from "../dashboards/productMovers.js";
 import type * as dashboards_reportsV2 from "../dashboards/reportsV2.js";
 import type * as demand_entries from "../demand/entries.js";
 import type * as demand_summaries from "../demand/summaries.js";
+import type * as disputes from "../disputes.js";
 import type * as http from "../http.js";
 import type * as inventory_alerts from "../inventory/alerts.js";
 import type * as inventory_autoReplenish from "../inventory/autoReplenish.js";
@@ -238,6 +239,7 @@ declare const fullApi: ApiFromModules<{
   "dashboards/reportsV2": typeof dashboards_reportsV2;
   "demand/entries": typeof demand_entries;
   "demand/summaries": typeof demand_summaries;
+  disputes: typeof disputes;
   http: typeof http;
   "inventory/alerts": typeof inventory_alerts;
   "inventory/autoReplenish": typeof inventory_autoReplenish;

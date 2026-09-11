@@ -1002,6 +1002,56 @@ export default defineSchema({
     .index("by_branch_status", ["branchId", "status"])
     .index("by_prevShift", ["prevShiftId"]),
 
+  // A difference someone has to explain, raised where it is recorded: a cash
+  // count that doesn't match the drawer, a turnover counted short, or a
+  // transfer that arrived different from its packing. The branch manager
+  // settles it with a cause and a note; admin oversees every branch and can
+  // reopen one. See convex/disputes.ts.
+  disputes: defineTable({
+    branchId: v.id("branches"),                // the branch that settles it
+    kind: v.union(
+      v.literal("cashCount"),
+      v.literal("turnoverShort"),
+      v.literal("transferReceiving")
+    ),
+    stage: v.union(                            // where the difference was recorded
+      v.literal("switchCashier"),
+      v.literal("endOfDay"),
+      v.literal("missedDay"),
+      v.literal("turnoverOver"),
+      v.literal("turnoverShort"),
+      v.literal("pieceReceiving"),
+      v.literal("boxReceiving")
+    ),
+    sourceId: v.string(),                      // the shift, approval, transfer or box
+    terminalId: v.optional(v.id("posTerminals")),
+    transferId: v.optional(v.id("transfers")),
+    approvalId: v.optional(v.id("cashTurnoverApprovals")),
+    subject: v.string(),                       // who / what, as listed
+    detail: v.string(),                        // the figures, as listed
+    expectedCentavos: v.optional(v.number()),
+    countedCentavos: v.optional(v.number()),
+    differenceCentavos: v.optional(v.number()),  // counted − expected
+    unitsDifference: v.optional(v.number()),     // received − packed
+    status: v.union(v.literal("open"), v.literal("settled")),
+    cause: v.optional(
+      v.union(
+        v.literal("countingError"),
+        v.literal("found"),
+        v.literal("chargedToStaff"),
+        v.literal("writtenOff"),
+        v.literal("other")
+      )
+    ),
+    note: v.optional(v.string()),
+    settledById: v.optional(v.id("users")),    // absent when closed automatically
+    settledAt: v.optional(v.number()),
+    raisedAt: v.number(),
+  })
+    .index("by_branch_status", ["branchId", "status"])
+    .index("by_status", ["status"])
+    .index("by_source", ["sourceId"]),
+
   promotions: defineTable({
     name: v.string(),
     description: v.optional(v.string()),

@@ -29,6 +29,7 @@ import {
   CalendarDays,
   ChevronDown,
   Target,
+  Scale,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -66,6 +67,7 @@ const overviewNavItems: NavItem[] = [
 const operationsNavItems: NavItem[] = [
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
   { href: "/admin/ordering-signoff", label: "Ordering Sign-off", icon: ClipboardCheck, roles: ["admin"] },
+  { href: "/admin/disputes", label: "Disputes", icon: Scale, roles: ["admin"] },
   { href: "/admin/couriers", label: "Couriers", icon: Truck, roles: ["admin"] },
   { href: "/admin/bir-registration", label: "BIR Approvals", icon: Receipt, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },

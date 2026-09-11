@@ -23,6 +23,11 @@ import { BRANCH_MANAGEMENT_ROLES, POS_ROLES } from "../_helpers/permissions";
 import { requireTerminal, touchTerminal } from "../_helpers/requireTerminal";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { fileZReading, findZReading } from "./readings";
+import {
+  closeTurnoverShortDispute,
+  raiseCashCountDispute,
+  raiseTurnoverShortDispute,
+} from "../disputes";
 
 const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -432,6 +437,7 @@ async function requestTurnoverApproval(
     }
     // A recount replaces the one still waiting.
     await ctx.db.patch(e._id, { status: "rejected", decidedAt: now, note: "Replaced by a recount" });
+    await closeTurnoverShortDispute(ctx, e._id, "Replaced by a recount");
   }
 
   const approvalId = await ctx.db.insert("cashTurnoverApprovals", {
@@ -445,6 +451,7 @@ async function requestTurnoverApproval(
     status: "pending",
     requestedAt: now,
   });
+  await raiseTurnoverShortDispute(ctx, (await ctx.db.get(approvalId))!);
 
   await _logAuditEntry(ctx, {
     action: "pos.shift.turnoverShort",
@@ -609,6 +616,13 @@ export const openShift = mutation({
       turnoverApprovalId: approvalId,
     });
     if (approvalId) await ctx.db.patch(approvalId, { openedShiftId: shiftId });
+    // Counted above what the drawer should hold: it opens, but goes to Disputes.
+    if (counted > expected) {
+      await raiseCashCountDispute(ctx, (await ctx.db.get(shiftId))!, "turnoverOver", {
+        countedCentavos: counted,
+        expectedCentavos: expected,
+      });
+    }
 
     await _logAuditEntry(ctx, {
       action: "pos.shift.turnoverCount",
@@ -691,6 +705,13 @@ export const closeShift = mutation({
         differenceCentavos: declared - expected,
       },
     });
+
+    await raiseCashCountDispute(
+      ctx,
+      shift,
+      args.closeType === "endOfDay" ? "endOfDay" : "switchCashier",
+      { countedCentavos: declared, expectedCentavos: expected }
+    );
 
     let zCounter: number | null = null;
     if (args.closeType === "endOfDay") {
@@ -784,6 +805,11 @@ export const closeMissedDay = mutation({
       totalSalesCentavos: z.grossSalesCentavos,
       notes: "Counted when closing a day that was never ended",
       createdAt: now,
+    });
+
+    await raiseCashCountDispute(ctx, lastShift, "missedDay", {
+      countedCentavos: declared,
+      expectedCentavos: expected,
     });
 
     await _logAuditEntry(ctx, {
@@ -907,6 +933,16 @@ export const decideTurnoverApproval = mutation({
       decidedAt: Date.now(),
       note: args.note?.trim() || undefined,
     });
+
+    // Sent back to recount: that count is superseded, so its dispute closes. An
+    // approved count keeps its dispute open — the shortfall still needs settling.
+    if (!args.approve) {
+      await closeTurnoverShortDispute(
+        ctx,
+        args.approvalId,
+        `Sent back to recount${args.note?.trim() ? `: ${args.note.trim()}` : ""}`
+      );
+    }
 
     await _logAuditEntry(ctx, {
       action: args.approve ? "pos.shift.turnoverApproved" : "pos.shift.turnoverRejected",

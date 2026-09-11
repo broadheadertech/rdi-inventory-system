@@ -7,6 +7,7 @@ import { _logAuditEntry } from "../_helpers/auditLog";
 import { clearReservedOnDelivery } from "../_helpers/transferStock";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
 import { internal } from "../_generated/api";
+import { raiseTransferDispute } from "../disputes";
 
 // NOTE: Use requireRole (NOT withBranchScope) — warehouse staff handle all
 // cross-branch transfers, not limited to their own branch.
@@ -550,6 +551,11 @@ export const confirmTransferDelivery = mutation({
       deliveredById: user._id,
       updatedAt: now,
     });
+
+    // Shortages, overages and damage go to the receiving branch's Disputes.
+    if (discrepancies.length > 0) {
+      await raiseTransferDispute(ctx, (await ctx.db.get(args.transferId))!);
+    }
 
     // Generate internal invoice for stock requests only (not returns)
     let invoiceId: Id<"internalInvoices"> | null = null;

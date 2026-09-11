@@ -5,6 +5,7 @@ import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { clearReservedOnDelivery } from "../_helpers/transferStock";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
+import { raiseBoxDispute } from "../disputes";
 
 // ─── Box Code Generation ────────────────────────────────────────────────────
 
@@ -571,6 +572,11 @@ export const confirmBoxReceipt = mutation({
       receivedById: user._id,
       ...(args.discrepancyNotes ? { discrepancyNotes: args.discrepancyNotes } : {}),
     });
+
+    // A flagged box goes to the receiving branch's Disputes.
+    if (args.hasDiscrepancy) {
+      await raiseBoxDispute(ctx, (await ctx.db.get(args.boxId))!);
+    }
 
     // Check if all boxes in this transfer are now received/discrepancy
     const allBoxes = await ctx.db
