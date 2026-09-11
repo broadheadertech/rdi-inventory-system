@@ -15,9 +15,23 @@ import {
   Clock,
   PackageCheck,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import {
+  AgingBadge,
+  MovementBadge,
+  SignOffBadge,
+  VerdictBadge,
+  VERDICT_META,
+  VERDICT_ORDER,
+  lineNeedsSignOff,
+  type AgingTier,
+  type Movement,
+  type SignOffStatus,
+  type Verdict,
+} from "@/components/ordering/OrderingBasis";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,23 +57,9 @@ function fmtDate(ms: number): string {
   });
 }
 
-const FLAG_LABELS: Record<string, { label: string; tone: string; hint: string }> = {
-  noRecentSales: {
-    label: "No sales in 30d",
-    tone: "bg-red-100 text-red-700 border-red-200",
-    hint: "Nothing sold here in the last 30 days — switched off by default.",
-  },
-  slowMoving: {
-    label: "Slow moving",
-    tone: "bg-amber-100 text-amber-700 border-amber-200",
-    hint: "Last sale is older than this cycle's stale threshold.",
-  },
-  agedStock: {
-    label: "Aged stock",
-    tone: "bg-orange-100 text-orange-700 border-orange-200",
-    hint: "Stock has been sitting at this store for 90+ days.",
-  },
-};
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
 
 // ─── Cycle setup ──────────────────────────────────────────────────────────────
 
@@ -172,7 +172,7 @@ function CycleSetup({
 
         <div className="space-y-1 sm:col-span-2">
           <label className="text-xs font-medium text-muted-foreground">
-            Treat as stale after (days without a sale)
+            Treat as gone quiet after (days without a sale)
           </label>
           <input
             value={staleAfterDays}
@@ -181,8 +181,8 @@ function CycleSetup({
             className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary sm:w-48"
           />
           <p className="text-xs text-muted-foreground">
-            Lines past this are flagged for assessment. Anything with no sale at all in 30
-            days is switched off in the draft regardless.
+            Stock that hasn&apos;t sold in this many days is listed for assessment even when
+            nothing needs ordering.
           </p>
         </div>
       </div>
@@ -223,7 +223,16 @@ type Line = {
   unitsSold30d: number;
   daysSinceLastSale: number | null;
   stockAgeDays: number | null;
-  flags: string[];
+  movement: Movement | null;
+  movementScore: number | null;
+  agingTier: AgingTier | null;
+  lowStockThreshold: number | null;
+  projectedStock: number | null;
+  triggered: boolean | null;
+  verdict: Verdict | null;
+  verdictReasons: string[];
+  signOff: SignOffStatus | null;
+  signOffNote: string | null;
 };
 
 function LineRow({ line, editable }: { line: Line; editable: boolean }) {
@@ -260,8 +269,13 @@ function LineRow({ line, editable }: { line: Line; editable: boolean }) {
     }
   }
 
+  const needsSignOff = editable && lineNeedsSignOff(line);
+  // Submitted, included, and never sent to HQ: it went on its verdict.
+  const sentOnVerdict =
+    !editable && line.included && line.orderedQuantity > 0 && line.signOff === null;
+
   return (
-    <tr className={cn("border-b last:border-0", !line.included && "opacity-55")}>
+    <tr className={cn("border-b align-top last:border-0", !line.included && "opacity-60")}>
       <td className="px-3 py-2.5">
         <input
           type="checkbox"
@@ -272,37 +286,59 @@ function LineRow({ line, editable }: { line: Line; editable: boolean }) {
           aria-label={`Include ${line.sku}`}
         />
       </td>
-      <td className="px-3 py-2.5">
+      <td className="min-w-[16rem] px-3 py-2.5">
         <div className="font-medium">{line.label}</div>
         <div className="font-mono text-xs text-muted-foreground">{line.sku}</div>
-        {line.flags.length > 0 && (
-          <div className="mt-1 flex flex-wrap gap-1">
-            {line.flags.map((f) => {
-              const meta = FLAG_LABELS[f];
-              if (!meta) return null;
-              return (
-                <span
-                  key={f}
-                  title={meta.hint}
-                  className={cn("rounded border px-1.5 py-0.5 text-[10px] font-medium", meta.tone)}
-                >
-                  {meta.label}
-                </span>
-              );
-            })}
-          </div>
+        {line.verdictReasons.length > 0 && (
+          <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+            {line.verdictReasons.map((reason, i) => (
+              <li key={i}>{reason}</li>
+            ))}
+          </ul>
         )}
+      </td>
+      <td className="px-3 py-2.5">
+        <div className="flex flex-col items-start gap-1">
+          <VerdictBadge verdict={line.verdict} />
+          {needsSignOff && (
+            <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-medium text-amber-700">
+              <ShieldCheck className="h-3 w-3" /> HQ sign-off
+            </span>
+          )}
+          {line.signOff && <SignOffBadge status={line.signOff} note={line.signOffNote} />}
+          {sentOnVerdict && (
+            <span className="whitespace-nowrap text-[11px] font-medium text-green-700">
+              Sent approved
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-3 py-2.5">
+        <MovementBadge movement={line.movement} score={line.movementScore} />
+      </td>
+      <td className="px-3 py-2.5">
+        <AgingBadge tier={line.agingTier} days={line.stockAgeDays} />
       </td>
       <td className="px-3 py-2.5 text-right tabular-nums">{line.onHandQuantity}</td>
       <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
         {line.incomingQuantity > 0 ? line.incomingQuantity : "—"}
       </td>
-      <td className="px-3 py-2.5 text-right tabular-nums">{line.unitsSold30d}</td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-        {line.daysSinceLastSale === null ? "never" : `${line.daysSinceLastSale}d`}
+      <td className="px-3 py-2.5 text-right tabular-nums">
+        {line.unitsSold30d}
+        <div className="text-[10px] text-muted-foreground">
+          {line.daysSinceLastSale === null ? "no sale" : `last ${line.daysSinceLastSale}d ago`}
+        </div>
       </td>
-      <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
-        {line.stockAgeDays === null ? "—" : `${line.stockAgeDays}d`}
+      <td
+        className={cn(
+          "whitespace-nowrap px-3 py-2.5 text-right tabular-nums",
+          line.triggered && "font-medium text-red-600"
+        )}
+      >
+        {line.projectedStock ?? "—"}
+        <span className="font-normal text-muted-foreground">
+          {" "}/ {line.lowStockThreshold ?? "—"}
+        </span>
       </td>
       <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">
         {line.suggestedQuantity}
@@ -326,6 +362,8 @@ function LineRow({ line, editable }: { line: Line; editable: boolean }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+type VerdictFilter = "all" | Verdict;
+
 export default function BranchOrderingPage() {
   const data = useQuery(api.inventory.orderingCycles.getMyCycle);
   const history = useQuery(api.inventory.orderingCycles.listRuns, { limit: 8 });
@@ -338,6 +376,7 @@ export default function BranchOrderingPage() {
   const [editingCycle, setEditingCycle] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [notes, setNotes] = useState<string | null>(null);
+  const [verdictFilter, setVerdictFilter] = useState<VerdictFilter>("all");
 
   if (data === undefined) {
     return (
@@ -356,7 +395,7 @@ export default function BranchOrderingPage() {
     );
   }
 
-  const { cycle, occurrence, run, lines } = data;
+  const { cycle, occurrence, run } = data;
 
   if (!cycle || editingCycle) {
     return (
@@ -372,10 +411,22 @@ export default function BranchOrderingPage() {
     );
   }
 
+  const lines = data.lines as Line[];
   const editable = run?.status === "draft";
-  const included = lines.filter((l) => l.included);
-  const includedUnits = included.reduce((sum, l) => sum + l.orderedQuantity, 0);
-  const flaggedCount = lines.filter((l) => l.flags.length > 0).length;
+  const preparedBeforeVerdicts = lines.some((l) => l.verdict === null);
+
+  const units = (ls: Line[]) => ls.reduce((sum, l) => sum + l.orderedQuantity, 0);
+  const toOrder = lines.filter((l) => l.included && l.orderedQuantity > 0);
+  const forSignOff = toOrder.filter(lineNeedsSignOff);
+  const onVerdict = toOrder.filter((l) => !lineNeedsSignOff(l));
+
+  const verdictCounts: Record<Verdict, number> = {
+    order: lines.filter((l) => l.verdict === "order").length,
+    review: lines.filter((l) => l.verdict === "review").length,
+    dontOrder: lines.filter((l) => l.verdict === "dontOrder").length,
+  };
+  const visibleLines =
+    verdictFilter === "all" ? lines : lines.filter((l) => l.verdict === verdictFilter);
 
   async function handle(action: string, fn: () => Promise<unknown>) {
     setBusy(action);
@@ -386,6 +437,28 @@ export default function BranchOrderingPage() {
     } finally {
       setBusy(null);
     }
+  }
+
+  function confirmAndSubmit(runId: Id<"orderingCycleRuns">) {
+    const parts: string[] = [];
+    if (onVerdict.length > 0) {
+      parts.push(
+        `${plural(onVerdict.length, "line")} (${units(onVerdict)} units) go straight to the warehouse, approved on their Order verdict.`
+      );
+    }
+    if (forSignOff.length > 0) {
+      parts.push(
+        `${plural(forSignOff.length, "line")} (${units(forSignOff)} units) wait for HQ sign-off.`
+      );
+    }
+    if (!window.confirm(`${parts.join("\n")}\n\nSubmit this order?`)) return;
+
+    handle("submit", async () => {
+      const r = await submitOrder({ runId });
+      const sent = r.approvedLineCount > 0 ? `${r.approvedUnitCount} units sent approved` : null;
+      const held = r.signOffLineCount > 0 ? `${r.signOffUnitCount} units awaiting HQ` : null;
+      toast.success(`Order submitted — ${[sent, held].filter(Boolean).join(", ")}`);
+    });
   }
 
   return (
@@ -453,13 +526,28 @@ export default function BranchOrderingPage() {
           <PackageCheck className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
           <div>
             <p className="font-medium">This cycle&apos;s order has been submitted.</p>
-            <p className="mt-0.5 text-muted-foreground">
-              It is now a stock request awaiting warehouse approval.{" "}
-              <Link href="/branch/transfers" className="text-primary hover:underline">
-                Track it in Transfers
-              </Link>
-              .
-            </p>
+            <ul className="mt-1 space-y-0.5 text-muted-foreground">
+              {run.transferId && (
+                <li>Lines with an Order verdict went to the warehouse already approved.</li>
+              )}
+              {run.signOff.pending > 0 && (
+                <li className="text-amber-700">
+                  {plural(run.signOff.pending, "line")} waiting for HQ sign-off.
+                </li>
+              )}
+              {run.signOff.approved > 0 && (
+                <li>{plural(run.signOff.approved, "line")} approved by HQ and sent to the warehouse.</li>
+              )}
+              {run.signOff.rejected > 0 && (
+                <li>{plural(run.signOff.rejected, "line")} rejected by HQ.</li>
+              )}
+              <li>
+                <Link href="/branch/transfers" className="text-primary hover:underline">
+                  Track it in Transfers
+                </Link>
+                .
+              </li>
+            </ul>
           </div>
         </div>
       )}
@@ -477,7 +565,7 @@ export default function BranchOrderingPage() {
           <CalendarClock className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
             No order prepared for this cycle yet. Preparing builds a draft from what this
-            store actually sold — it does not order anything.
+            store actually sold, with a verdict on every line — it does not order anything.
           </p>
           <button
             onClick={() => handle("prepare", () => prepareOrder({}))}
@@ -494,19 +582,38 @@ export default function BranchOrderingPage() {
         </div>
       )}
 
+      {/* Drafts prepared before verdicts existed */}
+      {run && preparedBeforeVerdicts && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <p>
+            This draft was prepared before order verdicts existed.
+            {editable && " Rebuild it to see each line's verdict and basis — it can't be submitted until then."}
+          </p>
+        </div>
+      )}
+
       {/* Draft */}
       {run && lines.length > 0 && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-muted/30 p-3">
-            <div className="text-sm">
-              <span className="font-semibold">{included.length}</span> of {lines.length}{" "}
-              lines · <span className="font-semibold">{includedUnits}</span> units · sized
-              for {run.coverDays} days cover
-              {flaggedCount > 0 && (
-                <span className="ml-2 inline-flex items-center gap-1 text-amber-700">
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  {flaggedCount} need a look
-                </span>
+            <div className="space-y-0.5 text-sm">
+              <div>
+                <span className="font-semibold">{toOrder.length}</span> of {lines.length} lines ·{" "}
+                <span className="font-semibold">{units(toOrder)}</span> units · sized for{" "}
+                {run.coverDays} days cover
+              </div>
+              {editable && toOrder.length > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  {plural(onVerdict.length, "line")} ({units(onVerdict)} units) approved on verdict ·{" "}
+                  {forSignOff.length > 0 ? (
+                    <span className="font-medium text-amber-700">
+                      {plural(forSignOff.length, "line")} ({units(forSignOff)} units) need HQ sign-off
+                    </span>
+                  ) : (
+                    "none need HQ sign-off"
+                  )}
+                </div>
               )}
             </div>
             {editable && (
@@ -536,19 +643,8 @@ export default function BranchOrderingPage() {
                   Skip cycle
                 </button>
                 <button
-                  onClick={() => {
-                    if (
-                      !window.confirm(
-                        `Submit ${included.length} lines (${includedUnits} units) as a stock request? This holds the stock at the warehouse and enters the approval queue.`
-                      )
-                    )
-                      return;
-                    handle("submit", async () => {
-                      const r = await submitOrder({ runId: run._id });
-                      toast.success(`Order submitted — ${r.unitCount} units requested`);
-                    });
-                  }}
-                  disabled={busy !== null || included.length === 0}
+                  onClick={() => confirmAndSubmit(run._id)}
+                  disabled={busy !== null || toOrder.length === 0 || preparedBeforeVerdicts}
                   className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                 >
                   {busy === "submit" ? (
@@ -583,25 +679,57 @@ export default function BranchOrderingPage() {
             </div>
           )}
 
+          {/* Verdict filter */}
+          <div className="flex flex-wrap gap-1.5">
+            {(["all", ...VERDICT_ORDER] as VerdictFilter[]).map((f) => (
+              <button
+                key={f}
+                onClick={() => setVerdictFilter(f)}
+                className={cn(
+                  "rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                  verdictFilter === f
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                )}
+              >
+                {f === "all" ? `All · ${lines.length}` : `${VERDICT_META[f].label} · ${verdictCounts[f]}`}
+              </button>
+            ))}
+          </div>
+
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/50 text-xs text-muted-foreground">
                   <th className="px-3 py-2.5 text-left font-medium">On</th>
-                  <th className="px-3 py-2.5 text-left font-medium">Item</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Item &amp; basis</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Verdict</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Movement</th>
+                  <th className="px-3 py-2.5 text-left font-medium">Aging</th>
                   <th className="px-3 py-2.5 text-right font-medium">On hand</th>
                   <th className="px-3 py-2.5 text-right font-medium">Incoming</th>
                   <th className="px-3 py-2.5 text-right font-medium">Sold 30d</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Last sale</th>
-                  <th className="px-3 py-2.5 text-right font-medium">Stock age</th>
+                  <th
+                    className="px-3 py-2.5 text-right font-medium"
+                    title="Stock projected at the end of the cover window, against the item's low-stock threshold. Red when the trigger fired."
+                  >
+                    Projected / threshold
+                  </th>
                   <th className="px-3 py-2.5 text-right font-medium">Suggested</th>
                   <th className="px-3 py-2.5 text-right font-medium">Order</th>
                 </tr>
               </thead>
               <tbody>
-                {lines.map((l) => (
-                  <LineRow key={l._id} line={l as Line} editable={editable} />
+                {visibleLines.map((l) => (
+                  <LineRow key={l._id} line={l} editable={editable} />
                 ))}
+                {visibleLines.length === 0 && (
+                  <tr>
+                    <td colSpan={11} className="px-3 py-6 text-center text-sm text-muted-foreground">
+                      No lines with this verdict.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -610,7 +738,7 @@ export default function BranchOrderingPage() {
 
       {run && lines.length === 0 && (
         <div className="rounded-lg border p-8 text-center text-sm text-muted-foreground">
-          Nothing needs ordering this cycle — no shortfalls and nothing flagged for review.
+          Nothing needs ordering this cycle — no trigger fired and nothing needs assessing.
         </div>
       )}
 
@@ -626,6 +754,7 @@ export default function BranchOrderingPage() {
                   <th className="px-3 py-2 text-left font-medium">Status</th>
                   <th className="px-3 py-2 text-right font-medium">Lines</th>
                   <th className="px-3 py-2 text-right font-medium">Units</th>
+                  <th className="px-3 py-2 text-left font-medium">HQ sign-off</th>
                   <th className="px-3 py-2 text-left font-medium">Note</th>
                 </tr>
               </thead>
@@ -636,6 +765,13 @@ export default function BranchOrderingPage() {
                     <td className="px-3 py-2 capitalize">{r.status}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.lineCount}</td>
                     <td className="px-3 py-2 text-right tabular-nums">{r.unitCount}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {r.pendingSignOffCount > 0 ? (
+                        <span className="text-amber-700">{r.pendingSignOffCount} awaiting</span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-xs text-muted-foreground">
                       {r.skippedReason ?? "—"}
                     </td>

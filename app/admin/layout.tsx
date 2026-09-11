@@ -17,6 +17,7 @@ import {
   LineChart,
   ArrowLeftRight,
   ClipboardList,
+  ClipboardCheck,
   Truck,
   Receipt,
   Settings,
@@ -64,6 +65,7 @@ const overviewNavItems: NavItem[] = [
 
 const operationsNavItems: NavItem[] = [
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
+  { href: "/admin/ordering-signoff", label: "Ordering Sign-off", icon: ClipboardCheck, roles: ["admin"] },
   { href: "/admin/couriers", label: "Couriers", icon: Truck, roles: ["admin"] },
   { href: "/admin/bir-registration", label: "BIR Approvals", icon: Receipt, roles: ["admin"] },
   { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },

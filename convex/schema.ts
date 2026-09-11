@@ -229,7 +229,8 @@ export default defineSchema({
     ),
     anchorDate: v.string(),               // YYYYMMDD (PHT) of the first ordering day
     leadTimeDays: v.number(),             // warehouse → shelf, used to size cover
-    // No sale in this many days ⇒ the line is excluded from the draft by default.
+    // Stock unsold for this many days is listed for assessment in the draft even
+    // when its threshold trigger did not fire.
     staleAfterDays: v.number(),
     isActive: v.boolean(),
     createdById: v.id("users"),
@@ -281,9 +282,33 @@ export default defineSchema({
     stockAgeDays: v.optional(v.number()),
     flags: v.array(v.string()),           // "noRecentSales" | "slowMoving" | "agedStock"
     reviewNote: v.optional(v.string()),
+    // The ordering basis, frozen with the snapshot. Optional only because lines
+    // prepared before verdicts existed have none. stockAgeDays above is the age
+    // of the oldest units on hand, which sets agingTier.
+    movement: v.optional(
+      v.union(v.literal("fast"), v.literal("medium"), v.literal("slow"), v.literal("none"))
+    ),
+    movementScore: v.optional(v.number()),        // what movement was judged on
+    agingTier: v.optional(v.union(v.literal("green"), v.literal("yellow"), v.literal("red"))),
+    lowStockThreshold: v.optional(v.number()),
+    projectedStock: v.optional(v.number()),       // left at the end of the cover window
+    triggered: v.optional(v.boolean()),
+    verdict: v.optional(
+      v.union(v.literal("order"), v.literal("review"), v.literal("dontOrder"))
+    ),
+    verdictReasons: v.optional(v.array(v.string())),
+    // HQ sign-off, for included lines the verdict alone does not approve.
+    signOff: v.optional(
+      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"))
+    ),
+    signOffById: v.optional(v.id("users")),
+    signOffAt: v.optional(v.number()),
+    signOffNote: v.optional(v.string()),
+    signOffTransferId: v.optional(v.id("transfers")),
   })
     .index("by_run", ["runId"])
-    .index("by_run_variant", ["runId", "variantId"]),
+    .index("by_run_variant", ["runId", "variantId"])
+    .index("by_signOff", ["signOff"]),
 
   brands: defineTable({
     name: v.string(),

@@ -262,6 +262,41 @@ export async function createTransferForRequester(
     return newTransferId;;
 }
 
+// ─── approveTransferRecord ────────────────────────────────────────────────────
+// The approval step itself: status, audit entry and the requester's
+// notification. Shared with the ordering cycle, which approves on a line's
+// verdict as well as on an HQ sign-off. A verdict approval leaves approvedById
+// empty, so no person appears to have approved what a rule approved; the audit
+// entry records the basis instead. Callers must have checked the transfer is
+// still "requested".
+export async function approveTransferRecord(
+  ctx: MutationCtx,
+  transferId: Id<"transfers">,
+  args: { actorId: Id<"users">; approvedById?: Id<"users">; basis?: string }
+): Promise<void> {
+  const now = Date.now();
+  await ctx.db.patch(transferId, {
+    status: "approved",
+    approvedById: args.approvedById,
+    approvedAt: now,
+    updatedAt: now,
+  });
+
+  await _logAuditEntry(ctx, {
+    action: "transfer.approve",
+    userId: args.actorId,
+    entityType: "transfers",
+    entityId: transferId,
+    before: { status: "requested" },
+    after: args.basis ? { status: "approved", basis: args.basis } : { status: "approved" },
+  });
+
+  await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+    type: "transfer_approved",
+    transferId,
+  });
+}
+
 export const createTransferRequest = mutation({
   args: {
     fromBranchId: v.id("branches"),
@@ -443,27 +478,9 @@ export const approveTransfer = mutation({
       });
     }
 
-    // L1 fix: single Date.now() call for both timestamp fields
-    const now = Date.now();
-    await ctx.db.patch(args.transferId, {
-      status: "approved",
+    await approveTransferRecord(ctx, args.transferId, {
+      actorId: scope.userId,
       approvedById: scope.userId,
-      approvedAt: now,
-      updatedAt: now,
-    });
-
-    await _logAuditEntry(ctx, {
-      action: "transfer.approve",
-      userId: scope.userId,
-      entityType: "transfers",
-      entityId: args.transferId,
-      before: { status: "requested" },
-      after: { status: "approved" },
-    });
-
-    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
-      type: "transfer_approved",
-      transferId: args.transferId,
     });
   },
 });
