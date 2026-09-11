@@ -963,6 +963,13 @@ export default defineSchema({
     handoverCashInRegisterCentavos: v.optional(v.number()),
     handoverChangeFundCentavos: v.optional(v.number()),
     handoverCashFundCentavos: v.optional(v.number()),
+    // The cash the cashier counted and declared when closing. The count is
+    // blind — the till never shows the expected figure — and
+    // closedCashBalanceCentavos holds what the system expected at that moment
+    // for the whole drawer since it was last set.
+    declaredCashCentavos: v.optional(v.number()),
+    // The manager approval that let a short turnover count open this shift.
+    turnoverApprovalId: v.optional(v.id("cashTurnoverApprovals")),
   })
     .index("by_branch_status", ["branchId", "status"])
     .index("by_terminal_status", ["terminalId", "status"])
@@ -970,6 +977,27 @@ export default defineSchema({
     .index("by_cashier_status", ["cashierId", "status"])
     .index("by_cashierAccount", ["cashierAccountId"])
     .index("by_branch_cashier", ["branchId", "cashierId"]),
+
+  // A turnover count that came up short — of the outgoing cashier's declaration
+  // or of the drawer's expected cash — holds the register until a manager
+  // approves it or sends the cashier back to recount.
+  cashTurnoverApprovals: defineTable({
+    branchId: v.id("branches"),
+    terminalId: v.optional(v.id("posTerminals")),
+    prevShiftId: v.id("cashierShifts"),                     // the turnover being counted
+    cashierAccountId: v.optional(v.id("cashierAccounts")),  // the incoming cashier
+    countedCentavos: v.number(),
+    declaredCentavos: v.optional(v.number()),  // absent when the outgoing shift was force-closed
+    expectedCentavos: v.number(),
+    status: v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    requestedAt: v.number(),
+    decidedById: v.optional(v.id("users")),
+    decidedAt: v.optional(v.number()),
+    note: v.optional(v.string()),
+    openedShiftId: v.optional(v.id("cashierShifts")),       // set once the approval is used
+  })
+    .index("by_branch_status", ["branchId", "status"])
+    .index("by_prevShift", ["prevShiftId"]),
 
   promotions: defineTable({
     name: v.string(),
@@ -993,6 +1021,12 @@ export default defineSchema({
     // tiered
     minSpendCentavos: v.optional(v.number()),
     tieredDiscountCentavos: v.optional(v.number()),
+    // percentage / fixedAmount: what the discount is taken from — the in-scope
+    // total, or one unit of the highest-priced in-scope item. Absent means
+    // whole purchase, which is how every promotion before this setting works.
+    discountApplication: v.optional(
+      v.union(v.literal("wholePurchase"), v.literal("highestItem"))
+    ),
     // scoping
     branchIds: v.array(v.id("branches")),
     branchClassifications: v.optional(

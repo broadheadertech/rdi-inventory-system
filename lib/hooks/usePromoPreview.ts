@@ -23,6 +23,7 @@ type ActivePromo = {
   getQuantity?: number;
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
+  discountApplication?: "wholePurchase" | "highestItem";
   brandIds: string[];
   categoryIds: string[];
   variantIds: string[];

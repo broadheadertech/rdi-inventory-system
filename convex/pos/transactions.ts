@@ -303,6 +303,7 @@ export const createTransaction = mutation({
         getQuantity: promo.getQuantity,
         minSpendCentavos: promo.minSpendCentavos,
         tieredDiscountCentavos: promo.tieredDiscountCentavos,
+        discountApplication: promo.discountApplication,
         brandIds: promo.brandIds.map(String),
         categoryIds: promo.categoryIds.map(String),
         variantIds: promo.variantIds.map(String),

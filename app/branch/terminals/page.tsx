@@ -333,6 +333,147 @@ function TerminalRow({ terminal }: { terminal: Terminal }) {
   );
 }
 
+// ─── Cash counts ──────────────────────────────────────────────────────────────
+
+function peso(centavos: number): string {
+  return `₱${(centavos / 100).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+const VARIANCE_KIND_LABEL = {
+  switchCashier: "Switch cashier count",
+  endOfDay: "End of day count",
+  turnoverApproved: "Short turnover, approved",
+} as const;
+
+/**
+ * Short turnovers holding a register until a manager decides, and the week's
+ * counts that did not match the drawer. Counts at the till are blind, so this is
+ * the only place these amounts appear.
+ */
+function CashCountsPanel() {
+  const approvals = useQuery(api.pos.shifts.listTurnoverApprovals);
+  const variances = useQuery(api.pos.shifts.listCashVariances);
+  const decide = useMutation(api.pos.shifts.decideTurnoverApproval);
+
+  if (!approvals || !variances || (approvals.length === 0 && variances.length === 0)) {
+    return null;
+  }
+
+  function onDecide(
+    approvalId: NonNullable<typeof approvals>[number]["approvalId"],
+    approve: boolean,
+    label: string
+  ) {
+    const note = window.prompt(
+      approve
+        ? `Approve the short count on ${label}? The shift opens on what the cashier counted.\n\nNote (optional):`
+        : `Send the cashier on ${label} back to recount?\n\nTell them why:`
+    );
+    if (note === null) return;
+    decide({ approvalId, approve, note: note.trim() || undefined })
+      .then(() => toast.success(approve ? "Approved — the register can open" : "Sent back to recount"))
+      .catch((err) => toast.error(getErrorMessage(err)));
+  }
+
+  return (
+    <div className="space-y-4">
+      {approvals.length > 0 && (
+        <div className="space-y-3 rounded-lg border border-red-500/40 bg-red-500/5 p-4">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-red-600" />
+            <h2 className="text-sm font-semibold">Short turnovers waiting for you</h2>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            These registers stay closed until you decide. Approving opens the shift on the amount
+            the incoming cashier counted; the shortfall stays on record.
+          </p>
+          <div className="divide-y">
+            {approvals.map((a) => (
+              <div key={a.approvalId} className="flex flex-wrap items-start justify-between gap-3 py-2 text-sm">
+                <div className="min-w-0">
+                  <p className="font-medium">
+                    {a.terminalLabel}: {a.outgoingCashierName} → {a.incomingCashierName}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Counted {peso(a.countedCentavos)} · declared{" "}
+                    {a.declaredCentavos === null ? "— (force-closed)" : peso(a.declaredCentavos)} ·
+                    expected {peso(a.expectedCentavos)}
+                  </p>
+                  <p className="text-xs font-medium text-red-600">Short {peso(a.shortCentavos)}</p>
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    onClick={() => onDecide(a.approvalId, true, a.terminalLabel)}
+                    className="rounded-md border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => onDecide(a.approvalId, false, a.terminalLabel)}
+                    className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+                  >
+                    Recount
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {variances.length > 0 && (
+        <div className="space-y-2 rounded-lg border bg-card p-4">
+          <h2 className="text-sm font-semibold">Cash differences · last 7 days</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs text-muted-foreground">
+                  <th className="py-2 pr-3 font-medium">When</th>
+                  <th className="py-2 pr-3 font-medium">Register</th>
+                  <th className="py-2 pr-3 font-medium">Cashier</th>
+                  <th className="py-2 pr-3 font-medium">Count</th>
+                  <th className="py-2 pr-3 text-right font-medium">Expected</th>
+                  <th className="py-2 pr-3 text-right font-medium">Counted</th>
+                  <th className="py-2 text-right font-medium">Difference</th>
+                </tr>
+              </thead>
+              <tbody>
+                {variances.map((r) => (
+                  <tr key={r.key} className="border-b last:border-0">
+                    <td className="whitespace-nowrap py-2 pr-3 text-xs text-muted-foreground">
+                      {new Date(r.at).toLocaleString("en-PH", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                        timeZone: "Asia/Manila",
+                      })}
+                    </td>
+                    <td className="py-2 pr-3">{r.terminalLabel}</td>
+                    <td className="py-2 pr-3">{r.cashierName}</td>
+                    <td className="py-2 pr-3 text-xs">{VARIANCE_KIND_LABEL[r.kind]}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{peso(r.expectedCentavos)}</td>
+                    <td className="py-2 pr-3 text-right tabular-nums">{peso(r.countedCentavos)}</td>
+                    <td
+                      className={`py-2 text-right font-medium tabular-nums ${
+                        r.differenceCentavos < 0 ? "text-red-600" : "text-amber-600"
+                      }`}
+                    >
+                      {r.differenceCentavos > 0 ? "+" : ""}
+                      {peso(r.differenceCentavos)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function BranchTerminalsPage() {
@@ -440,6 +581,9 @@ export default function BranchTerminalsPage() {
             ))}
           </div>
         )}
+
+      {/* ── Cash counts: short turnovers to approve, recent differences ── */}
+      <CashCountsPanel />
 
       {/* ── Open shifts ───────────────────────────────────────────────── */}
       {openShifts && openShifts.length > 0 && (

@@ -348,10 +348,10 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
           <ConnectionIndicator
             status={syncStatus === "syncing" ? "syncing" : undefined}
           />
-          {/* On an enrolled register this hands the machine back to its terminal
-              identity: the device token stays, so TerminalSessionGate signs
-              straight back in as the register rather than showing a login. */}
-          {!isEnrolledTerminal && (
+          {/* Only unbound devices get a sign-out — an enrolled register would sign
+              straight back in as itself — and only with no shift open: a
+              cashier leaves a shift by declaring the drawer at End Shift. */}
+          {!isEnrolledTerminal && !hasOpenShift && (
             <SignOutButton className="w-auto border-0 px-2 py-0 text-xs" />
           )}
         </div>

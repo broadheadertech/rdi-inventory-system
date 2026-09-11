@@ -43,6 +43,7 @@ const commonArgs = {
   getQuantity: v.optional(v.number()),
   minSpendCentavos: v.optional(v.number()),
   tieredDiscountCentavos: v.optional(v.number()),
+  discountApplication: v.optional(v.union(v.literal("wholePurchase"), v.literal("highestItem"))),
   branchIds: v.array(v.id("branches")),
   branchClassifications: v.optional(
     v.array(v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet")))

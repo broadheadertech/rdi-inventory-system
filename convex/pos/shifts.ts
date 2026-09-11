@@ -1,15 +1,40 @@
+// convex/pos/shifts.ts — cashier shifts on a register.
+//
+// A shift is one cashier's session on one register, and the drawer passes
+// through a chain of them each business day:
+//
+//   first shift     sets the drawer's float
+//   Switch Cashier  the outgoing cashier declares the cash on hand; the next
+//                   cashier counts it again before their shift opens
+//   End of Day      the last cashier declares the cash on hand, which becomes
+//                   the day's count, and the register's Z-reading is filed
+//
+// Every count is blind: the till never shows what the system expects, so no
+// one can simply type it back. A turnover count that comes up short — of the
+// outgoing declaration or of the drawer's expected cash — holds the register
+// until a manager approves it. And a register cannot start a new business day
+// while its last one has no Z-reading.
+
 import { v, ConvexError } from "convex/values";
-import { query, mutation, type QueryCtx } from "../_generated/server";
-import type { Id } from "../_generated/dataModel";
-import { withBranchScope } from "../_helpers/withBranchScope";
-import { POS_ROLES } from "../_helpers/permissions";
+import { query, mutation, type QueryCtx, type MutationCtx } from "../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
+import { withBranchScope, requireBranchScope } from "../_helpers/withBranchScope";
+import { BRANCH_MANAGEMENT_ROLES, POS_ROLES } from "../_helpers/permissions";
 import { requireTerminal, touchTerminal } from "../_helpers/requireTerminal";
+import { _logAuditEntry } from "../_helpers/auditLog";
+import { fileZReading, findZReading } from "./readings";
 
 const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-/** Today's business date in PHT, as YYYYMMDD — the key zReadings are filed under. */
-function todayPht(): string {
-  const d = new Date(Date.now() + PHT_OFFSET_MS);
+type Ctx = QueryCtx | MutationCtx;
+type RegisterId = Id<"posTerminals"> | null;
+
+// ─── dates (PHT) ──────────────────────────────────────────────────────────────
+
+/** The PHT business date of a timestamp, as YYYYMMDD — the key zReadings are filed under. */
+function phtDate(ms: number): string {
+  const d = new Date(ms + PHT_OFFSET_MS);
   return (
     `${d.getUTCFullYear()}` +
     String(d.getUTCMonth() + 1).padStart(2, "0") +
@@ -17,180 +42,371 @@ function todayPht(): string {
   );
 }
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
-async function computeShiftCash(
-  ctx: QueryCtx,
-  branchId: Id<"branches">,
-  shift: {
-    openedAt: number;
-    changeFundCentavos?: number;
-    cashFundCentavos: number;
-    terminalId?: Id<"posTerminals">;
-  }
-) {
-  const all = await ctx.db
-    .query("transactions")
-    .withIndex("by_branch_date", (q) =>
-      q.eq("branchId", branchId).gte("createdAt", shift.openedAt)
-    )
-    .collect();
-
-  // A drawer holds only what its own register took. Counting the branch would
-  // show Lane 1 the sum of every lane and make its cash count read as short.
-  const txns = shift.terminalId
-    ? all.filter((t) => t.terminalId === shift.terminalId)
-    : all;
-
-  let cashSalesCentavos = 0;
-  let gcashSalesCentavos = 0;
-  let mayaSalesCentavos = 0;
-  let transactionCount = 0;
-
-  for (const t of txns) {
-    transactionCount++;
-    const splitAmt = t.splitPayment?.amountCentavos ?? 0;
-    const primaryAmt = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
-
-    if (t.paymentMethod === "cash") cashSalesCentavos += primaryAmt;
-    else if (t.paymentMethod === "gcash") gcashSalesCentavos += primaryAmt;
-    else if (t.paymentMethod === "maya") mayaSalesCentavos += primaryAmt;
-
-    if (t.splitPayment) {
-      if (t.splitPayment.method === "cash") cashSalesCentavos += splitAmt;
-      else if (t.splitPayment.method === "gcash") gcashSalesCentavos += splitAmt;
-      else if (t.splitPayment.method === "maya") mayaSalesCentavos += splitAmt;
-    }
-  }
-
-  const changeFund = shift.changeFundCentavos ?? shift.cashFundCentavos;
-  const cashInRegister = changeFund + cashSalesCentavos;
-
-  return {
-    cashSalesCentavos,
-    gcashSalesCentavos,
-    mayaSalesCentavos,
-    transactionCount,
-    cashInRegisterCentavos: cashInRegister,
-  };
+function todayPht(): string {
+  return phtDate(Date.now());
 }
 
-// ─── getActiveShift ─────────────────────────────────────────────────────────
-// Returns the currently open shift for this branch (one at a time per branch).
+/** When today's PHT business day began. */
+function todayStartMs(): number {
+  const d = new Date(Date.now() + PHT_OFFSET_MS);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - PHT_OFFSET_MS;
+}
+
+function formatYmd(ymd: string): string {
+  return new Date(
+    Date.UTC(Number(ymd.slice(0, 4)), Number(ymd.slice(4, 6)) - 1, Number(ymd.slice(6, 8)))
+  ).toLocaleDateString("en-PH", { dateStyle: "medium", timeZone: "UTC" });
+}
+
+// ─── the register ─────────────────────────────────────────────────────────────
+
+/** Whether a row belongs to this register — or, on an unbound device, to no register. */
+function onRegister(terminalId: RegisterId) {
+  return (row: { terminalId?: Id<"posTerminals"> }) =>
+    terminalId ? row.terminalId === terminalId : row.terminalId === undefined;
+}
+
+async function requirePosScope(ctx: Ctx) {
+  const scope = await withBranchScope(ctx);
+  if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+    throw new ConvexError({ code: "UNAUTHORIZED" });
+  }
+  return scope;
+}
+
+async function requireManagerScope(ctx: Ctx) {
+  const scope = await withBranchScope(ctx);
+  if (!(BRANCH_MANAGEMENT_ROLES as readonly string[]).includes(scope.user.role)) {
+    throw new ConvexError({ code: "UNAUTHORIZED" });
+  }
+  return scope;
+}
+
+/**
+ * The open shift on this register. A shift belongs to a register, not a store:
+ * on an enrolled terminal only that terminal's shift counts, so Lane 2 never
+ * walks into Lane 1's shift. An unbound device only ever sees a shift that
+ * predates terminals.
+ */
+async function openShiftOnRegister(ctx: Ctx, branchId: Id<"branches">, terminalId: RegisterId) {
+  if (terminalId) {
+    return await ctx.db
+      .query("cashierShifts")
+      .withIndex("by_terminal_status", (q) => q.eq("terminalId", terminalId).eq("status", "open"))
+      .first();
+  }
+  const open = await ctx.db
+    .query("cashierShifts")
+    .withIndex("by_branch_status", (q) => q.eq("branchId", branchId).eq("status", "open"))
+    .collect();
+  return open.find((s) => s.terminalId === undefined) ?? null;
+}
+
+/** The newest shift on this register opened before `beforeMs`. */
+async function latestShiftOnRegister(
+  ctx: Ctx,
+  branchId: Id<"branches">,
+  terminalId: RegisterId,
+  beforeMs = Number.MAX_SAFE_INTEGER
+): Promise<Doc<"cashierShifts"> | null> {
+  const matches = onRegister(terminalId);
+  for await (const shift of ctx.db
+    .query("cashierShifts")
+    .withIndex("by_branch_opened", (q) => q.eq("branchId", branchId).lt("openedAt", beforeMs))
+    .order("desc")) {
+    if (matches(shift)) return shift;
+  }
+  return null;
+}
+
+async function lastZOnRegister(
+  ctx: Ctx,
+  branchId: Id<"branches">,
+  terminalId: RegisterId
+): Promise<Doc<"zReadings"> | null> {
+  if (terminalId) {
+    return await ctx.db
+      .query("zReadings")
+      .withIndex("by_terminal", (q) => q.eq("terminalId", terminalId))
+      .order("desc")
+      .first();
+  }
+  for await (const z of ctx.db
+    .query("zReadings")
+    .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+    .order("desc")) {
+    if (z.terminalId === undefined) return z;
+  }
+  return null;
+}
+
+/** The last earlier business day this register traded on without filing its Z-reading. */
+async function missingZReadingDate(
+  ctx: Ctx,
+  branchId: Id<"branches">,
+  terminalId: RegisterId
+): Promise<string | null> {
+  const last = await latestShiftOnRegister(ctx, branchId, terminalId, todayStartMs());
+  if (!last) return null;
+  const date = phtDate(last.openedAt);
+  return (await findZReading(ctx, branchId, terminalId, date)) ? null : date;
+}
+
+/**
+ * The drawer the next cashier must count: this register's last shift, if it
+ * ended as a Switch Cashier after the register's last Z-reading.
+ */
+async function pendingHandover(
+  ctx: Ctx,
+  branchId: Id<"branches">,
+  terminalId: RegisterId
+): Promise<Doc<"cashierShifts"> | null> {
+  const last = await latestShiftOnRegister(ctx, branchId, terminalId);
+  if (!last || last.status !== "closed" || last.closeType !== "turnover") return null;
+  const lastZ = await lastZOnRegister(ctx, branchId, terminalId);
+  if (lastZ && (last.closedAt ?? 0) <= lastZ.generatedAt) return null;
+  return last;
+}
+
+async function shiftCashierName(ctx: Ctx, shift: Doc<"cashierShifts">): Promise<string> {
+  if (shift.cashierAccountId) {
+    const account = await ctx.db.get(shift.cashierAccountId);
+    if (account) return `${account.firstName} ${account.lastName}`;
+  }
+  const user = await ctx.db.get(shift.cashierId);
+  return user?.name ?? "Cashier";
+}
+
+// ─── expected cash ────────────────────────────────────────────────────────────
+
+/** Cash a sale put in the drawer: its cash tender, including the cash half of a split. */
+function cashTendered(t: Doc<"transactions">): number {
+  const splitAmt = t.splitPayment?.amountCentavos ?? 0;
+  const primary = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
+  let cash = t.paymentMethod === "cash" ? primary : 0;
+  if (t.splitPayment?.method === "cash") cash += splitAmt;
+  return cash;
+}
+
+/**
+ * Cash that should be in the drawer `shift` is part of: the float it was last
+ * set with, plus cash taken and Cash In since, less Cash Out. Voided sales are
+ * left out — their cash went back.
+ *
+ * "Last set" walks back through the turnovers that handed this drawer on. Each
+ * cashier counts it, but the day keeps one running figure, so cash lost at one
+ * handover still shows at the next count and at the end of the day. The walk
+ * stops at an End of Day, at a Z-reading, or where the chain changes register
+ * (older shifts linked handovers across lanes).
+ */
+async function expectedDrawerCash(
+  ctx: Ctx,
+  branchId: Id<"branches">,
+  shift: Doc<"cashierShifts">
+): Promise<number> {
+  const lastZ = await lastZOnRegister(ctx, branchId, shift.terminalId ?? null);
+  const sinceZ = lastZ?.generatedAt ?? 0;
+
+  let start = shift;
+  for (let i = 0; i < 50 && start.prevShiftId; i++) {
+    const prev = await ctx.db.get(start.prevShiftId);
+    if (
+      !prev ||
+      prev.terminalId !== start.terminalId ||
+      prev.closeType === "endOfDay" ||
+      prev.openedAt < sinceZ
+    ) {
+      break;
+    }
+    start = prev;
+  }
+
+  const matches = onRegister(shift.terminalId ?? null);
+
+  const txns = (
+    await ctx.db
+      .query("transactions")
+      .withIndex("by_branch_date", (q) =>
+        q.eq("branchId", branchId).gte("createdAt", start.openedAt)
+      )
+      .collect()
+  ).filter(matches);
+  let cash = 0;
+  for (const t of txns) {
+    if (t.status !== "voided") cash += cashTendered(t);
+  }
+
+  const ops = (
+    await ctx.db
+      .query("drawerOperations")
+      .withIndex("by_branch_date", (q) =>
+        q.eq("branchId", branchId).gte("createdAt", start.openedAt)
+      )
+      .collect()
+  ).filter(matches);
+  let moved = 0;
+  for (const op of ops) {
+    if (op.type === "payIn") moved += op.amountCentavos;
+    else if (op.type === "payOut") moved -= op.amountCentavos;
+  }
+
+  return (start.changeFundCentavos ?? start.cashFundCentavos) + cash + moved;
+}
+
+// ─── getActiveShift ───────────────────────────────────────────────────────────
+// The open shift on this register. No cash figures: the till counts blind.
 
 export const getActiveShift = query({
   args: { deviceToken: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    const scope = await withBranchScope(ctx);
-    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
-      throw new ConvexError({ code: "UNAUTHORIZED" });
-    }
-
+    const scope = await requirePosScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) return null;
 
-    // A shift belongs to a register, not to a store. On an enrolled terminal
-    // only that terminal's shift counts, so Lane 2 does not walk into Lane 1's
-    // open shift — which would let it trade with no cashier login and file its
-    // sales under Lane 1's cashier.
     const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
-
-    const shift = terminal
-      ? await ctx.db
-          .query("cashierShifts")
-          .withIndex("by_terminal_status", (q) =>
-            q.eq("terminalId", terminal._id).eq("status", "open")
-          )
-          .first()
-      : // Unbound device: fall back to the branch's open shift, and only ever
-        // to one that predates terminals, so an enrolled lane's shift is never
-        // picked up by a laptop.
-        (
-          await ctx.db
-            .query("cashierShifts")
-            .withIndex("by_branch_status", (q) =>
-              q.eq("branchId", branchId).eq("status", "open")
-            )
-            .collect()
-        ).find((sh) => sh.terminalId === undefined) ?? null;
-
+    const terminalId = terminal?._id ?? null;
+    const shift = await openShiftOnRegister(ctx, branchId, terminalId);
     if (!shift) return null;
 
-    // Resolve cashier name from sub-account or Clerk user
-    let cashierName = "Cashier";
-    if (shift.cashierAccountId) {
-      const account = await ctx.db.get(shift.cashierAccountId);
-      if (account) cashierName = `${account.firstName} ${account.lastName}`;
-    } else {
-      const user = await ctx.db.get(shift.cashierId);
-      if (user) cashierName = user.name ?? "Cashier";
-    }
+    const matches = onRegister(terminalId);
+    const txns = await ctx.db
+      .query("transactions")
+      .withIndex("by_branch_date", (q) =>
+        q.eq("branchId", branchId).gte("createdAt", shift.openedAt)
+      )
+      .collect();
+    const transactionCount = txns.filter((t) => matches(t) && t.status !== "voided").length;
 
-    const cash = await computeShiftCash(ctx, branchId, shift);
-
+    const openedDate = phtDate(shift.openedAt);
     return {
       shiftId: shift._id,
-      cashierName,
+      cashierName: await shiftCashierName(ctx, shift),
       cashierAccountId: shift.cashierAccountId ?? null,
       changeFundCentavos: shift.changeFundCentavos ?? shift.cashFundCentavos,
       cashFundCentavos: shift.cashFundCentavos,
       openedAt: shift.openedAt,
-      ...cash,
+      openedDate,
+      // Left open from an earlier business day: that day has to be closed
+      // before this register trades today.
+      isPreviousDay: openedDate < todayPht(),
+      transactionCount,
     };
   },
 });
 
-// ─── openShift ──────────────────────────────────────────────────────────────
-// Opens a new shift. Accepts optional cashierAccountId for sub-account shifts.
+// ─── getRegisterStatus ────────────────────────────────────────────────────────
+// What stands between this register and its next shift, for the login gate.
+
+export const getRegisterStatus = query({
+  args: { deviceToken: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const scope = await requirePosScope(ctx);
+    const branchId = scope.branchId;
+    if (!branchId) return null;
+
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    const terminalId = terminal?._id ?? null;
+
+    const closedToday = await findZReading(ctx, branchId, terminalId, todayPht());
+    const missingZDate = closedToday ? null : await missingZReadingDate(ctx, branchId, terminalId);
+    const handover =
+      closedToday || missingZDate ? null : await pendingHandover(ctx, branchId, terminalId);
+
+    return {
+      closedToday: closedToday ? { zCounter: closedToday.zCounter } : null,
+      missingZDate,
+      // Who handed over and when — never how much: the next cashier counts blind.
+      handover: handover
+        ? {
+            shiftId: handover._id,
+            cashierName: await shiftCashierName(ctx, handover),
+            closedAt: handover.closedAt ?? null,
+          }
+        : null,
+    };
+  },
+});
+
+// ─── openShift ────────────────────────────────────────────────────────────────
+
+async function requestTurnoverApproval(
+  ctx: MutationCtx,
+  a: {
+    branchId: Id<"branches">;
+    terminalId: RegisterId;
+    prevShiftId: Id<"cashierShifts">;
+    cashierAccountId?: Id<"cashierAccounts">;
+    countedCentavos: number;
+    declaredCentavos?: number;
+    expectedCentavos: number;
+    userId: Id<"users">;
+  }
+): Promise<Id<"cashTurnoverApprovals">> {
+  const now = Date.now();
+  const existing = await ctx.db
+    .query("cashTurnoverApprovals")
+    .withIndex("by_prevShift", (q) => q.eq("prevShiftId", a.prevShiftId))
+    .collect();
+
+  for (const e of existing) {
+    if (e.status !== "pending") continue;
+    // The same count asked again — a reloaded till — waits on the same request.
+    if (e.countedCentavos === a.countedCentavos && e.cashierAccountId === a.cashierAccountId) {
+      return e._id;
+    }
+    // A recount replaces the one still waiting.
+    await ctx.db.patch(e._id, { status: "rejected", decidedAt: now, note: "Replaced by a recount" });
+  }
+
+  const approvalId = await ctx.db.insert("cashTurnoverApprovals", {
+    branchId: a.branchId,
+    terminalId: a.terminalId ?? undefined,
+    prevShiftId: a.prevShiftId,
+    cashierAccountId: a.cashierAccountId,
+    countedCentavos: a.countedCentavos,
+    declaredCentavos: a.declaredCentavos,
+    expectedCentavos: a.expectedCentavos,
+    status: "pending",
+    requestedAt: now,
+  });
+
+  await _logAuditEntry(ctx, {
+    action: "pos.shift.turnoverShort",
+    userId: a.userId,
+    branchId: a.branchId,
+    entityType: "cashTurnoverApprovals",
+    entityId: approvalId,
+    after: {
+      countedCentavos: a.countedCentavos,
+      declaredCentavos: a.declaredCentavos ?? null,
+      expectedCentavos: a.expectedCentavos,
+    },
+  });
+
+  return approvalId;
+}
 
 export const openShift = mutation({
   args: {
-    changeFundCentavos: v.optional(v.number()),
-    cashFundCentavos: v.number(),
     cashierAccountId: v.optional(v.id("cashierAccounts")),
     deviceToken: v.optional(v.string()),
-    prevShiftId: v.optional(v.id("cashierShifts")),
-    handoverCashInRegisterCentavos: v.optional(v.number()),
-    handoverChangeFundCentavos: v.optional(v.number()),
-    handoverCashFundCentavos: v.optional(v.number()),
+    // The first shift of the day sets the drawer…
+    changeFundCentavos: v.optional(v.number()),
+    cashFundCentavos: v.optional(v.number()),
+    // …a shift taking over a drawer counts it instead.
+    turnoverCountCentavos: v.optional(v.number()),
+    approvalId: v.optional(v.id("cashTurnoverApprovals")),
   },
   handler: async (ctx, args) => {
-    const scope = await withBranchScope(ctx);
-    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
-      throw new ConvexError({ code: "UNAUTHORIZED" });
-    }
-
-    if ((args.changeFundCentavos ?? 0) < 0) {
-      throw new ConvexError("Change fund cannot be negative");
-    }
-    if (args.cashFundCentavos < 0) {
-      throw new ConvexError("Cash fund cannot be negative");
-    }
-
+    const scope = await requirePosScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) throw new ConvexError("No branch assigned");
 
     // Device binding — a shift may only be opened from an enrolled register.
     const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    const terminalId = terminal?._id ?? null;
 
-    // One open shift per register — or per branch on an unbound device.
-    const existing = terminal
-      ? await ctx.db
-          .query("cashierShifts")
-          .withIndex("by_terminal_status", (q) =>
-            q.eq("terminalId", terminal._id).eq("status", "open")
-          )
-          .first()
-      : (
-          await ctx.db
-            .query("cashierShifts")
-            .withIndex("by_branch_status", (q) =>
-              q.eq("branchId", branchId).eq("status", "open")
-            )
-            .collect()
-        ).find((sh) => sh.terminalId === undefined);
-
-    if (existing) {
+    if (await openShiftOnRegister(ctx, branchId, terminalId)) {
       throw new ConvexError(
         terminal
           ? `A shift is already open on ${terminal.label}. Close it first.`
@@ -198,28 +414,9 @@ export const openShift = mutation({
       );
     }
 
-    // A Z-reading closes that machine's trading day. Selling after one is
-    // finalised would produce sales that appear in no Z-reading at all —
-    // finalizeZReading refuses to run twice for the same date, so they could
-    // never be reported. Blocked here rather than at the point of sale, so the
-    // cashier finds out before serving a customer.
-    const today = todayPht();
-    const closedToday = terminal
-      ? await ctx.db
-          .query("zReadings")
-          .withIndex("by_terminal_date", (q) =>
-            q.eq("terminalId", terminal._id).eq("date", today)
-          )
-          .first()
-      : (
-          await ctx.db
-            .query("zReadings")
-            .withIndex("by_branch_date", (q) =>
-              q.eq("branchId", branchId).eq("date", today)
-            )
-            .collect()
-        ).find((r) => r.terminalId === undefined);
-
+    // A Z-reading closes that machine's trading day. Selling after it would
+    // produce sales that appear in no Z-reading at all.
+    const closedToday = await findZReading(ctx, branchId, terminalId, todayPht());
     if (closedToday) {
       throw new ConvexError(
         `The Z-reading for today has already been finalised${
@@ -228,107 +425,365 @@ export const openShift = mutation({
       );
     }
 
+    // Nor can a register start a new day while its last one was never closed.
+    const missingZ = await missingZReadingDate(ctx, branchId, terminalId);
+    if (missingZ) {
+      throw new ConvexError(
+        `The Z-reading for ${formatYmd(missingZ)} was never filed${
+          terminal ? ` on ${terminal.label}` : ""
+        }. File it before opening today's first shift.`
+      );
+    }
+
+    const now = Date.now();
+    const handover = await pendingHandover(ctx, branchId, terminalId);
+
+    // ── First shift of the day: it sets the drawer ──────────────────────────
+    if (!handover) {
+      const changeFund = args.changeFundCentavos ?? 0;
+      const cashFund = args.cashFundCentavos ?? 0;
+      if (changeFund < 0) throw new ConvexError("Change fund cannot be negative");
+      if (cashFund < 0) throw new ConvexError("Cash fund cannot be negative");
+
+      const shiftId = await ctx.db.insert("cashierShifts", {
+        branchId,
+        cashierId: scope.userId,
+        cashierAccountId: args.cashierAccountId,
+        terminalId: terminal?._id,
+        changeFundCentavos: changeFund,
+        cashFundCentavos: cashFund,
+        status: "open",
+        openedAt: now,
+      });
+      await touchTerminal(ctx, terminal);
+      return { status: "opened" as const, shiftId };
+    }
+
+    // ── Taking over a drawer: it is counted, blind ──────────────────────────
+    const counted = args.turnoverCountCentavos;
+    if (counted === undefined) {
+      throw new ConvexError("Count the cash handed over before opening this shift.");
+    }
+    if (!Number.isInteger(counted) || counted < 0) {
+      throw new ConvexError("The counted amount must be zero or more.");
+    }
+
+    const declared = handover.declaredCashCentavos;
+    const expected = await expectedDrawerCash(ctx, branchId, handover);
+    const short = counted < expected || (declared !== undefined && counted < declared);
+
+    let approvalId: Id<"cashTurnoverApprovals"> | undefined;
+    if (short) {
+      const approval = args.approvalId ? await ctx.db.get(args.approvalId) : null;
+      if (
+        !approval ||
+        approval.status !== "approved" ||
+        approval.prevShiftId !== handover._id ||
+        approval.countedCentavos !== counted ||
+        approval.cashierAccountId !== args.cashierAccountId ||
+        approval.openedShiftId !== undefined
+      ) {
+        return {
+          status: "needsApproval" as const,
+          approvalId: await requestTurnoverApproval(ctx, {
+            branchId,
+            terminalId,
+            prevShiftId: handover._id,
+            cashierAccountId: args.cashierAccountId,
+            countedCentavos: counted,
+            declaredCentavos: declared,
+            expectedCentavos: expected,
+            userId: scope.userId,
+          }),
+        };
+      }
+      approvalId = approval._id;
+    }
+
     const shiftId = await ctx.db.insert("cashierShifts", {
       branchId,
       cashierId: scope.userId,
       cashierAccountId: args.cashierAccountId,
       terminalId: terminal?._id,
-      changeFundCentavos: args.changeFundCentavos,
-      cashFundCentavos: args.cashFundCentavos,
+      // The drawer is what this cashier counted; the expenses fund passes on with it.
+      changeFundCentavos: counted,
+      cashFundCentavos: handover.cashFundCentavos,
       status: "open",
-      openedAt: Date.now(),
-      prevShiftId: args.prevShiftId,
-      handoverCashInRegisterCentavos: args.handoverCashInRegisterCentavos,
-      handoverChangeFundCentavos: args.handoverChangeFundCentavos,
-      handoverCashFundCentavos: args.handoverCashFundCentavos,
+      openedAt: now,
+      prevShiftId: handover._id,
+      handoverCashInRegisterCentavos: expected,
+      handoverChangeFundCentavos: handover.changeFundCentavos,
+      handoverCashFundCentavos: handover.cashFundCentavos,
+      turnoverApprovalId: approvalId,
+    });
+    if (approvalId) await ctx.db.patch(approvalId, { openedShiftId: shiftId });
+
+    await _logAuditEntry(ctx, {
+      action: "pos.shift.turnoverCount",
+      userId: scope.userId,
+      branchId,
+      entityType: "cashierShifts",
+      entityId: shiftId,
+      after: {
+        countedCentavos: counted,
+        declaredCentavos: declared ?? null,
+        expectedCentavos: expected,
+        approvalId: approvalId ?? null,
+      },
     });
 
     await touchTerminal(ctx, terminal);
-
-    return { shiftId };
+    return { status: "opened" as const, shiftId };
   },
 });
 
-// ─── closeShift ─────────────────────────────────────────────────────────────
-// Closes the current shift. closeType: "turnover" | "endOfDay".
+// ─── closeShift ───────────────────────────────────────────────────────────────
+// Ends the shift once the cashier has declared the cash on hand — the only way
+// out of a shift at the till. End of Day also records the declaration as the
+// day's count and files the register's Z-reading.
 
 export const closeShift = mutation({
   args: {
-    closeType: v.optional(v.union(v.literal("turnover"), v.literal("endOfDay"))),
+    closeType: v.union(v.literal("turnover"), v.literal("endOfDay")),
+    declaredCashCentavos: v.number(),
     notes: v.optional(v.string()),
     deviceToken: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const scope = await withBranchScope(ctx);
-    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
-      throw new ConvexError({ code: "UNAUTHORIZED" });
-    }
-
+    const scope = await requirePosScope(ctx);
     const branchId = scope.branchId;
     if (!branchId) throw new ConvexError("No branch assigned");
 
     // Close this register's shift. Closing by branch would let one lane end
     // another lane's shift and bank its float.
     const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    const terminalId = terminal?._id ?? null;
+    const shift = await openShiftOnRegister(ctx, branchId, terminalId);
+    if (!shift) throw new ConvexError("No open shift to close");
 
-    const shift = terminal
-      ? await ctx.db
-          .query("cashierShifts")
-          .withIndex("by_terminal_status", (q) =>
-            q.eq("terminalId", terminal._id).eq("status", "open")
-          )
-          .first()
-      : (
-          await ctx.db
-            .query("cashierShifts")
-            .withIndex("by_branch_status", (q) =>
-              q.eq("branchId", branchId).eq("status", "open")
-            )
-            .collect()
-        ).find((sh) => sh.terminalId === undefined);
-
-    if (!shift) {
-      throw new ConvexError("No open shift to close");
+    const declared = args.declaredCashCentavos;
+    if (!Number.isInteger(declared) || declared < 0) {
+      throw new ConvexError("Declare the cash on hand — zero or more.");
     }
 
-    const allTxns = await ctx.db
-      .query("transactions")
-      .withIndex("by_branch_date", (q) =>
-        q.eq("branchId", branchId).gte("createdAt", shift.openedAt)
-      )
-      .collect();
-    // Only this register's sales — otherwise a second lane's takings inflate
-    // this drawer's expected cash and every count comes out short.
-    const txns = shift.terminalId
-      ? allTxns.filter((t) => t.terminalId === shift.terminalId)
-      : allTxns;
-
-    let cashSales = 0;
-    for (const t of txns) {
-      const splitAmt = t.splitPayment?.amountCentavos ?? 0;
-      const primaryAmt = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
-      if (t.paymentMethod === "cash") cashSales += primaryAmt;
-      if (t.splitPayment?.method === "cash") cashSales += splitAmt;
+    // A shift left open past its business day can only close that day.
+    const shiftDate = phtDate(shift.openedAt);
+    if (args.closeType === "turnover" && shiftDate < todayPht()) {
+      throw new ConvexError(
+        `This shift started on ${formatYmd(shiftDate)}. Close it with End of Day first.`
+      );
     }
 
-    const changeFund = shift.changeFundCentavos ?? shift.cashFundCentavos;
-    const cashInRegister = changeFund + cashSales;
+    const expected = await expectedDrawerCash(ctx, branchId, shift);
+    const now = Date.now();
 
     await ctx.db.patch(shift._id, {
       status: "closed",
-      closedAt: Date.now(),
-      closeType: args.closeType ?? "turnover",
-      closedCashBalanceCentavos: cashInRegister,
+      closedAt: now,
+      closeType: args.closeType,
+      closedCashBalanceCentavos: expected,
+      declaredCashCentavos: declared,
       notes: args.notes,
     });
 
-    return {
-      shiftId: shift._id,
-      changeFundCentavos: changeFund,
-      cashFundCentavos: shift.cashFundCentavos,
-      cashSalesCentavos: cashSales,
-      cashInRegisterCentavos: cashInRegister,
-      closeType: args.closeType ?? "turnover",
-    };
+    await _logAuditEntry(ctx, {
+      action: "pos.shift.close",
+      userId: scope.userId,
+      branchId,
+      entityType: "cashierShifts",
+      entityId: shift._id,
+      after: {
+        closeType: args.closeType,
+        declaredCashCentavos: declared,
+        expectedCashCentavos: expected,
+        differenceCentavos: declared - expected,
+      },
+    });
+
+    let zCounter: number | null = null;
+    if (args.closeType === "endOfDay") {
+      // The day this drawer traded — the shift's own, if it ran past midnight.
+      const z =
+        (await findZReading(ctx, branchId, terminalId, shiftDate)) ??
+        (await fileZReading(ctx, { branchId, terminalId, dateStr: shiftDate, userId: scope.userId }));
+      zCounter = z.zCounter;
+
+      // The declared cash is the day's count.
+      await ctx.db.insert("reconciliations", {
+        branchId,
+        cashierId: scope.userId,
+        reconciliationDate: shiftDate,
+        expectedCashCentavos: expected,
+        actualCashCentavos: declared,
+        differenceCentavos: declared - expected,
+        transactionCount: z.transactionCount,
+        cashSalesCentavos: z.cashSalesCentavos,
+        gcashSalesCentavos: z.gcashSalesCentavos,
+        mayaSalesCentavos: z.mayaSalesCentavos,
+        totalSalesCentavos: z.grossSalesCentavos,
+        notes: args.notes,
+        createdAt: now,
+      });
+    }
+
+    return { shiftId: shift._id, closeType: args.closeType, zCounter };
+  },
+});
+
+// ─── Turnover approvals ───────────────────────────────────────────────────────
+
+/** The till's view of its request: the decision only, never the amounts it is checked against. */
+export const getTurnoverApproval = query({
+  args: { approvalId: v.id("cashTurnoverApprovals") },
+  handler: async (ctx, args) => {
+    const scope = await requirePosScope(ctx);
+    const approval = await ctx.db.get(args.approvalId);
+    if (!approval || approval.branchId !== scope.branchId) return null;
+    return { status: approval.status, note: approval.note ?? null };
+  },
+});
+
+async function terminalLabel(ctx: Ctx, terminalId: Id<"posTerminals"> | undefined) {
+  if (!terminalId) return "Unassigned register";
+  return (await ctx.db.get(terminalId))?.label ?? "Unknown register";
+}
+
+async function accountName(ctx: Ctx, cashierAccountId: Id<"cashierAccounts"> | undefined) {
+  if (!cashierAccountId) return "Cashier";
+  const account = await ctx.db.get(cashierAccountId);
+  return account ? `${account.firstName} ${account.lastName}` : "Cashier";
+}
+
+export const listTurnoverApprovals = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await requireManagerScope(ctx);
+    const branchId = scope.branchId;
+    if (!branchId) return [];
+
+    const pending = await ctx.db
+      .query("cashTurnoverApprovals")
+      .withIndex("by_branch_status", (q) => q.eq("branchId", branchId).eq("status", "pending"))
+      .collect();
+
+    const out = [];
+    for (const a of pending) {
+      const prev = await ctx.db.get(a.prevShiftId);
+      out.push({
+        approvalId: a._id,
+        terminalLabel: await terminalLabel(ctx, a.terminalId),
+        outgoingCashierName: prev ? await shiftCashierName(ctx, prev) : "Unknown",
+        incomingCashierName: await accountName(ctx, a.cashierAccountId),
+        countedCentavos: a.countedCentavos,
+        declaredCentavos: a.declaredCentavos ?? null,
+        expectedCentavos: a.expectedCentavos,
+        shortCentavos: Math.max(a.expectedCentavos, a.declaredCentavos ?? 0) - a.countedCentavos,
+        requestedAt: a.requestedAt,
+      });
+    }
+    return out.sort((x, y) => x.requestedAt - y.requestedAt);
+  },
+});
+
+export const decideTurnoverApproval = mutation({
+  args: {
+    approvalId: v.id("cashTurnoverApprovals"),
+    approve: v.boolean(),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const approval = await ctx.db.get(args.approvalId);
+    if (!approval) throw new ConvexError("Request not found");
+
+    const scope = await requireBranchScope(ctx, approval.branchId);
+    if (!(BRANCH_MANAGEMENT_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+    if (approval.status !== "pending") {
+      throw new ConvexError("This count has already been decided, or the cashier recounted.");
+    }
+
+    await ctx.db.patch(args.approvalId, {
+      status: args.approve ? "approved" : "rejected",
+      decidedById: scope.userId,
+      decidedAt: Date.now(),
+      note: args.note?.trim() || undefined,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: args.approve ? "pos.shift.turnoverApproved" : "pos.shift.turnoverRejected",
+      userId: scope.userId,
+      branchId: approval.branchId,
+      entityType: "cashTurnoverApprovals",
+      entityId: args.approvalId,
+      before: { status: "pending" },
+      after: { status: args.approve ? "approved" : "rejected" },
+    });
+  },
+});
+
+// ─── Cash variances ───────────────────────────────────────────────────────────
+// The last week's counts that did not match what the drawer should hold. The
+// till never sees these figures; this is where a manager does.
+
+export const listCashVariances = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await requireManagerScope(ctx);
+    const branchId = scope.branchId;
+    if (!branchId) return [];
+
+    const since = Date.now() - 7 * DAY_MS;
+
+    const closes = (
+      await ctx.db
+        .query("cashierShifts")
+        .withIndex("by_branch_opened", (q) =>
+          q.eq("branchId", branchId).gte("openedAt", since - DAY_MS)
+        )
+        .collect()
+    ).filter(
+      (s) =>
+        s.status === "closed" &&
+        (s.closedAt ?? 0) >= since &&
+        s.declaredCashCentavos !== undefined &&
+        s.closedCashBalanceCentavos !== undefined &&
+        s.declaredCashCentavos !== s.closedCashBalanceCentavos
+    );
+
+    const approved = (
+      await ctx.db
+        .query("cashTurnoverApprovals")
+        .withIndex("by_branch_status", (q) => q.eq("branchId", branchId).eq("status", "approved"))
+        .collect()
+    ).filter((a) => (a.decidedAt ?? 0) >= since);
+
+    const rows = [];
+    for (const s of closes) {
+      rows.push({
+        key: s._id as string,
+        kind: s.closeType === "endOfDay" ? ("endOfDay" as const) : ("switchCashier" as const),
+        at: s.closedAt ?? 0,
+        terminalLabel: await terminalLabel(ctx, s.terminalId),
+        cashierName: await shiftCashierName(ctx, s),
+        expectedCentavos: s.closedCashBalanceCentavos ?? 0,
+        countedCentavos: s.declaredCashCentavos ?? 0,
+        differenceCentavos: (s.declaredCashCentavos ?? 0) - (s.closedCashBalanceCentavos ?? 0),
+      });
+    }
+    for (const a of approved) {
+      rows.push({
+        key: a._id as string,
+        kind: "turnoverApproved" as const,
+        at: a.decidedAt ?? 0,
+        terminalLabel: await terminalLabel(ctx, a.terminalId),
+        cashierName: await accountName(ctx, a.cashierAccountId),
+        expectedCentavos: a.expectedCentavos,
+        countedCentavos: a.countedCentavos,
+        differenceCentavos: a.countedCentavos - a.expectedCentavos,
+      });
+    }
+
+    return rows.sort((x, y) => y.at - x.at).slice(0, 30);
   },
 });

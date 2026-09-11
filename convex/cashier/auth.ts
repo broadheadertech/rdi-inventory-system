@@ -1,6 +1,5 @@
 import { v, ConvexError } from "convex/values";
-import { internalQuery, internalMutation, query } from "../_generated/server";
-import { withBranchScope } from "../_helpers/withBranchScope";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { POS_ROLES } from "../_helpers/permissions";
 import { requireTerminal } from "../_helpers/requireTerminal";
 
@@ -105,59 +104,5 @@ export const _recordSuccessfulLogin = internalMutation({
   },
 });
 
-
-// ─── getPrevShiftHandover ─────────────────────────────────────────────────────
-// Returns the most-recently closed shift for this branch so the new cashier
-// can count the handover cash before opening their shift.
-
-export const getPrevShiftHandover = query({
-  args: {},
-  handler: async (ctx) => {
-    const scope = await withBranchScope(ctx);
-    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
-      throw new ConvexError({ code: "UNAUTHORIZED" });
-    }
-
-    const branchId = scope.branchId;
-    if (!branchId) return null;
-
-    // Most recently closed shift for this branch
-    const lastShift = await ctx.db
-      .query("cashierShifts")
-      .withIndex("by_branch_opened", (q) => q.eq("branchId", branchId))
-      .order("desc")
-      .filter((q) => q.eq(q.field("status"), "closed"))
-      .first();
-
-    if (!lastShift) return null;
-
-    // A handover passes the drawer from one cashier to the next mid-trading.
-    // An end-of-day close is the opposite: the Z-reading is finalised, the
-    // drawer is counted and the cash is banked. Presenting yesterday's closing
-    // balance to the next morning's cashier asks them to acknowledge money that
-    // is no longer in the till, and rolls a reconciled day forward into an
-    // unreconciled one. After endOfDay the next shift starts on its own float.
-    if (lastShift.closeType === "endOfDay") return null;
-
-    // Resolve cashier name
-    let cashierName = "Unknown";
-    if (lastShift.cashierAccountId) {
-      const account = await ctx.db.get(lastShift.cashierAccountId);
-      if (account) cashierName = `${account.firstName} ${account.lastName}`;
-    } else {
-      const user = await ctx.db.get(lastShift.cashierId);
-      if (user) cashierName = user.name ?? "Unknown";
-    }
-
-    return {
-      shiftId: lastShift._id,
-      cashierName,
-      openedAt: lastShift.openedAt,
-      closedAt: lastShift.closedAt,
-      closeType: lastShift.closeType,
-      changeFundCentavos: lastShift.changeFundCentavos ?? 0,
-      cashFundCentavos: lastShift.cashFundCentavos,
-      cashInRegisterCentavos: lastShift.closedCashBalanceCentavos ?? 0,
-    };
-  },
-});
+// The handover a new cashier counts is now per register and blind — see
+// getRegisterStatus in convex/pos/shifts.ts.

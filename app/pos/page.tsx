@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useMemo, useRef, useCallback, useEffect } from "react";
-import { useQuery, useConvex, useMutation, useAction } from "convex/react";
+import { useQuery, useConvex } from "convex/react";
 import { api as _api } from "@/convex/_generated/api";
-import { getErrorMessage } from "@/lib/utils";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = _api as any;
 import { POSProductGrid } from "@/components/pos/POSProductGrid";
@@ -12,8 +11,9 @@ import { BarcodeScanner } from "@/components/shared/BarcodeScanner";
 import { ScanConfirmation, type ScanResult } from "@/components/pos/ScanConfirmation";
 import { ReadingReport, type ReadingData } from "@/components/pos/ReadingReport";
 import { POSCartProvider, usePOSCart } from "@/components/providers/POSCartProvider";
-import { TerminalEnrollment } from "@/components/pos/TerminalEnrollment";
-import { getDeviceToken, clearDeviceToken, getInstallId } from "@/lib/deviceToken";
+import { ShiftGate, type ClosedShift } from "@/components/pos/ShiftGate";
+import { EndShiftDialog } from "@/components/pos/EndShiftDialog";
+import { getDeviceToken } from "@/lib/deviceToken";
 import { useConnectionStatus } from "@/components/shared/ConnectionIndicator";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { DiscountType } from "@/lib/constants";
@@ -24,14 +24,10 @@ import {
   ScanBarcode,
   Radio,
   LayoutGrid,
-  Wallet,
   DollarSign,
   FileBarChart,
   X,
   Zap,
-  LogIn,
-  ArrowRight,
-  Users,
 } from "lucide-react";
 import {
   saveCart,
@@ -71,322 +67,6 @@ export default function PosPage() {
     <POSCartProvider>
       <PosPageContent />
     </POSCartProvider>
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Shift Gate — multi-step: login → handover → funds
-// ═══════════════════════════════════════════════════════════════════════════════
-
-type ShiftGateStep = "login" | "handover" | "funds";
-
-type VerifiedAccount = {
-  cashierAccountId: string;
-  firstName: string;
-  lastName: string;
-};
-
-function ShiftGate({
-  children,
-  branchId,
-}: {
-  children: React.ReactNode;
-  branchId: string | null | undefined;
-}) {
-  // Device binding — read once on mount so SSR and the first client render agree.
-  const [deviceToken, setDeviceTokenState] = useState<string | null | undefined>(undefined);
-  useEffect(() => {
-    setDeviceTokenState(getDeviceToken());
-  }, []);
-
-  // A shift belongs to a register, so this query needs the token. Without it the
-  // server correctly reports "no shift on this terminal" and the gate keeps
-  // showing Open Shift even though the shift opened — the api-as-any cast in
-  // this file hides the missing argument from the typechecker.
-  const shift = useQuery(
-    api.pos.shifts.getActiveShift,
-    deviceToken === undefined ? "skip" : { deviceToken: deviceToken ?? undefined }
-  );
-  const prevHandover = useQuery(api.cashier.auth.getPrevShiftHandover);
-  const openShift = useMutation(api.pos.shifts.openShift);
-  const verifyCashierLogin = useAction(api.cashier.authActions.verifyCashierLogin);
-  const recordActivity = useMutation(api.pos.terminalSecurity.recordActivity);
-
-  const terminal = useQuery(
-    api.pos.terminals.whoAmI,
-    deviceToken === undefined ? "skip" : { deviceToken: deviceToken ?? undefined }
-  );
-
-  // Server rejected the stored token (revoked, or moved to another branch) —
-  // drop it so this device falls back to the enrollment screen.
-  useEffect(() => {
-    if (terminal && !terminal.enrolled && deviceToken) {
-      clearDeviceToken();
-      setDeviceTokenState(null);
-    }
-  }, [terminal, deviceToken]);
-
-  // Lets a manager dismiss enrollment on a register that is still running
-  // unbound, before POS_REQUIRE_TERMINAL is switched on.
-  const [enrollmentSkipped, setEnrollmentSkipped] = useState(false);
-
-  const [step, setStep] = useState<ShiftGateStep>("login");
-  const [verifiedAccount, setVerifiedAccount] = useState<VerifiedAccount | null>(null);
-
-  // Login step state
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [loginError, setLoginError] = useState("");
-
-  // Fund step state
-  const [changeFundInput, setChangeFundInput] = useState("");
-  const [cashFundInput, setCashFundInput] = useState("0");
-
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Loading
-  if (shift === undefined || deviceToken === undefined || terminal === undefined) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <p className="text-muted-foreground">Loading shift...</p>
-      </div>
-    );
-  }
-
-  // Unregistered device — enroll before any cashier can sign in. Until
-  // POS_REQUIRE_TERMINAL is switched on this is dismissible, so registers can be
-  // enrolled one at a time without taking unenrolled lanes offline.
-  if (!terminal.enrolled && !(enrollmentSkipped && !terminal.enforced)) {
-    return (
-      <TerminalEnrollment
-        onEnrolled={() => setDeviceTokenState(getDeviceToken())}
-        onSkip={terminal.enforced ? undefined : () => setEnrollmentSkipped(true)}
-      />
-    );
-  }
-
-  // Shift is open — render POS
-  if (shift !== null) {
-    return <>{children}</>;
-  }
-
-  // ── Step 1: Cashier login ───────────────────────────────────────────────────
-  async function handleLogin() {
-    if (!branchId) return;
-    if (!username.trim() || !password.trim()) {
-      setLoginError("Enter your username and password");
-      return;
-    }
-    setIsSubmitting(true);
-    setLoginError("");
-    try {
-      const account = await verifyCashierLogin({
-        username: username.trim(),
-        password,
-        deviceToken: deviceToken ?? undefined,
-      });
-      setVerifiedAccount(account);
-
-      // Stamp the session with who just signed in, so the same cashier account
-      // appearing on two terminals at once can be flagged.
-      const installId = getInstallId();
-      if (installId && deviceToken) {
-        recordActivity({
-          deviceToken,
-          installId,
-          cashierAccountId: account.cashierAccountId,
-        }).catch(() => {});
-      }
-      // Go to handover step if there's a prev shift, otherwise straight to funds
-      if (prevHandover) {
-        setStep("handover");
-      } else {
-        setStep("funds");
-      }
-    } catch (err) {
-      setLoginError(getErrorMessage(err));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  // ── Step 3: Open shift ──────────────────────────────────────────────────────
-  async function handleOpenShift() {
-    if (!verifiedAccount) return;
-    const changeCents = Math.round(parseFloat(changeFundInput || "0") * 100);
-    const cashCents = Math.round(parseFloat(cashFundInput || "0") * 100);
-    if (changeCents < 0 || cashCents < 0) return;
-    setIsSubmitting(true);
-    try {
-      await openShift({
-        cashierAccountId: verifiedAccount.cashierAccountId,
-        deviceToken: deviceToken ?? undefined,
-        changeFundCentavos: changeCents,
-        cashFundCentavos: cashCents,
-        prevShiftId: prevHandover?.shiftId ?? undefined,
-        handoverCashInRegisterCentavos: prevHandover?.cashInRegisterCentavos ?? undefined,
-        handoverChangeFundCentavos: prevHandover?.changeFundCentavos ?? undefined,
-        handoverCashFundCentavos: prevHandover?.cashFundCentavos ?? undefined,
-      });
-    } catch (err) {
-      // Previously swallowed: a refusal here (a shift already open on this
-      // register, say) left the screen unchanged with no explanation at all.
-      setLoginError(getErrorMessage(err));
-    } finally {
-      setIsSubmitting(false);
-    }
-  }
-
-  // ── Shared card wrapper ─────────────────────────────────────────────────────
-  return (
-    <div className="flex h-screen items-center justify-center bg-background">
-      <div className="w-full max-w-sm rounded-xl border bg-card p-6 space-y-5 shadow-lg">
-
-        {/* ── Step 1: Login ──────────────────────────────────────────────── */}
-        {step === "login" && (
-          <>
-            <div className="text-center space-y-1">
-              <LogIn className="mx-auto h-10 w-10 text-primary" />
-              <h1 className="text-xl font-bold">Cashier Login</h1>
-              <p className="text-sm text-muted-foreground">Enter your credentials to open a shift</p>
-            </div>
-            <div className="space-y-3">
-              <input
-                type="text"
-                value={username}
-                onChange={(e) => { setUsername(e.target.value); setLoginError(""); }}
-                placeholder="Username"
-                autoComplete="username"
-                autoFocus
-                className="w-full rounded-lg border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-              />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => { setPassword(e.target.value); setLoginError(""); }}
-                placeholder="Password"
-                autoComplete="current-password"
-                className="w-full rounded-lg border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                onKeyDown={(e) => { if (e.key === "Enter") handleLogin(); }}
-              />
-              {loginError && (
-                <p className="text-xs text-red-500 text-center">{loginError}</p>
-              )}
-            </div>
-            <button
-              onClick={handleLogin}
-              disabled={isSubmitting}
-              className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {isSubmitting ? "Verifying..." : "Continue"}
-            </button>
-          </>
-        )}
-
-        {/* ── Step 2: Handover ───────────────────────────────────────────── */}
-        {step === "handover" && prevHandover && verifiedAccount && (
-          <>
-            <div className="text-center space-y-1">
-              <Users className="mx-auto h-10 w-10 text-amber-500" />
-              <h1 className="text-xl font-bold">Shift Handover</h1>
-              <p className="text-sm text-muted-foreground">
-                From <span className="font-medium text-foreground">{prevHandover.cashierName}</span>
-              </p>
-            </div>
-            <div className="rounded-lg border bg-muted/30 divide-y text-sm">
-              <div className="flex justify-between px-4 py-2.5">
-                <span className="text-muted-foreground">Cash in Register</span>
-                <span className="font-bold text-green-700">
-                  ₱{(prevHandover.cashInRegisterCentavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-              <div className="flex justify-between px-4 py-2.5">
-                <span className="text-muted-foreground">Change Fund</span>
-                <span className="font-semibold">
-                  ₱{(prevHandover.changeFundCentavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-              <div className="flex justify-between px-4 py-2.5">
-                <span className="text-muted-foreground">Cash Fund (Expenses)</span>
-                <span className="font-semibold">
-                  ₱{(prevHandover.cashFundCentavos / 100).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
-                </span>
-              </div>
-            </div>
-            <p className="text-xs text-center text-muted-foreground">
-              Count the cash in the drawer and confirm before proceeding.
-            </p>
-            <button
-              onClick={() => setStep("funds")}
-              className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
-            >
-              Acknowledge & Continue
-              <ArrowRight className="h-4 w-4" />
-            </button>
-          </>
-        )}
-
-        {/* ── Step 3: Set funds ──────────────────────────────────────────── */}
-        {step === "funds" && verifiedAccount && (
-          <>
-            <div className="text-center space-y-1">
-              <Wallet className="mx-auto h-10 w-10 text-primary" />
-              <h1 className="text-xl font-bold">Open Shift</h1>
-              <p className="text-sm text-muted-foreground">
-                Welcome, <span className="font-medium text-foreground">{verifiedAccount.firstName}</span>
-              </p>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Change Fund (₱)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={changeFundInput}
-                  onChange={(e) => setChangeFundInput(e.target.value)}
-                  placeholder="e.g. 2000"
-                  className="mt-1 w-full rounded-lg border px-3 py-2.5 text-lg font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary"
-                  autoFocus
-                  onKeyDown={(e) => { if (e.key === "Enter") handleOpenShift(); }}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">Starting bills & coins for making change</p>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                  Cash Fund — Expenses (₱)
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={cashFundInput}
-                  onChange={(e) => setCashFundInput(e.target.value)}
-                  placeholder="0"
-                  className="mt-1 w-full rounded-lg border px-3 py-2.5 text-lg font-semibold text-center focus:outline-none focus:ring-2 focus:ring-primary"
-                  onKeyDown={(e) => { if (e.key === "Enter") handleOpenShift(); }}
-                />
-                <p className="mt-1 text-xs text-muted-foreground">Petty cash for store expenses</p>
-              </div>
-            </div>
-            {loginError && (
-              <p className="text-center text-xs text-red-500">{loginError}</p>
-            )}
-            <button
-              onClick={handleOpenShift}
-              disabled={isSubmitting}
-              className="w-full rounded-lg bg-primary py-2.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-            >
-              {isSubmitting ? "Opening..." : "Open Shift"}
-            </button>
-          </>
-        )}
-
-      </div>
-    </div>
   );
 }
 
@@ -496,42 +176,17 @@ function PosPageContent() {
     api.pos.shifts.getActiveShift,
     posDeviceToken === undefined ? "skip" : { deviceToken: posDeviceToken ?? undefined }
   );
-  const closeShiftMut = useMutation(api.pos.shifts.closeShift);
-
-  // X-Reading / Y-Reading modals
+  // X-Reading modal
   const [showXReading, setShowXReading] = useState(false);
-  const [yReadingShiftId, setYReadingShiftId] = useState<Id<"cashierShifts"> | null>(null);
-
-  // End Shift modal
-  const [showEndShiftModal, setShowEndShiftModal] = useState(false);
-  const [isClosingShift, setIsClosingShift] = useState(false);
-
   const xReading = useQuery(
     api.pos.readings.getXReading,
     showXReading ? {} : "skip"
   );
-  const yReading = useQuery(
-    api.pos.readings.getYReading,
-    yReadingShiftId ? { shiftId: yReadingShiftId } : "skip"
-  );
 
-  const handleEndShift = useCallback(async (closeType: "turnover" | "endOfDay") => {
-    setIsClosingShift(true);
-    try {
-      const result = await closeShiftMut({
-        closeType,
-        deviceToken: getDeviceToken() ?? undefined,
-      });
-      setShowEndShiftModal(false);
-      if (result?.shiftId) {
-        setYReadingShiftId(result.shiftId);
-      }
-    } catch {
-      // Error handled by Convex
-    } finally {
-      setIsClosingShift(false);
-    }
-  }, [closeShiftMut]);
+  // End Shift: declare the drawer, then switch cashier or end the day.
+  const [showEndShift, setShowEndShift] = useState(false);
+  // The shift that just ended, handed to the gate so it can say who logged out.
+  const [lastClosed, setLastClosed] = useState<ClosedShift | null>(null);
 
   // Keep ref for offline handlers
   const productsRef = useRef(products);
@@ -741,7 +396,11 @@ function PosPageContent() {
   }, [products, offlineStock]);
 
   return (
-    <ShiftGate branchId={currentUser?.branchId ? String(currentUser.branchId) : null}>
+    <ShiftGate
+      branchId={currentUser?.branchId ? String(currentUser.branchId) : null}
+      lastClosed={lastClosed}
+      onDismissClosed={() => setLastClosed(null)}
+    >
       {isRushMode && (
         <div className="bg-amber-500 text-black text-center py-1 text-xs font-bold uppercase tracking-widest">
           <Zap className="inline h-3 w-3 mr-1" />
@@ -791,14 +450,10 @@ function PosPageContent() {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* No running cash total here: the drawer is counted blind at End Shift. */}
                   {shift && (
                     <div className="flex items-center gap-3 rounded-lg border bg-muted/30 px-3 py-1.5 text-xs">
-                      <span className="text-muted-foreground">
-                        {shift.cashierName} — Fund: <span className="font-semibold text-foreground">{formatCentavos(shift.changeFundCentavos)}</span>
-                      </span>
-                      <span className="text-muted-foreground">
-                        Cash: <span className="font-bold text-green-600">{formatCentavos(shift.cashInRegisterCentavos)}</span>
-                      </span>
+                      <span className="font-medium text-foreground">{shift.cashierName}</span>
                       <span className="text-muted-foreground">
                         Txns: <span className="font-semibold text-foreground">{shift.transactionCount}</span>
                       </span>
@@ -822,7 +477,7 @@ function PosPageContent() {
                   </Link>
                   {shift && (
                     <button
-                      onClick={() => setShowEndShiftModal(true)}
+                      onClick={() => setShowEndShift(true)}
                       className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
                     >
                       End Shift
@@ -1006,74 +661,16 @@ function PosPageContent() {
       {/* Scan confirmation overlay */}
       <ScanConfirmation result={scanResult} onDismiss={handleDismissScan} />
 
-      {/* End Shift Modal */}
-      {showEndShiftModal && shift && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="relative w-full max-w-sm rounded-xl border bg-card p-6 shadow-xl space-y-5">
-            <button
-              onClick={() => setShowEndShiftModal(false)}
-              className="absolute right-3 top-3 rounded-full p-1 hover:bg-muted"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            <div className="text-center space-y-1">
-              <Wallet className="mx-auto h-9 w-9 text-red-500" />
-              <h2 className="text-lg font-bold">End Shift</h2>
-              <p className="text-sm text-muted-foreground">
-                {shift.cashierName}&apos;s shift summary
-              </p>
-            </div>
-            <div className="rounded-lg border bg-muted/30 divide-y text-sm">
-              <div className="flex justify-between px-4 py-2.5">
-                <span className="text-muted-foreground">Change Fund</span>
-                <span className="font-semibold">{formatCentavos(shift.changeFundCentavos)}</span>
-              </div>
-              <div className="flex justify-between px-4 py-2.5">
-                <span className="text-muted-foreground">Cash Sales</span>
-                <span className="font-semibold">{formatCentavos(shift.cashSalesCentavos)}</span>
-              </div>
-              <div className="flex justify-between px-4 py-2.5 bg-green-50">
-                <span className="font-medium text-green-800">Cash in Register</span>
-                <span className="font-bold text-green-700">{formatCentavos(shift.cashInRegisterCentavos)}</span>
-              </div>
-              <div className="flex justify-between px-4 py-2.5">
-                <span className="text-muted-foreground">GCash Sales</span>
-                <span className="font-semibold">{formatCentavos(shift.gcashSalesCentavos)}</span>
-              </div>
-              <div className="flex justify-between px-4 py-2.5">
-                <span className="text-muted-foreground">Maya Sales</span>
-                <span className="font-semibold">{formatCentavos(shift.mayaSalesCentavos)}</span>
-              </div>
-              <div className="flex justify-between px-4 py-2.5">
-                <span className="text-muted-foreground">Transactions</span>
-                <span className="font-semibold">{shift.transactionCount}</span>
-              </div>
-            </div>
-            <p className="text-xs text-center text-muted-foreground">
-              Choose how to end this shift:
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => handleEndShift("turnover")}
-                disabled={isClosingShift}
-                className="flex flex-col items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
-              >
-                <Users className="h-5 w-5" />
-                Cashier Turnover
-                <span className="text-xs font-normal text-amber-600">Next cashier takes over</span>
-              </button>
-              <button
-                onClick={() => handleEndShift("endOfDay")}
-                disabled={isClosingShift}
-                className="flex flex-col items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm font-medium text-red-800 hover:bg-red-100 disabled:opacity-50"
-              >
-                <DollarSign className="h-5 w-5" />
-                End of Day
-                <span className="text-xs font-normal text-red-600">Store closes for the day</span>
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* End Shift — forced open for a shift left open from an earlier day */}
+      {shift && (showEndShift || shift.isPreviousDay) && (
+        <EndShiftDialog
+          shift={shift}
+          onCancel={() => setShowEndShift(false)}
+          onClosed={(closed) => {
+            setShowEndShift(false);
+            setLastClosed(closed);
+          }}
+        />
       )}
 
       {/* X-Reading Modal */}
@@ -1104,29 +701,6 @@ function PosPageContent() {
         </div>
       )}
 
-      {/* Y-Reading Modal (shown after End Shift) */}
-      {yReadingShiftId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:bg-white print:p-0">
-          <div className="relative w-full max-w-md max-h-[90vh] overflow-y-auto rounded-xl border bg-card p-5 shadow-xl print:max-w-none print:max-h-none print:border-none print:shadow-none print:rounded-none">
-            <button
-              onClick={() => setYReadingShiftId(null)}
-              className="absolute right-3 top-3 rounded-full p-1 hover:bg-muted print:hidden"
-            >
-              <X className="h-4 w-4" />
-            </button>
-            {yReading === undefined ? (
-              <div className="flex items-center justify-center py-12">
-                <p className="text-muted-foreground">Generating Y-Reading...</p>
-              </div>
-            ) : (
-              <ReadingReport
-                data={yReading as ReadingData}
-                onClose={() => setYReadingShiftId(null)}
-              />
-            )}
-          </div>
-        </div>
-      )}
     </ShiftGate>
   );
 }

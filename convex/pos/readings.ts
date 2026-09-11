@@ -1,5 +1,5 @@
 import { v, ConvexError } from "convex/values";
-import { query, mutation, QueryCtx } from "../_generated/server";
+import { query, mutation, QueryCtx, MutationCtx } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
@@ -505,6 +505,146 @@ export const getRecentClosedShifts = query({
 // FINALIZE Z-READING — persists the day's Z with an accumulated grand total
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/** The Z-reading already filed for one register and business date, if any. */
+export async function findZReading(
+  ctx: QueryCtx | MutationCtx,
+  branchId: Id<"branches">,
+  terminalId: Id<"posTerminals"> | null,
+  dateStr: string
+): Promise<Doc<"zReadings"> | null> {
+  if (terminalId) {
+    return await ctx.db
+      .query("zReadings")
+      .withIndex("by_terminal_date", (q) => q.eq("terminalId", terminalId).eq("date", dateStr))
+      .first();
+  }
+  // Readings from before terminal binding stay branch-wide.
+  const rows = await ctx.db
+    .query("zReadings")
+    .withIndex("by_branch_date", (q) => q.eq("branchId", branchId).eq("date", dateStr))
+    .collect();
+  return rows.find((r) => r.terminalId === undefined) ?? null;
+}
+
+/**
+ * Files one register's Z-reading for a business date: that day's sales on that
+ * machine, its Z-counter incremented and its grand total rolled forward.
+ * Callers check with findZReading that none is filed yet. Shared by
+ * finalizeZReading and by End of Day, which files it as the day closes.
+ */
+export async function fileZReading(
+  ctx: MutationCtx,
+  args: {
+    branchId: Id<"branches">;
+    terminalId: Id<"posTerminals"> | null;
+    dateStr: string;
+    userId: Id<"users">;
+  }
+): Promise<Doc<"zReadings">> {
+  const { branchId, terminalId, dateStr } = args;
+
+  const { startMs, endMs } = getPhilippineDateRange(dateStr);
+  const txns = (
+    await ctx.db
+      .query("transactions")
+      .withIndex("by_branch_date", (q) =>
+        q.eq("branchId", branchId).gte("createdAt", startMs).lte("createdAt", endMs)
+      )
+      .collect()
+  ).filter((t) =>
+    // Only this machine's sales roll into this machine's grand total. Sales
+    // from before terminal binding have no terminalId and belong to the
+    // branch-wide sequence.
+    terminalId ? t.terminalId === terminalId : t.terminalId === undefined
+  );
+
+  let gross = 0, vatable = 0, vatExempt = 0, vat = 0, discount = 0;
+  let cash = 0, gcash = 0, maya = 0, count = 0, voided = 0;
+  let firstSI: string | null = null;
+  let lastSI: string | null = null;
+
+  for (const t of txns) {
+    if (t.status === "voided") { voided++; continue; }
+    count++;
+    gross += t.totalCentavos;
+    const isDisc = t.discountType === "senior" || t.discountType === "pwd";
+    if (isDisc) {
+      vatExempt += t.subtotalCentavos - t.vatAmountCentavos;
+      discount += t.discountAmountCentavos;
+    } else {
+      vatable += t.subtotalCentavos;
+      vat += t.vatAmountCentavos;
+    }
+    const splitAmt = t.splitPayment?.amountCentavos ?? 0;
+    const primary = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
+    if (t.paymentMethod === "cash") cash += primary;
+    else if (t.paymentMethod === "gcash") gcash += primary;
+    else maya += primary;
+    if (t.splitPayment) {
+      const m = t.splitPayment.method;
+      if (m === "cash") cash += splitAmt;
+      else if (m === "gcash") gcash += splitAmt;
+      else maya += splitAmt;
+    }
+    if (!firstSI || t.receiptNumber < firstSI) firstSI = t.receiptNumber;
+    if (!lastSI || t.receiptNumber > lastSI) lastSI = t.receiptNumber;
+  }
+
+  // Roll this machine's accumulated grand total forward and increment its
+  // Z-counter. The counter never resets — only the day's figures do.
+  const last = terminalId
+    ? await ctx.db
+        .query("zReadings")
+        .withIndex("by_terminal", (q) => q.eq("terminalId", terminalId))
+        .order("desc")
+        .first()
+    : (
+        await ctx.db
+          .query("zReadings")
+          .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+          .order("desc")
+          .collect()
+      ).find((r) => r.terminalId === undefined);
+  const previousGrandTotalCentavos = last?.accumulatedGrandTotalCentavos ?? 0;
+  const zCounter = (last?.zCounter ?? 0) + 1;
+  const accumulatedGrandTotalCentavos = previousGrandTotalCentavos + gross;
+
+  const zId = await ctx.db.insert("zReadings", {
+    branchId,
+    terminalId: terminalId ?? undefined,
+    zCounter,
+    date: dateStr,
+    beginningSI: firstSI ?? undefined,
+    endingSI: lastSI ?? undefined,
+    transactionCount: count,
+    voidedCount: voided,
+    grossSalesCentavos: gross,
+    vatableSalesCentavos: vatable,
+    vatExemptSalesCentavos: vatExempt,
+    zeroRatedSalesCentavos: 0,
+    vatAmountCentavos: vat,
+    discountCentavos: discount,
+    cashSalesCentavos: cash,
+    gcashSalesCentavos: gcash,
+    mayaSalesCentavos: maya,
+    previousGrandTotalCentavos,
+    accumulatedGrandTotalCentavos,
+    generatedById: args.userId,
+    generatedAt: Date.now(),
+  });
+
+  await _logAuditEntry(ctx, {
+    action: "pos.zReadingFinalized",
+    userId: args.userId,
+    branchId,
+    entityType: "zReadings",
+    entityId: zId,
+    after: { zCounter, date: dateStr, accumulatedGrandTotalCentavos },
+  });
+
+  return (await ctx.db.get(zId))!;
+}
+
 export const finalizeZReading = mutation({
   args: { date: v.optional(v.string()), deviceToken: v.optional(v.string()) },
   handler: async (ctx, args) => {
@@ -523,131 +663,48 @@ export const finalizeZReading = mutation({
     // Z-counter and non-resettable grand total, so two lanes each finalise
     // their own. Readings from before terminal binding stay branch-wide.
     const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    const terminalId = terminal?._id ?? null;
 
     // One Z-reading per machine per day (BIR end-of-day close)
-    const existing = terminal
-      ? await ctx.db
-          .query("zReadings")
-          .withIndex("by_terminal_date", (q) =>
-            q.eq("terminalId", terminal._id).eq("date", dateStr)
-          )
-          .first()
-      : (
-          await ctx.db
-            .query("zReadings")
-            .withIndex("by_branch_date", (q) =>
-              q.eq("branchId", branchId).eq("date", dateStr)
-            )
-            .collect()
-        ).find((r) => r.terminalId === undefined);
-    if (existing) {
+    if (await findZReading(ctx, branchId, terminalId, dateStr)) {
       throw new ConvexError({
         code: "INVALID_STATE",
         message: "A Z-reading has already been finalized for this date.",
       });
     }
 
-    const { startMs, endMs } = getPhilippineDateRange(dateStr);
-    const txns = (
-      await ctx.db
-        .query("transactions")
-        .withIndex("by_branch_date", (q) =>
-          q.eq("branchId", branchId).gte("createdAt", startMs).lte("createdAt", endMs)
-        )
-        .collect()
-    ).filter((t) =>
-      // Only this machine's sales roll into this machine's grand total. Sales
-      // from before terminal binding have no terminalId and belong to the
-      // branch-wide sequence.
-      terminal ? t.terminalId === terminal._id : t.terminalId === undefined
-    );
-
-    let gross = 0, vatable = 0, vatExempt = 0, vat = 0, discount = 0;
-    let cash = 0, gcash = 0, maya = 0, count = 0, voided = 0;
-    let firstSI: string | null = null;
-    let lastSI: string | null = null;
-
-    for (const t of txns) {
-      if (t.status === "voided") { voided++; continue; }
-      count++;
-      gross += t.totalCentavos;
-      const isDisc = t.discountType === "senior" || t.discountType === "pwd";
-      if (isDisc) {
-        vatExempt += t.subtotalCentavos - t.vatAmountCentavos;
-        discount += t.discountAmountCentavos;
-      } else {
-        vatable += t.subtotalCentavos;
-        vat += t.vatAmountCentavos;
-      }
-      const splitAmt = t.splitPayment?.amountCentavos ?? 0;
-      const primary = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
-      if (t.paymentMethod === "cash") cash += primary;
-      else if (t.paymentMethod === "gcash") gcash += primary;
-      else maya += primary;
-      if (t.splitPayment) {
-        const m = t.splitPayment.method;
-        if (m === "cash") cash += splitAmt;
-        else if (m === "gcash") gcash += splitAmt;
-        else maya += splitAmt;
-      }
-      if (!firstSI || t.receiptNumber < firstSI) firstSI = t.receiptNumber;
-      if (!lastSI || t.receiptNumber > lastSI) lastSI = t.receiptNumber;
-    }
-
-    // Roll this machine's accumulated grand total forward and increment its
-    // Z-counter. The counter never resets — only the day's figures do.
-    const last = terminal
+    // The day closes with its last shift. Filing the Z while a shift is still
+    // trading would leave every later sale out of any Z-reading — End of Day
+    // declares the drawer and files the Z together instead.
+    const openShift = terminal
       ? await ctx.db
-          .query("zReadings")
-          .withIndex("by_terminal", (q) => q.eq("terminalId", terminal._id))
-          .order("desc")
+          .query("cashierShifts")
+          .withIndex("by_terminal_status", (q) =>
+            q.eq("terminalId", terminal._id).eq("status", "open")
+          )
           .first()
       : (
           await ctx.db
-            .query("zReadings")
-            .withIndex("by_branch", (q) => q.eq("branchId", branchId))
-            .order("desc")
+            .query("cashierShifts")
+            .withIndex("by_branch_status", (q) =>
+              q.eq("branchId", branchId).eq("status", "open")
+            )
             .collect()
-        ).find((r) => r.terminalId === undefined);
-    const previousGrandTotalCentavos = last?.accumulatedGrandTotalCentavos ?? 0;
-    const zCounter = (last?.zCounter ?? 0) + 1;
-    const accumulatedGrandTotalCentavos = previousGrandTotalCentavos + gross;
+        ).find((s) => s.terminalId === undefined);
+    if (openShift) {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message:
+          "A shift is still open on this register. Close it with End of Day, which files the Z-reading.",
+      });
+    }
 
-    const now = Date.now();
-    const zId = await ctx.db.insert("zReadings", {
-      branchId,
-      terminalId: terminal?._id,
-      zCounter,
-      date: dateStr,
-      beginningSI: firstSI ?? undefined,
-      endingSI: lastSI ?? undefined,
-      transactionCount: count,
-      voidedCount: voided,
-      grossSalesCentavos: gross,
-      vatableSalesCentavos: vatable,
-      vatExemptSalesCentavos: vatExempt,
-      zeroRatedSalesCentavos: 0,
-      vatAmountCentavos: vat,
-      discountCentavos: discount,
-      cashSalesCentavos: cash,
-      gcashSalesCentavos: gcash,
-      mayaSalesCentavos: maya,
-      previousGrandTotalCentavos,
-      accumulatedGrandTotalCentavos,
-      generatedById: scope.userId,
-      generatedAt: now,
-    });
-
-    await _logAuditEntry(ctx, {
-      action: "pos.zReadingFinalized",
-      userId: scope.userId,
-      branchId,
-      entityType: "zReadings",
-      entityId: zId,
-      after: { zCounter, date: dateStr, accumulatedGrandTotalCentavos },
-    });
-
-    return { zCounter, previousGrandTotalCentavos, accumulatedGrandTotalCentavos };
+    const z = await fileZReading(ctx, { branchId, terminalId, dateStr, userId: scope.userId });
+    return {
+      zCounter: z.zCounter,
+      previousGrandTotalCentavos: z.previousGrandTotalCentavos,
+      accumulatedGrandTotalCentavos: z.accumulatedGrandTotalCentavos,
+    };
   },
 });
 

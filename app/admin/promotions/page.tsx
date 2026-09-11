@@ -5,7 +5,7 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { formatCurrency, formatDate } from "@/lib/formatters";
-import { getErrorMessage } from "@/lib/utils";
+import { cn, getErrorMessage } from "@/lib/utils";
 import { toast } from "sonner";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
@@ -108,6 +108,21 @@ const STATUS_BADGE: Record<
   upcoming: { label: "Upcoming", className: "bg-blue-100 text-blue-800" },
 };
 
+type DiscountApplication = "wholePurchase" | "highestItem";
+
+const DISCOUNT_APPLICATION_OPTIONS: { value: DiscountApplication; label: string; hint: string }[] = [
+  {
+    value: "highestItem",
+    label: "Highest-priced item only",
+    hint: "One unit of the most expensive item in scope. Pants ₱100 + Shirt ₱50 at 10% off → ₱10 off the Pants.",
+  },
+  {
+    value: "wholePurchase",
+    label: "Whole purchase",
+    hint: "The total of every item in scope. Pants ₱100 + Shirt ₱50 at 10% off → ₱15 off.",
+  },
+];
+
 /** Return a readable string for the promo value column. */
 function formatPromoValue(promo: {
   promoType: PromoType;
@@ -118,17 +133,19 @@ function formatPromoValue(promo: {
   getQuantity?: number;
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
+  discountApplication?: DiscountApplication;
 }): string {
+  const onHighest = promo.discountApplication === "highestItem" ? " · highest item" : "";
   switch (promo.promoType) {
     case "percentage": {
       let s = `${promo.percentageValue ?? 0}%`;
       if (promo.maxDiscountCentavos) {
         s += ` (max ${formatCurrency(promo.maxDiscountCentavos)})`;
       }
-      return s;
+      return s + onHighest;
     }
     case "fixedAmount":
-      return formatCurrency(promo.fixedAmountCentavos ?? 0);
+      return formatCurrency(promo.fixedAmountCentavos ?? 0) + onHighest;
     case "buyXGetY":
       return `Buy ${promo.buyQuantity ?? 0}, Get ${promo.getQuantity ?? 0}`;
     case "tiered":
@@ -153,6 +170,7 @@ interface PromoForm {
   getQuantity: string;
   minSpendCentavos: string;
   tieredDiscountCentavos: string;
+  discountApplication: DiscountApplication;
   startDate: string;
   endDate: string;
   noExpiration: boolean;
@@ -195,6 +213,8 @@ function emptyForm(): PromoForm {
     getQuantity: "",
     minSpendCentavos: "",
     tieredDiscountCentavos: "",
+    // New promotions discount the highest-priced item unless set otherwise.
+    discountApplication: "highestItem",
     startDate: "",
     endDate: "",
     noExpiration: false,
@@ -366,6 +386,8 @@ export default function PromotionsPage() {
       getQuantity: promo.getQuantity?.toString() ?? "",
       minSpendCentavos: promo.minSpendCentavos?.toString() ?? "",
       tieredDiscountCentavos: promo.tieredDiscountCentavos?.toString() ?? "",
+      // A promotion saved before the setting existed discounts the whole purchase.
+      discountApplication: promo.discountApplication ?? "wholePurchase",
       startDate: tsToDateInput(promo.startDate),
       endDate: promo.endDate !== undefined ? tsToDateInput(promo.endDate) : "",
       noExpiration: promo.endDate === undefined,
@@ -447,6 +469,10 @@ export default function PromotionsPage() {
       tieredDiscountCentavos:
         form.promoType === "tiered" && form.tieredDiscountCentavos
           ? parseInt(form.tieredDiscountCentavos, 10)
+          : undefined,
+      discountApplication:
+        form.promoType === "percentage" || form.promoType === "fixedAmount"
+          ? form.discountApplication
           : undefined,
       branchIds: form.branchScopeMode === "specific" ? form.branchIds : [],
       branchClassifications: form.branchScopeMode === "byClassification" ? form.branchClassifications : undefined,
@@ -811,6 +837,37 @@ export default function PromotionsPage() {
                     updateField("fixedAmountCentavos", e.target.value)
                   }
                 />
+              </div>
+            )}
+
+            {(form.promoType === "percentage" || form.promoType === "fixedAmount") && (
+              <div className="space-y-2">
+                <Label>Apply discount to</Label>
+                <div className="space-y-2">
+                  {DISCOUNT_APPLICATION_OPTIONS.map((option) => (
+                    <label
+                      key={option.value}
+                      className={cn(
+                        "flex cursor-pointer items-start gap-2.5 rounded-md border p-2.5 text-sm transition-colors",
+                        form.discountApplication === option.value
+                          ? "border-primary bg-primary/5"
+                          : "hover:bg-muted/50"
+                      )}
+                    >
+                      <input
+                        type="radio"
+                        name="discountApplication"
+                        className="mt-0.5 accent-primary"
+                        checked={form.discountApplication === option.value}
+                        onChange={() => updateField("discountApplication", option.value)}
+                      />
+                      <span>
+                        <span className="font-medium">{option.label}</span>
+                        <span className="block text-xs text-muted-foreground">{option.hint}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
 

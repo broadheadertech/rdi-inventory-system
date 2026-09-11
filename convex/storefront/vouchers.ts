@@ -1,6 +1,28 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
+import type { Doc } from "../_generated/dataModel";
+
+/** The offer as a customer reads it, e.g. "20% OFF your highest-priced item". */
+function describeDiscount(promo: Doc<"promotions">): string {
+  const onHighest =
+    promo.discountApplication === "highestItem" ? " your highest-priced item" : "";
+  if (promo.promoType === "percentage" && promo.percentageValue) {
+    return `${promo.percentageValue}% OFF${onHighest}`;
+  }
+  if (promo.promoType === "fixedAmount" && promo.fixedAmountCentavos) {
+    const amount = (promo.fixedAmountCentavos / 100).toLocaleString("en-PH");
+    return `₱${amount} OFF${onHighest}`;
+  }
+  if (promo.promoType === "buyXGetY") {
+    return `Buy ${promo.buyQuantity ?? 0} Get ${promo.getQuantity ?? 0}`;
+  }
+  if (promo.promoType === "tiered" && promo.tieredDiscountCentavos) {
+    const amount = (promo.tieredDiscountCentavos / 100).toLocaleString("en-PH");
+    return `₱${amount} OFF`;
+  }
+  return "";
+}
 
 // ─── Get Available Vouchers (Public) ─────────────────────────────────────────
 // Returns active vouchers with masked codes and linked promotion details.
@@ -26,19 +48,7 @@ export const getAvailableVouchers = query({
         const promo = await ctx.db.get(voucher.promotionId);
         if (!promo || !promo.isActive) return null;
 
-        // Build discount description
-        let discountDescription = "";
-        if (promo.promoType === "percentage" && promo.percentageValue) {
-          discountDescription = `${promo.percentageValue}% OFF`;
-        } else if (promo.promoType === "fixedAmount" && promo.fixedAmountCentavos) {
-          const amount = (promo.fixedAmountCentavos / 100).toLocaleString("en-PH");
-          discountDescription = `₱${amount} OFF`;
-        } else if (promo.promoType === "buyXGetY") {
-          discountDescription = `Buy ${promo.buyQuantity ?? 0} Get ${promo.getQuantity ?? 0}`;
-        } else if (promo.promoType === "tiered" && promo.tieredDiscountCentavos) {
-          const amount = (promo.tieredDiscountCentavos / 100).toLocaleString("en-PH");
-          discountDescription = `₱${amount} OFF`;
-        }
+        const discountDescription = describeDiscount(promo);
 
         // Mask the code: show first 4 chars, mask the rest
         const code = voucher.code;
@@ -114,20 +124,7 @@ export const collectVoucher = query({
     // Resolve promotion for display
     const promo = await ctx.db.get(voucher.promotionId);
 
-    let discountDescription = "";
-    if (promo) {
-      if (promo.promoType === "percentage" && promo.percentageValue) {
-        discountDescription = `${promo.percentageValue}% OFF`;
-      } else if (promo.promoType === "fixedAmount" && promo.fixedAmountCentavos) {
-        const amount = (promo.fixedAmountCentavos / 100).toLocaleString("en-PH");
-        discountDescription = `₱${amount} OFF`;
-      } else if (promo.promoType === "buyXGetY") {
-        discountDescription = `Buy ${promo.buyQuantity ?? 0} Get ${promo.getQuantity ?? 0}`;
-      } else if (promo.promoType === "tiered" && promo.tieredDiscountCentavos) {
-        const amount = (promo.tieredDiscountCentavos / 100).toLocaleString("en-PH");
-        discountDescription = `₱${amount} OFF`;
-      }
-    }
+    const discountDescription = promo ? describeDiscount(promo) : "";
 
     return {
       code: voucher.code,

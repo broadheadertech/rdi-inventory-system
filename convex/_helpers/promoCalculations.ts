@@ -13,6 +13,9 @@ export type PromoInput = {
   getQuantity?: number;
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
+  // percentage / fixedAmount: take the discount from the in-scope total
+  // (default), or from one unit of the highest-priced in-scope item.
+  discountApplication?: "wholePurchase" | "highestItem";
   // Product scope (empty arrays = all products) — for crossSell/pwp this is the TRIGGER scope
   brandIds: string[];
   categoryIds: string[];
@@ -131,11 +134,19 @@ export function calculatePromoDiscount(
     0
   );
 
+  // What a percentage or fixed-amount discount is taken from. "highestItem" is
+  // a single unit of the priciest in-scope item: Pants ₱100 + Shirt ₱50 at 10%
+  // off gives ₱10, and two Pants still give ₱10.
+  const discountBase =
+    promo.discountApplication === "highestItem"
+      ? Math.max(...eligible.map((item) => item.unitPriceCentavos))
+      : eligibleTotal;
+
   switch (promo.promoType) {
     case "percentage":
-      return calcPercentage(eligible, eligibleTotal, promo);
+      return calcPercentage(discountBase, promo);
     case "fixedAmount":
-      return calcFixedAmount(eligibleTotal, promo);
+      return calcFixedAmount(discountBase, promo);
     case "buyXGetY":
       return calcBuyXGetY(eligible, promo);
     case "tiered":
@@ -151,9 +162,12 @@ export function calculatePromoDiscount(
 
 // ─── Per-Type Calculators ───────────────────────────────────────────────────
 
+function highestItemSuffix(promo: PromoInput): string {
+  return promo.discountApplication === "highestItem" ? " on the highest-priced item" : "";
+}
+
 function calcPercentage(
-  _eligible: CartItemForPromo[],
-  eligibleTotal: number,
+  base: number,
   promo: PromoInput
 ): PromoResult {
   const pct = promo.percentageValue ?? 0;
@@ -161,7 +175,7 @@ function calcPercentage(
     return { applicable: false, discountCentavos: 0, description: "" };
   }
 
-  let discount = Math.round(eligibleTotal * (pct / 100));
+  let discount = Math.round(base * (pct / 100));
 
   // Cap at max if set
   if (promo.maxDiscountCentavos && discount > promo.maxDiscountCentavos) {
@@ -171,12 +185,12 @@ function calcPercentage(
   return {
     applicable: true,
     discountCentavos: discount,
-    description: `${promo.name} (${pct}% off)`,
+    description: `${promo.name} (${pct}% off${highestItemSuffix(promo)})`,
   };
 }
 
 function calcFixedAmount(
-  eligibleTotal: number,
+  base: number,
   promo: PromoInput
 ): PromoResult {
   const fixedOff = promo.fixedAmountCentavos ?? 0;
@@ -184,13 +198,13 @@ function calcFixedAmount(
     return { applicable: false, discountCentavos: 0, description: "" };
   }
 
-  // Don't discount more than the eligible total
-  const discount = Math.min(fixedOff, eligibleTotal);
+  // Never more than what it is taken from
+  const discount = Math.min(fixedOff, base);
 
   return {
     applicable: true,
     discountCentavos: discount,
-    description: `${promo.name} (₱${(fixedOff / 100).toFixed(0)} off)`,
+    description: `${promo.name} (₱${(fixedOff / 100).toFixed(0)} off${highestItemSuffix(promo)})`,
   };
 }
 
