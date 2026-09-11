@@ -1,14 +1,16 @@
 "use client";
 
-// Ends a cashier's shift. The cashier counts the drawer bill by bill — blind,
-// never shown what the system expects — declares the total, and only then is
-// logged out; there is no other way out of a shift at the till. The shift's
-// GCash, Maya and bank transfer takings are shown alongside, to be checked
-// against the apps and the bank: that money is not in the drawer.
+// Ends a cashier's shift with a turnover slip: the shift's transactions and
+// sales, what the drawer should hold — the amount to surrender — and its GCash,
+// Maya and bank transfer takings, which are checked against the apps and the
+// bank rather than counted. The cashier counts the drawer bill by bill and sees
+// at once whether it matches; a count that doesn't asks again and is flagged
+// for the manager. Only once the count is declared are they logged out —
+// there is no other way out of a shift at the till.
 //
-// Switch Cashier hands the drawer to the next cashier, who counts it again.
-// End of Day also files the register's Z-reading. A shift still open from an
-// earlier day can only be ended as that day's End of Day.
+// Switch Cashier hands the drawer to the next cashier, who counts it again,
+// blind. End of Day also files the register's Z-reading. A shift still open
+// from an earlier day can only be ended as that day's End of Day.
 
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -28,6 +30,7 @@ import {
 } from "@/components/pos/DenominationCounter";
 
 type Mode = "choose" | "turnover" | "endOfDay";
+type ShiftSummary = FunctionReturnType<typeof api.pos.shifts.getShiftTenders>;
 
 export type EndShiftTarget = {
   shiftId: Id<"cashierShifts">;
@@ -54,15 +57,28 @@ export function EndShiftDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  const tenders = useQuery(
+  const summary = useQuery(
     api.pos.shifts.getShiftTenders,
     mode === "choose" ? "skip" : { deviceToken: getDeviceToken() ?? undefined }
   );
 
+  const counted = countedCentavos(counts);
+  const expected = summary?.drawer.expectedCentavos;
+  const difference = expected === undefined ? null : counted - expected;
+  const hasCounted = Object.values(counts).some((v) => v !== "");
+
   async function declareAndClose() {
     if (mode === "choose") return;
-    const declared = countedCentavos(counts);
-    if (declared === 0 && !confirmEmptyDrawer()) return;
+    if (difference !== null && difference !== 0) {
+      const ok = window.confirm(
+        `Your count is ${difference < 0 ? "short" : "over"} by ${formatCurrency(Math.abs(difference))} ` +
+          `against the ${formatCurrency(expected!)} expected.\n\n` +
+          "Recount if you can. Declare this amount anyway? It will be flagged for the manager."
+      );
+      if (!ok) return;
+    } else if (counted === 0 && !confirmEmptyDrawer()) {
+      return;
+    }
     if (
       mode === "endOfDay" &&
       !window.confirm(
@@ -79,7 +95,7 @@ export function EndShiftDialog({
     try {
       const r = await closeShift({
         closeType: mode,
-        declaredCashCentavos: declared,
+        declaredCashCentavos: counted,
         deviceToken: getDeviceToken() ?? undefined,
       });
       onClosed({
@@ -155,11 +171,36 @@ export function EndShiftDialog({
               <p className="text-sm text-muted-foreground">
                 {forced
                   ? `This shift was left open since ${dateLabel(shift.openedDate)}. Count the drawer and close that day before trading today.`
-                  : "Count how many of each bill and coin are in the drawer. You'll be logged out once the total is recorded."}
+                  : mode === "turnover"
+                    ? "Count the drawer and surrender the cash to the next cashier. You'll be logged out once the count is recorded."
+                    : "Count the drawer. You'll be logged out once the count is recorded and the Z-reading is filed."}
               </p>
             </div>
-            <DenominationCounter counts={counts} onChange={setCounts} disabled={busy} />
-            <NonCashCheck tenders={tenders} />
+
+            <TurnoverSlip summary={summary} mode={mode} />
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Count the drawer
+              </p>
+              <DenominationCounter counts={counts} onChange={setCounts} disabled={busy} />
+              {hasCounted && difference !== null && (
+                <p
+                  className={`rounded-lg px-3 py-2 text-center text-sm font-semibold ${
+                    difference === 0
+                      ? "bg-green-50 text-green-700"
+                      : difference < 0
+                        ? "bg-red-50 text-red-700"
+                        : "bg-amber-50 text-amber-700"
+                  }`}
+                >
+                  {difference === 0
+                    ? "Matches the amount expected"
+                    : `${difference < 0 ? "Short" : "Over"} by ${formatCurrency(Math.abs(difference))}`}
+                </p>
+              )}
+            </div>
+
             {error && <p className="text-center text-xs text-red-500">{error}</p>}
             <div className="flex gap-2">
               {!forced && (
@@ -190,62 +231,116 @@ export function EndShiftDialog({
   );
 }
 
-// ─── Non-cash takings ─────────────────────────────────────────────────────────
+// ─── Turnover slip ────────────────────────────────────────────────────────────
 
-function NonCashCheck({
-  tenders,
+function Line({
+  label,
+  value,
+  sign,
+  muted = true,
 }: {
-  tenders: FunctionReturnType<typeof api.pos.shifts.getShiftTenders> | undefined;
+  label: React.ReactNode;
+  value: number;
+  sign?: "+" | "−";
+  muted?: boolean;
 }) {
-  if (tenders === undefined) {
-    return <p className="text-center text-xs text-muted-foreground">Loading non-cash payments…</p>;
-  }
-  if (tenders === null) return null;
+  return (
+    <div className="flex items-center justify-between">
+      <span className={muted ? "text-muted-foreground" : undefined}>{label}</span>
+      <span className="tabular-nums">
+        {sign ? `${sign} ` : ""}
+        {formatCurrency(value)}
+      </span>
+    </div>
+  );
+}
 
-  const rows = [
-    { label: "GCash", ...tenders.gcash },
-    { label: "Maya", ...tenders.maya },
-    { label: "Bank Transfer", ...tenders.bankTransfer },
+function TurnoverSlip({
+  summary,
+  mode,
+}: {
+  summary: ShiftSummary | undefined;
+  mode: "turnover" | "endOfDay";
+}) {
+  if (summary === undefined) {
+    return <p className="text-center text-xs text-muted-foreground">Loading the shift&apos;s totals…</p>;
+  }
+  if (summary === null) return null;
+
+  const d = summary.drawer;
+  const nonCash = [
+    { label: "GCash", ...summary.gcash },
+    { label: "Maya", ...summary.maya },
+    { label: "Bank Transfer", ...summary.bankTransfer },
   ];
 
   return (
-    <div className="space-y-2 rounded-lg border p-3 text-sm">
-      <div>
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Non-cash this shift
-        </p>
-        <p className="text-xs text-muted-foreground">
-          Not in the drawer — check these against the GCash and Maya apps and the bank.
-        </p>
-      </div>
+    <div className="space-y-3 rounded-lg border p-3 text-sm">
       <div className="space-y-1">
-        {rows.map((r) => (
-          <div key={r.label} className="flex items-center justify-between">
-            <span>
-              {r.label}{" "}
-              <span className="text-xs text-muted-foreground">
-                · {r.count} payment{r.count === 1 ? "" : "s"}
-              </span>
-            </span>
-            <span className="font-semibold tabular-nums">{formatCurrency(r.amountCentavos)}</span>
-          </div>
-        ))}
-      </div>
-      {tenders.transfers.length > 0 && (
-        <div className="space-y-1 border-t pt-2 text-xs">
-          <p className="text-muted-foreground">Transfer reference nos.</p>
-          <ul className="max-h-24 space-y-0.5 overflow-y-auto">
-            {tenders.transfers.map((t, i) => (
-              <li key={`${t.receiptNumber}-${i}`} className="flex items-center justify-between gap-2">
-                <span className="truncate font-mono">{t.reference ?? "No reference"}</span>
-                <span className="shrink-0 tabular-nums text-muted-foreground">
-                  {formatCurrency(t.amountCentavos)}
-                </span>
-              </li>
-            ))}
-          </ul>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Transactions</span>
+          <span className="font-semibold">{summary.transactionCount}</span>
         </div>
-      )}
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Total sales</span>
+          <span className="font-semibold tabular-nums">
+            {formatCurrency(summary.totalSalesCentavos)}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-1 border-t pt-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Cash drawer
+        </p>
+        <Line label="Drawer at start of shift" value={d.startCentavos} />
+        <Line label="Cash sales" value={d.cashSalesCentavos} sign="+" />
+        <Line label="Cash In" value={d.cashInCentavos} sign="+" />
+        <Line label="Cash Out" value={d.cashOutCentavos} sign="−" />
+        <div className="flex items-center justify-between border-t pt-1 font-bold">
+          <span>{mode === "turnover" ? "To surrender" : "Expected in drawer"}</span>
+          <span className="tabular-nums text-green-700">{formatCurrency(d.expectedCentavos)}</span>
+        </div>
+      </div>
+
+      <div className="space-y-1 border-t pt-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Non-cash — not in the drawer
+        </p>
+        {nonCash.map((r) => (
+          <Line
+            key={r.label}
+            muted={false}
+            label={
+              <>
+                {r.label}{" "}
+                <span className="text-xs text-muted-foreground">
+                  · {r.count} payment{r.count === 1 ? "" : "s"}
+                </span>
+              </>
+            }
+            value={r.amountCentavos}
+          />
+        ))}
+        {summary.transfers.length > 0 && (
+          <div className="space-y-0.5 pt-1 text-xs">
+            <p className="text-muted-foreground">Transfer reference nos.</p>
+            <ul className="max-h-24 space-y-0.5 overflow-y-auto">
+              {summary.transfers.map((t, i) => (
+                <li key={`${t.receiptNumber}-${i}`} className="flex items-center justify-between gap-2">
+                  <span className="truncate font-mono">{t.reference ?? "No reference"}</span>
+                  <span className="shrink-0 tabular-nums text-muted-foreground">
+                    {formatCurrency(t.amountCentavos)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <p className="pt-1 text-xs text-muted-foreground">
+          Check these against the GCash and Maya apps and the bank.
+        </p>
+      </div>
     </div>
   );
 }

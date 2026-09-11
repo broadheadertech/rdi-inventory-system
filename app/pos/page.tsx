@@ -420,7 +420,7 @@ function PosPageContent() {
           <div className="flex h-full flex-col">
             {/* ── Top bar: mode toggle + cash balance + EOD ──────────── */}
             <div className="border-b px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 {/* Mode pills */}
                 <div className="flex gap-1">
                   {INPUT_MODES.map((mode) => (
@@ -456,44 +456,11 @@ function PosPageContent() {
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {/* No running cash total here: the drawer is counted blind at End Shift.
-                      Non-cash takings are shown — they are checked against the apps and
-                      the bank, not counted. */}
-                  {shift && (
-                    <div className="flex items-center gap-3 whitespace-nowrap rounded-lg border bg-muted/30 px-3 py-1.5 text-xs">
-                      <span className="font-medium text-foreground">{shift.cashierName}</span>
-                      <span className="text-muted-foreground">
-                        Txns: <span className="font-semibold text-foreground">{shift.transactionCount}</span>
-                      </span>
-                      {tenders && (
-                        <span className="hidden items-center gap-3 border-l pl-3 md:flex">
-                          <span className="text-muted-foreground">
-                            GCash:{" "}
-                            <span className="font-semibold text-blue-700">
-                              {formatCurrency(tenders.gcash.amountCentavos)}
-                            </span>
-                          </span>
-                          <span className="text-muted-foreground">
-                            Maya:{" "}
-                            <span className="font-semibold text-emerald-700">
-                              {formatCurrency(tenders.maya.amountCentavos)}
-                            </span>
-                          </span>
-                          <span className="text-muted-foreground">
-                            Bank:{" "}
-                            <span className="font-semibold text-amber-700">
-                              {formatCurrency(tenders.bankTransfer.amountCentavos)}
-                            </span>
-                          </span>
-                        </span>
-                      )}
-                    </div>
-                  )}
+                <div className="flex shrink-0 items-center gap-2">
                   {shift && (
                     <button
                       onClick={() => setShowXReading(true)}
-                      className="flex items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                      className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
                     >
                       <FileBarChart className="h-3.5 w-3.5" />
                       <span className="hidden sm:inline">X-Read</span>
@@ -501,7 +468,7 @@ function PosPageContent() {
                   )}
                   <Link
                     href="/pos/reconciliation"
-                    className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                    className="flex items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
                   >
                     <ClipboardCheck className="h-3.5 w-3.5" />
                     <span className="hidden sm:inline">EOD</span>
@@ -509,12 +476,52 @@ function PosPageContent() {
                   {shift && (
                     <button
                       onClick={() => setShowEndShift(true)}
-                      className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
+                      className="whitespace-nowrap rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-100"
                     >
                       End Shift
                     </button>
                   )}
                 </div>
+
+                {/* The shift at a glance: its own row, so it never squeezes the
+                    buttons. COH is what the drawer should hold now; GCash, Maya
+                    and bank transfers are checked against the apps and the bank. */}
+                {shift && (
+                  <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border bg-muted/30 px-3 py-1.5 text-xs">
+                    <span className="font-medium text-foreground">{shift.cashierName}</span>
+                    <span className="text-muted-foreground">
+                      Txns: <span className="font-semibold text-foreground">{shift.transactionCount}</span>
+                    </span>
+                    {tenders && (
+                      <>
+                        <span className="border-l pl-4 text-muted-foreground">
+                          COH:{" "}
+                          <span className="font-semibold text-green-700">
+                            {formatCurrency(tenders.drawer.expectedCentavos)}
+                          </span>
+                        </span>
+                        <span className="border-l pl-4 text-muted-foreground">
+                          GCash:{" "}
+                          <span className="font-semibold text-blue-700">
+                            {formatCurrency(tenders.gcash.amountCentavos)}
+                          </span>
+                        </span>
+                        <span className="text-muted-foreground">
+                          Maya:{" "}
+                          <span className="font-semibold text-emerald-700">
+                            {formatCurrency(tenders.maya.amountCentavos)}
+                          </span>
+                        </span>
+                        <span className="text-muted-foreground">
+                          Bank:{" "}
+                          <span className="font-semibold text-amber-700">
+                            {formatCurrency(tenders.bankTransfer.amountCentavos)}
+                          </span>
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

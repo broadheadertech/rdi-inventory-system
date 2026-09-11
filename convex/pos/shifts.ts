@@ -9,10 +9,12 @@
 //   End of Day      the last cashier declares the cash on hand, which becomes
 //                   the day's count, and the register's Z-reading is filed
 //
-// Every count is blind: the till never shows what the system expects, so no
-// one can simply type it back. A turnover count that comes up short — of the
-// outgoing declaration or of the drawer's expected cash — holds the register
-// until a manager approves it. And a register cannot start a new business day
+// The outgoing cashier sees what the drawer should hold and counts against it
+// (getShiftTenders). The incoming cashier's turnover count stays blind — they
+// are never shown the amount handed over, so a shortfall at the handover
+// can't be covered by typing a number back. A turnover count that comes up
+// short — of the outgoing declaration or of the drawer's expected cash —
+// holds the register until a manager approves it. And a register cannot start a new business day
 // while its last one has no Z-reading.
 
 import { v, ConvexError } from "convex/values";
@@ -313,7 +315,8 @@ export async function requireShiftForSale(
 }
 
 // ─── getActiveShift ───────────────────────────────────────────────────────────
-// The open shift on this register. No cash figures: the till counts blind.
+// The open shift on this register. Its takings and drawer figures come from
+// getShiftTenders.
 
 export const getActiveShift = query({
   args: { deviceToken: v.optional(v.string()) },
@@ -354,9 +357,9 @@ export const getActiveShift = query({
 });
 
 // ─── getShiftTenders ──────────────────────────────────────────────────────────
-// What the open shift took by GCash, Maya and bank transfer, for the cashier to
-// check against the wallet apps and the bank before ending it. Cash stays out:
-// the drawer is still counted blind.
+// What the open shift took, by tender, and what its drawer should hold — the
+// turnover slip. The cashier checks GCash, Maya and bank transfers against the
+// apps and the bank, and counts the drawer against the amount to surrender.
 
 export const getShiftTenders = query({
   args: { deviceToken: v.optional(v.string()) },
@@ -401,7 +404,42 @@ export const getShiftTenders = query({
         }
       }
     }
-    return { ...tally, transfers };
+    // The drawer: what it held when this shift began, and what moved since.
+    let cashSales = 0;
+    let totalSales = 0;
+    for (const t of txns) {
+      cashSales += cashTendered(t);
+      totalSales += t.totalCentavos;
+    }
+    const ops = (
+      await ctx.db
+        .query("drawerOperations")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branchId).gte("createdAt", shift.openedAt)
+        )
+        .collect()
+    ).filter(matches);
+    let cashIn = 0;
+    let cashOut = 0;
+    for (const op of ops) {
+      if (op.type === "payIn") cashIn += op.amountCentavos;
+      else if (op.type === "payOut") cashOut += op.amountCentavos;
+    }
+    const expected = await expectedDrawerCash(ctx, branchId, shift);
+
+    return {
+      ...tally,
+      transfers,
+      transactionCount: txns.length,
+      totalSalesCentavos: totalSales,
+      drawer: {
+        startCentavos: expected - cashSales - cashIn + cashOut,
+        cashSalesCentavos: cashSales,
+        cashInCentavos: cashIn,
+        cashOutCentavos: cashOut,
+        expectedCentavos: expected,
+      },
+    };
   },
 });
 
