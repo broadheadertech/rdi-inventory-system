@@ -235,6 +235,7 @@ export default function ReturnsPage() {
     setProcessing(true);
     try {
       const result = await processReturn({
+        deviceToken: deviceToken ?? undefined,
         transactionId: transaction._id,
         returnItems: returnItems.map((ri) => ({
           variantId: ri.variantId,
@@ -258,7 +259,7 @@ export default function ReturnsPage() {
     } finally {
       setProcessing(false);
     }
-  }, [transaction, returnItems, returnType, processReturn]);
+  }, [transaction, returnItems, returnType, processReturn, deviceToken]);
 
   // ── Reset ───────────────────────────────────────────────────────────────────
 

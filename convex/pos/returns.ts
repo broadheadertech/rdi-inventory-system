@@ -1,8 +1,10 @@
 import { v, ConvexError } from "convex/values";
 import { query, mutation } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { requireShiftForSale } from "./shifts";
 
 // ─── Return reasons ─────────────────────────────────────────────────────────
 
@@ -151,6 +153,7 @@ export const processReturn = mutation({
       })
     ),
     returnType: v.union(v.literal("refund"), v.literal("exchange")),
+    deviceToken: v.optional(v.string()),
     // For exchange: replacement items to add
     exchangeItems: v.optional(
       v.array(
@@ -169,20 +172,13 @@ export const processReturn = mutation({
     }
     const branchId = scope.branchId!;
 
-    // 2. Require active shift
-    const shift = await ctx.db
-      .query("cashierShifts")
-      .withIndex("by_cashier_status", (q) =>
-        q.eq("cashierId", scope.userId).eq("status", "open")
-      )
-      .first();
-
-    if (!shift) {
-      throw new ConvexError({
-        code: "NO_ACTIVE_SHIFT",
-        message: "You must have an active shift to process returns.",
-      });
-    }
+    // 2. The register this return is rung on, and its shift — held to the same
+    //    line as a sale: this register's open shift, and today's. A register
+    //    whose last day has no Z-reading has no open shift, so returns stop
+    //    with sales. The terminal is stamped on the return below so its refund
+    //    lands in that register's Z-reading and drawer count.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    await requireShiftForSale(ctx, branchId, terminal?._id ?? null);
 
     // 3. Validate original transaction
     const originalTx = await ctx.db.get(args.transactionId);
@@ -368,6 +364,9 @@ export const processReturn = mutation({
 
     const returnTxId = await ctx.db.insert("transactions", {
       branchId,
+      // Without the register, a cash refund fell outside that register's
+      // Z-reading and expected cash, and its drawer read short by the refund.
+      terminalId: terminal?._id,
       cashierId: scope.userId,
       receiptNumber,
       subtotalCentavos: -refundTotalCentavos,
