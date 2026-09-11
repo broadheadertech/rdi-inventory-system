@@ -1,9 +1,11 @@
-import { query, mutation } from "../_generated/server";
+import { query, mutation, QueryCtx } from "../_generated/server";
 import { v } from "convex/values";
+import type { Doc, Id } from "../_generated/dataModel";
 import { requireRole } from "../_helpers/permissions";
 
 const HQ_ROLES = ["admin", "hqStaff"] as const;
 const PHT = 8 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 // ─── Static PH Holidays / Events ──────────────────────────────────────────────
 
@@ -85,8 +87,115 @@ function describeOffer(p: PromoDoc): string {
   }
 }
 
+// ─── Sales helpers ────────────────────────────────────────────────────────────
+
+function phtDateKey(ms: number): string {
+  const d = new Date(ms + PHT);
+  return toYYYYMMDD(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
+
+/** Every transaction rung at an active retail branch in [startMs, endMs). */
+async function loadRetailTransactions(ctx: QueryCtx, startMs: number, endMs: number) {
+  const allBranches = await ctx.db
+    .query("branches")
+    .filter((q) => q.eq(q.field("isActive"), true))
+    .collect();
+  const retailBranches = allBranches.filter((b) => b.channel !== "warehouse");
+
+  const txns = (
+    await Promise.all(
+      retailBranches.map((branch) =>
+        ctx.db
+          .query("transactions")
+          .withIndex("by_branch_date", (q) =>
+            q.eq("branchId", branch._id).gte("createdAt", startMs)
+          )
+          .filter((q) => q.lt(q.field("createdAt"), endMs))
+          .collect()
+      )
+    )
+  ).flat();
+
+  return { allBranches, txns };
+}
+
+// A refund or exchange is booked as its own transaction with a RET- receipt
+// number — the same test reportsV2 uses.
+function isReturnTxn(t: Doc<"transactions">): boolean {
+  return t.totalCentavos < 0 || t.receiptNumber.startsWith("RET-");
+}
+
+/**
+ * The promotion a transaction counts toward, or null.
+ *
+ * A sale records its promotion directly. A return records none, so it is traced
+ * through its RET- receipt number to the sale it reverses: a refunded promo sale
+ * should come off that promo's figures rather than linger in them. Receipt
+ * numbers are only unique within an invoice series, so a match at the
+ * returning branch wins over one elsewhere.
+ */
+async function promotionFor(
+  ctx: QueryCtx,
+  t: Doc<"transactions">,
+  cache: Map<string, Id<"promotions"> | null>
+): Promise<Id<"promotions"> | null> {
+  if (!isReturnTxn(t)) return t.promotionId ?? null;
+  if (!t.receiptNumber.startsWith("RET-")) return null;
+
+  const originalReceipt = t.receiptNumber.slice("RET-".length);
+  const cacheKey = `${t.branchId}|${originalReceipt}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const matches = await ctx.db
+    .query("transactions")
+    .withIndex("by_receiptNumber", (q) => q.eq("receiptNumber", originalReceipt))
+    .collect();
+  const sale =
+    matches.find((m) => m.branchId === t.branchId) ??
+    (matches.length === 1 ? matches[0] : undefined);
+
+  const promotionId = sale?.promotionId ?? null;
+  cache.set(cacheKey, promotionId);
+  return promotionId;
+}
+
+/**
+ * What a transaction adds to its promotion's sales. A sale adds what was paid.
+ * A return takes off only what was refunded (its negative subtotal) — the items
+ * handed over in an exchange are a new purchase, not the promo's.
+ */
+function promoSalesAmount(t: Doc<"transactions">): number {
+  return isReturnTxn(t) ? t.subtotalCentavos : t.totalCentavos;
+}
+
+type PromoTally = {
+  salesCentavos: number;
+  transactionCount: number;
+  discountCentavos: number;
+};
+
+function addToTally(tally: PromoTally, t: Doc<"transactions">): void {
+  tally.salesCentavos += promoSalesAmount(t);
+  if (!isReturnTxn(t)) {
+    tally.transactionCount += 1;
+    tally.discountCentavos += t.promoDiscountAmountCentavos ?? 0;
+  }
+}
+
+function sumTallies(tallies: Iterable<PromoTally>): PromoTally {
+  const total: PromoTally = { salesCentavos: 0, transactionCount: 0, discountCentavos: 0 };
+  for (const t of tallies) {
+    total.salesCentavos += t.salesCentavos;
+    total.transactionCount += t.transactionCount;
+    total.discountCentavos += t.discountCentavos;
+  }
+  return total;
+}
+
 // ─── getCalendarMonth ─────────────────────────────────────────────────────────
-// Returns daily revenue + static + custom events for every day in the month.
+// Returns daily revenue + static + custom events for every day in the month,
+// and how much of it was sold with a promotion.
 
 export const getCalendarMonth = query({
   args: {
@@ -103,36 +212,44 @@ export const getCalendarMonth = query({
     const startMs = Date.UTC(year, month - 1, 1) - PHT;
     const endMs   = Date.UTC(year, month, 1) - PHT; // exclusive
 
-    // Fetch all retail branch transactions in this month
-    const allBranches = await ctx.db
-      .query("branches")
-      .filter((q) => q.eq(q.field("isActive"), true))
-      .collect();
-    const retailBranches = allBranches.filter((b) => b.channel !== "warehouse");
+    const { allBranches, txns: allTxns } = await loadRetailTransactions(ctx, startMs, endMs);
 
-    const allTxns = (
-      await Promise.all(
-        retailBranches.map((branch) =>
-          ctx.db
-            .query("transactions")
-            .withIndex("by_branch_date", (q) =>
-              q.eq("branchId", branch._id).gte("createdAt", startMs)
-            )
-            .filter((q) => q.lt(q.field("createdAt"), endMs))
-            .collect()
-        )
-      )
-    ).flat();
+    // Every promotion, not only this month's, so a return of an earlier promo
+    // sale can still be named.
+    const allPromos = await ctx.db.query("promotions").collect();
+    const promoById = new Map(allPromos.map((p) => [p._id as string, p]));
 
-    // Group revenue by PHT date
+    // Group revenue by PHT date. Voided sales never happened, so they are left
+    // out, as in Reports. Returns stay in so a day nets to what was actually
+    // taken, but only sales count as transactions.
     const revenueByDay = new Map<string, { revenueCentavos: number; transactionCount: number }>();
+    const promoByDay = new Map<string, Map<string, PromoTally>>();
+    const promoByMonth = new Map<string, PromoTally>();
+    const returnCache = new Map<string, Id<"promotions"> | null>();
+
     for (const txn of allTxns) {
-      const d = new Date(txn.createdAt + PHT);
-      const key = toYYYYMMDD(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+      if (txn.status === "voided") continue;
+
+      const key = phtDateKey(txn.createdAt);
       const existing = revenueByDay.get(key) ?? { revenueCentavos: 0, transactionCount: 0 };
       existing.revenueCentavos += txn.totalCentavos;
-      existing.transactionCount += 1;
+      if (!isReturnTxn(txn)) existing.transactionCount += 1;
       revenueByDay.set(key, existing);
+
+      const promotionId = await promotionFor(ctx, txn, returnCache);
+      if (!promotionId) continue;
+
+      const dayTallies = promoByDay.get(key) ?? new Map<string, PromoTally>();
+      promoByDay.set(key, dayTallies);
+      for (const tallies of [dayTallies, promoByMonth]) {
+        const tally = tallies.get(promotionId) ?? {
+          salesCentavos: 0,
+          transactionCount: 0,
+          discountCentavos: 0,
+        };
+        addToTally(tally, txn);
+        tallies.set(promotionId, tally);
+      }
     }
 
     // Fetch custom events for this month
@@ -151,7 +268,6 @@ export const getCalendarMonth = query({
     }
 
     // Promotions overlapping this month. endDate absent means open-ended.
-    const allPromos = await ctx.db.query("promotions").collect();
     const monthPromos = allPromos.filter((p) => {
       const promoEnd = p.endDate ?? Number.MAX_SAFE_INTEGER;
       return p.startDate < endMs && promoEnd >= startMs;
@@ -162,20 +278,26 @@ export const getCalendarMonth = query({
       allBranches.map((b) => [b._id as string, b.name])
     );
 
-    const promoMeta = monthPromos.map((p) => ({
-      id: p._id as string,
-      name: p.name,
-      promoType: p.promoType,
-      offer: describeOffer(p),
-      isActive: p.isActive,
-      priority: p.priority,
-      startDate: p.startDate,
-      endDate: p.endDate ?? null,
-      allBranches: p.branchIds.length === 0,
-      branchNames: p.branchIds
-        .map((id) => branchNameById.get(id as string))
-        .filter((n): n is string => Boolean(n)),
-    }));
+    const promoMeta = monthPromos.map((p) => {
+      const month = promoByMonth.get(p._id as string);
+      return {
+        id: p._id as string,
+        name: p.name,
+        promoType: p.promoType,
+        offer: describeOffer(p),
+        isActive: p.isActive,
+        priority: p.priority,
+        startDate: p.startDate,
+        endDate: p.endDate ?? null,
+        allBranches: p.branchIds.length === 0,
+        branchNames: p.branchIds
+          .map((id) => branchNameById.get(id as string))
+          .filter((n): n is string => Boolean(n)),
+        monthSalesCentavos: month?.salesCentavos ?? 0,
+        monthTransactionCount: month?.transactionCount ?? 0,
+        monthDiscountCentavos: month?.discountCentavos ?? 0,
+      };
+    });
 
     // Build static holiday index for this month
     const staticByDay = new Map<string, StaticEvent[]>();
@@ -203,6 +325,22 @@ export const getCalendarMonth = query({
         const promoEnd = p.endDate ?? Number.MAX_SAFE_INTEGER;
         return p.startDate <= dayEnd && promoEnd >= dayStart;
       });
+
+      // Sales that used a promo this day, by the promo actually recorded on the
+      // sale. Can include a promo not scheduled for the day — a return of an
+      // earlier promo sale, typically.
+      const dayTallies = promoByDay.get(key) ?? new Map<string, PromoTally>();
+      const byPromotion = [...dayTallies.entries()]
+        .map(([id, tally]) => {
+          const promo = promoById.get(id);
+          return {
+            id,
+            name: promo?.name ?? "Deleted promotion",
+            offer: promo ? describeOffer(promo) : "",
+            ...tally,
+          };
+        })
+        .sort((a, b) => b.salesCentavos - a.salesCentavos);
 
       return {
         date: key,
@@ -233,10 +371,12 @@ export const getCalendarMonth = query({
           isEnd:
             p.endDate !== null && p.endDate >= dayStart && p.endDate <= dayEnd,
         })),
+        promoSales: { ...sumTallies(dayTallies.values()), byPromotion },
       };
     });
 
     const maxDayRevenue = Math.max(...days.map((d) => d.revenueCentavos), 1);
+    const monthPromoSales = sumTallies(promoByMonth.values());
 
     return {
       year,
@@ -250,7 +390,65 @@ export const getCalendarMonth = query({
       daysWithPromotions: days.filter((d) => d.promotions.length > 0).length,
       totalRevenueCentavos: days.reduce((s, d) => s + d.revenueCentavos, 0),
       maxDayRevenueCentavos: maxDayRevenue,
+      promoSalesCentavos: monthPromoSales.salesCentavos,
+      promoTransactionCount: monthPromoSales.transactionCount,
+      promoDiscountCentavos: monthPromoSales.discountCentavos,
     };
+  },
+});
+
+// ─── getDayPromoSales ─────────────────────────────────────────────────────────
+// The individual sales on one day that used a promotion, plus returns of such
+// sales, newest first.
+
+const DAY_PROMO_SALES_LIMIT = 200;
+
+export const getDayPromoSales = query({
+  args: {
+    date: v.string(), // YYYYMMDD, PHT
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+    if (!/^\d{8}$/.test(args.date)) return { rows: [], totalCount: 0 };
+
+    const startMs =
+      Date.UTC(+args.date.slice(0, 4), +args.date.slice(4, 6) - 1, +args.date.slice(6, 8)) - PHT;
+    const { allBranches, txns } = await loadRetailTransactions(ctx, startMs, startMs + DAY_MS);
+
+    const branchNameById = new Map<string, string>(
+      allBranches.map((b) => [b._id as string, b.name])
+    );
+    const promoCache = new Map<string, Doc<"promotions"> | null>();
+    const returnCache = new Map<string, Id<"promotions"> | null>();
+
+    const rows = [];
+    for (const t of txns) {
+      if (t.status === "voided") continue;
+
+      const promotionId = await promotionFor(ctx, t, returnCache);
+      if (!promotionId) continue;
+
+      let promo = promoCache.get(promotionId);
+      if (promo === undefined) {
+        promo = await ctx.db.get(promotionId);
+        promoCache.set(promotionId, promo);
+      }
+
+      const isReturn = isReturnTxn(t);
+      rows.push({
+        id: t._id as string,
+        receiptNumber: t.receiptNumber,
+        createdAt: t.createdAt,
+        branchName: branchNameById.get(t.branchId as string) ?? "Unknown branch",
+        promotionName: promo?.name ?? "Deleted promotion",
+        isReturn,
+        amountCentavos: promoSalesAmount(t),
+        discountCentavos: isReturn ? 0 : (t.promoDiscountAmountCentavos ?? 0),
+      });
+    }
+
+    rows.sort((a, b) => b.createdAt - a.createdAt);
+    return { rows: rows.slice(0, DAY_PROMO_SALES_LIMIT), totalCount: rows.length };
   },
 });
 

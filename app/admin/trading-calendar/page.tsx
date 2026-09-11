@@ -94,6 +94,45 @@ function revenueIntensity(rev: number, max: number): string {
   return "";
 }
 
+function fmtTime(ms: number): string {
+  return new Date(ms).toLocaleTimeString("en-PH", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "Asia/Manila",
+  });
+}
+
+/** part as a whole-number percent of whole, clamped to 0–100. */
+function sharePct(part: number, whole: number): number {
+  if (whole <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((part / whole) * 100)));
+}
+
+function fmtSigned(centavos: number): string {
+  return centavos < 0 ? `−${fmtFull(-centavos)}` : fmtFull(centavos);
+}
+
+type PromoFigures = { salesCentavos: number; transactionCount: number; discountCentavos: number };
+
+/** A promo row in the day report: one running that day, and what it sold. */
+type DayPromoRow = {
+  id: string;
+  name: string;
+  offer: string;
+  isActive: boolean;
+  where: string;
+  sales: PromoFigures | null;
+};
+
+/** The count-and-discount half of a promo's row in the day report. */
+function promoSalesDetail(sales: PromoFigures | null): string {
+  if (!sales) return "no sales";
+  // Only a return landed here: an earlier promo sale refunded on this day.
+  if (sales.transactionCount === 0) return "refund of an earlier sale";
+  const count = `${sales.transactionCount} sale${sales.transactionCount === 1 ? "" : "s"}`;
+  return sales.discountCentavos > 0 ? `${count} · ${fmtFull(sales.discountCentavos)} off` : count;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Page
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -153,6 +192,15 @@ export default function TradingCalendarPage() {
     return calendarData.days.find((d) => d.date === selectedDate) ?? null;
   }, [selectedDate, calendarData]);
 
+  // The receipts behind the selected day's promo sales — fetched only when
+  // there are some.
+  const dayPromoSales = useQuery(
+    api.analytics.tradingCalendar.getDayPromoSales,
+    selectedDay && selectedDay.promoSales.byPromotion.length > 0
+      ? { date: selectedDay.date }
+      : "skip"
+  );
+
   // ── Add event ───────────────────────────────────────────────────────────────
 
   async function handleAddEvent() {
@@ -190,6 +238,49 @@ export default function TradingCalendarPage() {
     );
   }
 
+  // The selected day's promotions as a report: every promo running that day
+  // with what it sold, plus any that took sales without being scheduled — a
+  // refund of an earlier promo sale, typically. Promos that sold come first.
+  const salesByPromo = new Map(
+    (selectedDay?.promoSales.byPromotion ?? []).map((s) => [s.id, s])
+  );
+  const dayPromoRows: DayPromoRow[] = selectedDay
+    ? [
+        ...selectedDay.promotions.map((p) => ({
+          id: p.id,
+          name: p.name,
+          offer: p.offer,
+          isActive: p.isActive,
+          where: [
+            p.allBranches
+              ? "All branches"
+              : p.branchNames.length <= 2
+                ? p.branchNames.join(", ")
+                : `${p.branchNames.slice(0, 2).join(", ")} +${p.branchNames.length - 2} more`,
+            p.isStart ? "starts today" : null,
+            p.isEnd ? "ends today" : null,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          sales: salesByPromo.get(p.id) ?? null,
+        })),
+        ...selectedDay.promoSales.byPromotion
+          .filter((s) => !selectedDay.promotions.some((p) => p.id === s.id))
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            offer: s.offer,
+            isActive: true,
+            where: "Not running this day",
+            sales: s,
+          })),
+      ].sort(
+        (a, b) =>
+          Number(b.sales !== null) - Number(a.sales !== null) ||
+          (b.sales?.salesCentavos ?? 0) - (a.sales?.salesCentavos ?? 0)
+      )
+    : [];
+
   return (
     <div className="flex gap-6 min-h-0">
 
@@ -222,8 +313,24 @@ export default function TradingCalendarPage() {
         </div>
 
         {/* Month total */}
-        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
           <span>Month total: <span className="font-semibold text-foreground">{fmtFull(calendarData.totalRevenueCentavos)}</span></span>
+          {calendarData.promoTransactionCount > 0 && (
+            <>
+              <span className="text-xs">·</span>
+              <span>
+                With a promo:{" "}
+                <span className="font-semibold text-violet-700">
+                  {fmtFull(calendarData.promoSalesCentavos)}
+                </span>
+                <span className="text-xs">
+                  {" "}({sharePct(calendarData.promoSalesCentavos, calendarData.totalRevenueCentavos)}%
+                  {" "}· {calendarData.promoTransactionCount} sales
+                  {" "}· {fmtFull(calendarData.promoDiscountCentavos)} off)
+                </span>
+              </span>
+            </>
+          )}
           <span className="text-xs">·</span>
           <span className="flex items-center gap-3 flex-wrap">
             {[
@@ -239,6 +346,10 @@ export default function TradingCalendarPage() {
                 <span className="text-xs">{l.label}</span>
               </span>
             ))}
+            <span className="flex items-center gap-1">
+              <span className="h-1 w-3 rounded-full bg-violet-500" />
+              <span className="text-xs">Share sold with a promo</span>
+            </span>
           </span>
         </div>
 
@@ -297,6 +408,21 @@ export default function TradingCalendarPage() {
                 {hasRevenue && (
                   <span className="mt-1 text-[10px] font-medium text-green-700 leading-none">
                     {fmt(data.revenueCentavos)}
+                  </span>
+                )}
+
+                {/* Share of the day's sales that used a promo */}
+                {hasRevenue && data.promoSales.transactionCount > 0 && (
+                  <span
+                    className="mt-1 block h-1 w-full overflow-hidden rounded-full bg-muted"
+                    title={`${fmtFull(data.promoSales.salesCentavos)} with a promo — ${sharePct(data.promoSales.salesCentavos, data.revenueCentavos)}% of the day`}
+                  >
+                    <span
+                      className="block h-full rounded-full bg-violet-500"
+                      style={{
+                        width: `${sharePct(data.promoSales.salesCentavos, data.revenueCentavos)}%`,
+                      }}
+                    />
                   </span>
                 )}
 
@@ -376,9 +502,15 @@ export default function TradingCalendarPage() {
                         title={`${p.name}: day ${startDay}–${endDay}${p.endDate === null ? " (open-ended)" : ""}`}
                       />
                     </div>
-                    <span className="w-16 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
-                      {startDay}–{endDay}
-                    </span>
+                    <div
+                      className="w-24 shrink-0 text-right text-[10px] tabular-nums leading-tight"
+                      title={`Days ${startDay}–${endDay}`}
+                    >
+                      <p className="font-semibold text-foreground">{fmt(p.monthSalesCentavos)}</p>
+                      <p className="text-muted-foreground">
+                        {p.monthTransactionCount} sale{p.monthTransactionCount === 1 ? "" : "s"}
+                      </p>
+                    </div>
                   </div>
                 );
               })}
@@ -406,6 +538,22 @@ export default function TradingCalendarPage() {
                   <p className="text-lg font-bold">{selectedDay.transactionCount}</p>
                 </div>
               </div>
+              {selectedDay.promoSales.transactionCount > 0 && (
+                <div className="mt-3 border-t pt-3">
+                  <p className="text-xs text-muted-foreground">With a promo</p>
+                  <p className="text-lg font-bold text-violet-700">
+                    {fmtFull(selectedDay.promoSales.salesCentavos)}
+                    <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+                      {sharePct(selectedDay.promoSales.salesCentavos, selectedDay.revenueCentavos)}% of sales
+                    </span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedDay.promoSales.transactionCount} sale
+                    {selectedDay.promoSales.transactionCount === 1 ? "" : "s"} ·{" "}
+                    {fmtFull(selectedDay.promoSales.discountCentavos)} discount given
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Static events */}
@@ -426,34 +574,106 @@ export default function TradingCalendarPage() {
               </div>
             )}
 
-            {/* Promotions running on this day */}
-            {selectedDay.promotions.length > 0 && (
+            {/* Promotions on this day, as a report: what ran and what it sold */}
+            {dayPromoRows.length > 0 && (
+              <div className="rounded-lg border bg-card p-4">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Promotions
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    {selectedDay.promotions.length} running
+                  </p>
+                </div>
+                <ul className="mt-1 divide-y">
+                  {dayPromoRows.map((r) => (
+                    <li key={r.id} className={cn("py-2", !r.sales && "opacity-60")}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <p className="min-w-0 truncate text-sm font-medium">
+                          {r.name}
+                          {!r.isActive && (
+                            <span className="ml-1.5 rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600">
+                              paused
+                            </span>
+                          )}
+                        </p>
+                        <span
+                          className={cn(
+                            "shrink-0 text-sm font-semibold tabular-nums",
+                            !r.sales
+                              ? "text-muted-foreground"
+                              : r.sales.salesCentavos < 0
+                                ? "text-red-600"
+                                : "text-green-700"
+                          )}
+                        >
+                          {r.sales ? fmtSigned(r.sales.salesCentavos) : "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline justify-between gap-2 text-xs text-muted-foreground">
+                        <span className="min-w-0 truncate">
+                          {r.offer && <span className="text-violet-700">{r.offer} · </span>}
+                          {r.where}
+                        </span>
+                        <span className="shrink-0 tabular-nums">{promoSalesDetail(r.sales)}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* The receipts behind those figures */}
+            {selectedDay.promoSales.byPromotion.length > 0 && (
               <div className="rounded-lg border bg-card p-4 space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Promotions
+                  Sales with a promo
                 </p>
-                {selectedDay.promotions.map((p) => (
-                  <div key={p.id} className="space-y-0.5">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-medium leading-snug">{p.name}</p>
-                      {!p.isActive && (
-                        <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600">
-                          paused
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs font-medium text-violet-700">{p.offer}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {p.allBranches
-                        ? "All branches"
-                        : p.branchNames.length <= 2
-                          ? p.branchNames.join(", ")
-                          : `${p.branchNames.slice(0, 2).join(", ")} +${p.branchNames.length - 2} more`}
-                      {p.isStart && " · starts today"}
-                      {p.isEnd && " · ends today"}
-                    </p>
+                {dayPromoSales === undefined ? (
+                  <div className="space-y-2">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="h-10 animate-pulse rounded bg-muted" />
+                    ))}
                   </div>
-                ))}
+                ) : (
+                  <>
+                    <ul className="max-h-96 divide-y overflow-y-auto">
+                      {dayPromoSales.rows.map((r) => (
+                        <li key={r.id} className="py-2 text-xs">
+                          <div className="flex items-baseline justify-between gap-2">
+                            <span className="truncate font-mono font-medium">{r.receiptNumber}</span>
+                            <span
+                              className={cn(
+                                "shrink-0 font-semibold tabular-nums",
+                                r.isReturn && "text-red-600"
+                              )}
+                            >
+                              {r.isReturn ? `−${fmtFull(-r.amountCentavos)}` : fmtFull(r.amountCentavos)}
+                            </span>
+                          </div>
+                          <div className="flex items-baseline justify-between gap-2 text-muted-foreground">
+                            <span className="truncate">
+                              {fmtTime(r.createdAt)} · {r.branchName}
+                            </span>
+                            {r.isReturn ? (
+                              <span className="shrink-0 text-red-600">Return</span>
+                            ) : r.discountCentavos > 0 ? (
+                              <span className="shrink-0 tabular-nums text-violet-700">
+                                {fmtFull(r.discountCentavos)} off
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className="truncate text-violet-700">{r.promotionName}</p>
+                        </li>
+                      ))}
+                    </ul>
+                    {dayPromoSales.totalCount > dayPromoSales.rows.length && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Showing the latest {dayPromoSales.rows.length} of {dayPromoSales.totalCount}
+                      </p>
+                    )}
+                  </>
+                )}
               </div>
             )}
 
