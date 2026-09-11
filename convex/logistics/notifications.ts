@@ -88,8 +88,8 @@ export const _processNotification = internalAction({
           body: `Driver has arrived at ${toBranchName} with TRF-${shortId}. Please prepare to receive.`,
         },
         driver_delivered: {
-          title: "Transfer Delivered",
-          body: `TRF-${shortId} from ${fromBranchName} has been delivered. Please confirm receipt in the system.`,
+          title: "Transfer Handed Over",
+          body: `The driver handed over TRF-${shortId} from ${fromBranchName}. Count it in Receiving to add it to your stock.`,
         },
         transfer_confirmed: {
           title: "Receipt Confirmed",

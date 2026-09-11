@@ -1,10 +1,7 @@
 import { query, mutation } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
-import type { Id } from "../_generated/dataModel";
 import { requireRole, DRIVER_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
-import { clearReservedOnDelivery } from "../_helpers/transferStock";
-import { generateInternalInvoice } from "../_helpers/internalInvoice";
 import { internal } from "../_generated/api";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
@@ -19,8 +16,10 @@ export const listMyDeliveries = query({
       .withIndex("by_driver", (q) => q.eq("driverId", user._id))
       .collect();
 
-    // Filter for inTransit only (in-memory — by_driver index doesn't include status)
-    const active = transfers.filter((t) => t.status === "inTransit");
+    // Still the driver's job: in transit and not yet handed over. After the
+    // handover the branch is counting it (in-memory — by_driver index doesn't
+    // include status).
+    const active = transfers.filter((t) => t.status === "inTransit" && !t.driverHandedOverAt);
 
     const enriched = await Promise.all(
       active.map(async (transfer) => {
@@ -115,6 +114,7 @@ export const getDeliveryDetail = query({
       deliveryMode: boxes.length > 0 ? ("box" as const) : ("piece" as const),
       driverAcceptedAt: transfer.driverAcceptedAt ?? null,
       driverArrivedAt: transfer.driverArrivedAt ?? null,
+      driverHandedOverAt: transfer.driverHandedOverAt ?? null,
       createdAt: transfer.createdAt,
     };
   },
@@ -200,6 +200,14 @@ export const markArrived = mutation({
   },
 });
 
+// ─── driverConfirmDelivery ───────────────────────────────────────────────────
+// The driver's handover: the goods are at the branch and in its hands. It adds
+// no stock. It used to credit the full packed quantity with no one counting,
+// which closed the transfer before the branch could — so a shortage in the
+// truck was booked as received and the branch could never record it. Now the
+// branch's count at Receiving adds what actually arrived and closes the
+// transfer; this only records that the driver's part is done.
+
 export const driverConfirmDelivery = mutation({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
@@ -210,108 +218,33 @@ export const driverConfirmDelivery = mutation({
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
     if (transfer.status !== "inTransit") {
-      throw new ConvexError({ code: "INVALID_STATE", message: "Only in-transit transfers can be confirmed." });
+      throw new ConvexError({ code: "INVALID_STATE", message: "Only in-transit transfers can be handed over." });
     }
     if (transfer.driverId !== user._id) {
       throw new ConvexError({ code: "UNAUTHORIZED", message: "Transfer not assigned to you." });
     }
     if (!transfer.driverArrivedAt) {
-      throw new ConvexError({ code: "INVALID_STATE", message: "Must mark arrived before confirming delivery." });
+      throw new ConvexError({ code: "INVALID_STATE", message: "Must mark arrived before handing over." });
     }
-
-    const items = await ctx.db
-      .query("transferItems")
-      .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
-      .collect();
+    if (transfer.driverHandedOverAt) {
+      throw new ConvexError({ code: "INVALID_STATE", message: "Already handed over." });
+    }
 
     const now = Date.now();
-
-    // Bulk inventory upsert — all packed quantities → destination branch
-    for (const item of items) {
-      const qty = item.packedQuantity ?? item.requestedQuantity;
-      if (qty > 0) {
-        const existing = await ctx.db
-          .query("inventory")
-          .withIndex("by_branch_variant", (q) =>
-            q.eq("branchId", transfer.toBranchId).eq("variantId", item.variantId)
-          )
-          .unique();
-
-        if (existing) {
-          await ctx.db.patch(existing._id, {
-            quantity: existing.quantity + qty,
-            arrivedAt: now,
-            updatedAt: now,
-          });
-        } else {
-          await ctx.db.insert("inventory", {
-            branchId: transfer.toBranchId,
-            variantId: item.variantId,
-            quantity: qty,
-            arrivedAt: now,
-            updatedAt: now,
-          });
-        }
-
-        // Create FIFO batch at destination
-        const variant = await ctx.db.get(item.variantId);
-        await ctx.db.insert("inventoryBatches", {
-          branchId: transfer.toBranchId,
-          variantId: item.variantId,
-          quantity: qty,
-          costPriceCentavos: variant?.costPriceCentavos ?? variant?.priceCentavos ?? 0,
-          receivedAt: now,
-          source: "transfer",
-          sourceId: args.transferId as string,
-          createdAt: now,
-        });
-
-        // Set receivedQuantity for consistency with 6.3 receiving flow
-        await ctx.db.patch(item._id, { receivedQuantity: qty });
-      }
-    }
-
-    // Clear reserved stock at source — goods have physically left
-    await clearReservedOnDelivery(ctx, args.transferId, transfer.fromBranchId);
-
-    // Update transfer status
     await ctx.db.patch(args.transferId, {
-      status: "delivered",
-      deliveredAt: now,
-      deliveredById: user._id,
+      driverHandedOverAt: now,
       updatedAt: now,
     });
 
-    // Generate internal invoice for stock requests only (not returns)
-    let invoiceId: Id<"internalInvoices"> | null = null;
-    if (transfer.type !== "return") {
-      invoiceId = await generateInternalInvoice(ctx, {
-        transferId: args.transferId,
-        fromBranchId: transfer.fromBranchId,
-        toBranchId: transfer.toBranchId,
-        userId: user._id,
-      });
-    }
-
     await _logAuditEntry(ctx, {
-      action: "transfer.driverDeliver",
+      action: "transfer.driverHandedOver",
       userId: user._id,
       entityType: "transfers",
       entityId: args.transferId,
-      before: { status: "inTransit" },
-      after: { status: "delivered", deliveredById: user._id },
+      after: { driverHandedOverAt: now },
     });
 
-    if (invoiceId) {
-      await _logAuditEntry(ctx, {
-        action: "internalInvoice.generate",
-        userId: user._id,
-        entityType: "internalInvoices",
-        entityId: invoiceId,
-        after: { transferId: args.transferId },
-      });
-    }
-
+    // Tells the branch to count it in Receiving.
     await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
       type: "driver_delivered",
       transferId: args.transferId,

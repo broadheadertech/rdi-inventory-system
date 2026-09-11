@@ -199,7 +199,7 @@ function DeliveryDetail({
       },
       (err: unknown) => {
         setError(
-          friendlyError(err, "Couldn't confirm delivery — try again.")
+          friendlyError(err, "Couldn't confirm the handover — try again.")
         );
         setSubmitting(false);
       }
@@ -306,7 +306,8 @@ function DeliveryDetail({
               Arrived at destination
             </p>
             <p className="text-xs text-amber-600">
-              Ready to hand off to branch staff
+              Hand the goods to branch staff. They count them in Receiving, and their count is
+              what goes into stock.
             </p>
           </div>
         )}
@@ -355,7 +356,7 @@ function DeliveryDetail({
             disabled={submitting}
             className="w-full h-14 rounded-lg bg-green-600 text-white text-base font-semibold active:opacity-90 disabled:opacity-50"
           >
-            {submitting ? "Confirming..." : "Confirm Delivery"}
+            {submitting ? "Confirming..." : "Confirm Handover"}
           </button>
         )}
       </div>

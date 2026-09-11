@@ -550,6 +550,9 @@ export default defineSchema({
     driverId: v.optional(v.id("users")),
     driverAcceptedAt: v.optional(v.number()), // when the driver accepted the assigned transit
     driverArrivedAt: v.optional(v.number()),
+    // The driver's handover at the branch. It adds no stock: the branch's count
+    // at Receiving does, and that is what closes the transfer.
+    driverHandedOverAt: v.optional(v.number()),
     // Third-party courier dispatch (alternative to an internal driver)
     courierId: v.optional(v.id("couriers")),
     trackingNumber: v.optional(v.string()),

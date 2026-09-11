@@ -317,22 +317,50 @@ function PieceReceivingView({
     }
   }
 
+  // The branch's count is what arrived. It may be short of what was packed —
+  // recorded against the sending branch — or over, which adds stock the sender
+  // never deducted and so has to be confirmed.
   const isReadyToComplete =
-    receivingData !== undefined &&
-    receivingData !== null &&
-    receivingData.items.length > 0 &&
-    receivingData.items.every(
-      (item) =>
-        damagedIds.has(item.itemId) ||
-        (receivedCounts[item.itemId] ?? 0) >= item.packedQuantity
-    );
+    receivingData !== undefined && receivingData !== null && receivingData.items.length > 0;
 
   function handleComplete() {
     if (!receivingData) return;
+
+    const differences: string[] = [];
+    let hasOverage = false;
+    for (const item of receivingData.items) {
+      if (damagedIds.has(item.itemId)) continue;
+      const received = receivedCounts[item.itemId] ?? 0;
+      if (received < item.packedQuantity) {
+        differences.push(
+          `${item.sku}: ${received} of ${item.packedQuantity} packed — ${item.packedQuantity - received} short`
+        );
+      } else if (received > item.packedQuantity) {
+        hasOverage = true;
+        differences.push(
+          `${item.sku}: ${received} counted, ${item.packedQuantity} packed — ${received - item.packedQuantity} extra`
+        );
+      }
+    }
+    if (
+      differences.length > 0 &&
+      !window.confirm(
+        `The count doesn't match what was packed:\n\n${differences.join("\n")}\n\n` +
+          "Shortages are recorded against the sending branch." +
+          (hasOverage
+            ? " Extra pieces are added to your stock and flagged for the warehouse — confirm only if they are physically here."
+            : "") +
+          "\n\nComplete receiving?"
+      )
+    ) {
+      return;
+    }
+
     setSubmitting(true);
     setReceiveError(null);
     confirmDelivery({
       transferId,
+      confirmOverage: hasOverage,
       receivedItems: receivingData.items.map((item) => ({
         itemId: item.itemId,
         receivedQuantity: receivedCounts[item.itemId] ?? 0,
@@ -343,7 +371,7 @@ function PieceReceivingView({
     }).then(
       () => onBack(),
       (err: unknown) => {
-        setReceiveError(err instanceof Error ? err.message : "Failed — try again.");
+        setReceiveError(getErrorMessage(err));
         setSubmitting(false);
       }
     );
@@ -360,6 +388,17 @@ function PieceReceivingView({
           {receivingData && (
             <p className="text-sm text-muted-foreground mt-1">
               {receivingData.fromBranchName} <ArrowRight className="inline h-3 w-3 mx-1" /> {receivingData.toBranchName}
+            </p>
+          )}
+          {receivingData?.driverName && (
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Driver {receivingData.driverName} ·{" "}
+              {receivingData.driverHandedOverAt
+                ? `handed over ${new Date(receivingData.driverHandedOverAt).toLocaleTimeString("en-PH", { timeStyle: "short" })}`
+                : receivingData.driverArrivedAt
+                  ? "arrived, handover not confirmed yet"
+                  : "not marked arrived yet"}
+              . Your count completes this delivery.
             </p>
           )}
         </div>
@@ -421,10 +460,12 @@ function PieceReceivingView({
             {receivingData?.items.map((item) => {
               const received = receivedCounts[item.itemId] ?? 0;
               const isDamaged = damagedIds.has(item.itemId);
-              const isReceived = !isDamaged && received >= item.packedQuantity;
+              const isOver = !isDamaged && received > item.packedQuantity;
+              const isReceived = !isDamaged && received === item.packedQuantity;
               return (
                 <TableRow key={item.itemId} className={cn(
                   isReceived && "bg-green-50/50",
+                  isOver && "bg-amber-50/40",
                   isDamaged && "border-l-2 border-l-amber-400 bg-amber-50/30"
                 )}>
                   <TableCell className="font-mono text-xs">{item.sku}</TableCell>
@@ -462,6 +503,10 @@ function PieceReceivingView({
                   <TableCell>
                     {isDamaged ? (
                       <Badge variant="outline" className="text-xs text-amber-600">Damaged</Badge>
+                    ) : isOver ? (
+                      <Badge variant="outline" className="text-xs text-amber-700 border-amber-400">
+                        +{received - item.packedQuantity} extra
+                      </Badge>
                     ) : isReceived ? (
                       <Badge variant="default" className="text-xs"><CheckCircle2 className="h-3 w-3 mr-1" /> Done</Badge>
                     ) : (

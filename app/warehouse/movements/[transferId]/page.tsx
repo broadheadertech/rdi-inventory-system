@@ -338,7 +338,8 @@ export default function MovementDetailPage() {
           <p className="text-sm text-muted-foreground">
             Assigned to driver{" "}
             <span className="font-medium text-foreground">{movement.driverName}</span>. The driver
-            confirms delivery from the Driver app.
+            confirms the handover from the Driver app; the branch&apos;s count at Receiving adds
+            the stock and completes the delivery.
           </p>
         </StageCard>
       )}
@@ -359,20 +360,32 @@ export default function MovementDetailPage() {
           </p>
           <Button
             disabled={busy}
-            onClick={() =>
+            onClick={() => {
+              const received = (i: (typeof movement.items)[number]) =>
+                recvQty[i.itemId as string] ?? i.packedQuantity ?? i.requestedQuantity;
+              // Counting more than packed adds stock the source never deducted.
+              const hasOverage = movement.items.some(
+                (i) => received(i) > (i.packedQuantity ?? i.requestedQuantity)
+              );
+              if (
+                hasOverage &&
+                !window.confirm(
+                  "More pieces were counted than packed on at least one line. They are added to stock and flagged — confirm only if the extra pieces are physically there."
+                )
+              ) {
+                return;
+              }
               run(() =>
                 confirm({
                   transferId,
+                  confirmOverage: hasOverage,
                   receivedItems: movement.items.map((i) => ({
                     itemId: i.itemId as Id<"transferItems">,
-                    receivedQuantity:
-                      recvQty[i.itemId as string] ??
-                      i.packedQuantity ??
-                      i.requestedQuantity,
+                    receivedQuantity: received(i),
                   })),
                 })
-              )
-            }
+              );
+            }}
           >
             Confirm Receipt
           </Button>

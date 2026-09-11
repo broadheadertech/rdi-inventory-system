@@ -111,6 +111,8 @@ export const listActiveDeliveries = query({
           toBranchName,
           itemCount: items.length,
           driverArrivedAt: transfer.driverArrivedAt ?? null,
+          // Handed over and waiting for the branch's count.
+          driverHandedOverAt: transfer.driverHandedOverAt ?? null,
           shippedAt: transfer.shippedAt ?? null,
           createdAt: transfer.createdAt,
         };

@@ -376,8 +376,15 @@ export const getTransferReceivingData = query({
       })
     );
 
+    // Where the driver is, for the branch's information — the branch's count
+    // completes the delivery whether or not the driver has confirmed handover.
+    const driver = transfer.driverId ? await ctx.db.get(transfer.driverId) : null;
+
     return {
       transferId: transfer._id,
+      driverName: driver?.name ?? null,
+      driverArrivedAt: transfer.driverArrivedAt ?? null,
+      driverHandedOverAt: transfer.driverHandedOverAt ?? null,
       fromBranchName: fromBranch?.isActive ? fromBranch.name : "(inactive)",
       toBranchName: toBranch?.isActive ? toBranch.name : "(inactive)",
       notes: transfer.notes ?? null,
@@ -397,6 +404,9 @@ export const confirmTransferDelivery = mutation({
         damageNotes: v.optional(v.string()),
       })
     ),
+    // Counting more than was packed adds stock the source never deducted, so
+    // the receiver has to confirm the extra pieces are physically there.
+    confirmOverage: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
@@ -411,12 +421,8 @@ export const confirmTransferDelivery = mutation({
         message: "Only in-transit transfers can be confirmed.",
       });
     }
-    if (transfer.driverId) {
-      throw new ConvexError({
-        code: "INVALID_STATE",
-        message: "This transfer is assigned to a driver. The driver must confirm delivery.",
-      });
-    }
+    // A driver's delivery is finished by this count too. The driver only
+    // records the handover; what arrived is what the receiver counts here.
 
     // Validate quantities
     for (const item of args.receivedItems) {
@@ -456,6 +462,18 @@ export const confirmTransferDelivery = mutation({
     const discrepancies: { sku: string; packed: number; received: number; type: string; damageNotes?: string }[] = [];
 
     const itemById = new Map(transferItems.map((row) => [row._id as string, row]));
+
+    const overCounted = args.receivedItems.some((item) => {
+      const original = itemById.get(item.itemId as string)!;
+      return item.receivedQuantity > (original.packedQuantity ?? original.requestedQuantity);
+    });
+    if (overCounted && !args.confirmOverage) {
+      throw new ConvexError({
+        code: "OVERAGE_UNCONFIRMED",
+        message:
+          "More pieces were counted than were packed. Confirm the extra pieces are physically here before completing.",
+      });
+    }
 
     for (const item of args.receivedItems) {
       const original = itemById.get(item.itemId as string)!;
@@ -550,7 +568,14 @@ export const confirmTransferDelivery = mutation({
       entityType: "transfers",
       entityId: args.transferId,
       before: { status: "inTransit" },
-      after: { status: "delivered", deliveredById: user._id, type: transfer.type ?? "stockRequest" },
+      after: {
+        status: "delivered",
+        deliveredById: user._id,
+        type: transfer.type ?? "stockRequest",
+        ...(transfer.driverId
+          ? { driverId: transfer.driverId, driverHandedOverAt: transfer.driverHandedOverAt ?? null }
+          : {}),
+      },
     });
 
     if (invoiceId) {
