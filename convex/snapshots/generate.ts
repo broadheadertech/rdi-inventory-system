@@ -115,6 +115,7 @@ export const _generateBranchChunk = internalMutation({
       let salesCash = 0;
       let salesGcash = 0;
       let salesMaya = 0;
+      let salesBankTransfer = 0;
 
       for (const txn of validTxns) {
         salesTotalCentavos += txn.totalCentavos;
@@ -122,6 +123,7 @@ export const _generateBranchChunk = internalMutation({
           case "cash": salesCash += txn.totalCentavos; break;
           case "gcash": salesGcash += txn.totalCentavos; break;
           case "maya": salesMaya += txn.totalCentavos; break;
+          case "bankTransfer": salesBankTransfer += txn.totalCentavos; break;
         }
         // Count items sold
         const items = await ctx.db
@@ -214,6 +216,7 @@ export const _generateBranchChunk = internalMutation({
         salesCash,
         salesGcash,
         salesMaya,
+        salesBankTransfer,
         totalSkus,
         inStockCount,
         lowStockCount,

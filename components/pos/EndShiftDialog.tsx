@@ -1,20 +1,31 @@
 "use client";
 
-// Ends a cashier's shift. The cashier declares the cash on hand — blind, never
-// shown what the system expects — and only then is logged out; there is no
-// other way out of a shift at the till. Switch Cashier hands the drawer to the
-// next cashier, who counts it again. End of Day also files the register's
-// Z-reading. A shift still open from an earlier day can only be ended as that
-// day's End of Day.
+// Ends a cashier's shift. The cashier counts the drawer bill by bill — blind,
+// never shown what the system expects — declares the total, and only then is
+// logged out; there is no other way out of a shift at the till. The shift's
+// GCash, Maya and bank transfer takings are shown alongside, to be checked
+// against the apps and the bank: that money is not in the drawer.
+//
+// Switch Cashier hands the drawer to the next cashier, who counts it again.
+// End of Day also files the register's Z-reading. A shift still open from an
+// earlier day can only be ended as that day's End of Day.
 
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
+import type { FunctionReturnType } from "convex/server";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { getErrorMessage } from "@/lib/utils";
 import { getDeviceToken } from "@/lib/deviceToken";
+import { formatCurrency } from "@/lib/formatters";
 import { ArrowLeft, CalendarCheck, Loader2, Users, Wallet, X } from "lucide-react";
-import { dateLabel, pesoToCentavos, type ClosedShift } from "@/components/pos/ShiftGate";
+import { dateLabel, type ClosedShift } from "@/components/pos/ShiftGate";
+import {
+  DenominationCounter,
+  confirmEmptyDrawer,
+  countedCentavos,
+  type DenominationCounts,
+} from "@/components/pos/DenominationCounter";
 
 type Mode = "choose" | "turnover" | "endOfDay";
 
@@ -39,17 +50,19 @@ export function EndShiftDialog({
 
   const forced = shift.isPreviousDay;
   const [mode, setMode] = useState<Mode>(forced ? "endOfDay" : "choose");
-  const [countInput, setCountInput] = useState("");
+  const [counts, setCounts] = useState<DenominationCounts>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  const tenders = useQuery(
+    api.pos.shifts.getShiftTenders,
+    mode === "choose" ? "skip" : { deviceToken: getDeviceToken() ?? undefined }
+  );
+
   async function declareAndClose() {
     if (mode === "choose") return;
-    const declared = pesoToCentavos(countInput);
-    if (declared === null) {
-      setError("Enter the cash you counted — 0 if the drawer is empty.");
-      return;
-    }
+    const declared = countedCentavos(counts);
+    if (declared === 0 && !confirmEmptyDrawer()) return;
     if (
       mode === "endOfDay" &&
       !window.confirm(
@@ -90,7 +103,11 @@ export function EndShiftDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="relative w-full max-w-sm space-y-5 rounded-xl border bg-card p-6 shadow-xl">
+      <div
+        className={`relative max-h-[92vh] w-full overflow-y-auto space-y-5 rounded-xl border bg-card p-6 shadow-xl ${
+          mode === "choose" ? "max-w-sm" : "max-w-md"
+        }`}
+      >
         {!forced && (
           <button
             onClick={onCancel}
@@ -138,28 +155,11 @@ export function EndShiftDialog({
               <p className="text-sm text-muted-foreground">
                 {forced
                   ? `This shift was left open since ${dateLabel(shift.openedDate)}. Count the drawer and close that day before trading today.`
-                  : "Count all the cash in the drawer and declare the total. You'll be logged out once it's recorded."}
+                  : "Count how many of each bill and coin are in the drawer. You'll be logged out once the total is recorded."}
               </p>
             </div>
-            <div>
-              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Cash on hand (₱)
-              </label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                inputMode="decimal"
-                value={countInput}
-                onChange={(e) => setCountInput(e.target.value)}
-                placeholder="0.00"
-                autoFocus
-                className="mt-1 w-full rounded-lg border px-3 py-2.5 text-center text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-primary"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") declareAndClose();
-                }}
-              />
-            </div>
+            <DenominationCounter counts={counts} onChange={setCounts} disabled={busy} />
+            <NonCashCheck tenders={tenders} />
             {error && <p className="text-center text-xs text-red-500">{error}</p>}
             <div className="flex gap-2">
               {!forced && (
@@ -186,6 +186,66 @@ export function EndShiftDialog({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Non-cash takings ─────────────────────────────────────────────────────────
+
+function NonCashCheck({
+  tenders,
+}: {
+  tenders: FunctionReturnType<typeof api.pos.shifts.getShiftTenders> | undefined;
+}) {
+  if (tenders === undefined) {
+    return <p className="text-center text-xs text-muted-foreground">Loading non-cash payments…</p>;
+  }
+  if (tenders === null) return null;
+
+  const rows = [
+    { label: "GCash", ...tenders.gcash },
+    { label: "Maya", ...tenders.maya },
+    { label: "Bank Transfer", ...tenders.bankTransfer },
+  ];
+
+  return (
+    <div className="space-y-2 rounded-lg border p-3 text-sm">
+      <div>
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Non-cash this shift
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Not in the drawer — check these against the GCash and Maya apps and the bank.
+        </p>
+      </div>
+      <div className="space-y-1">
+        {rows.map((r) => (
+          <div key={r.label} className="flex items-center justify-between">
+            <span>
+              {r.label}{" "}
+              <span className="text-xs text-muted-foreground">
+                · {r.count} payment{r.count === 1 ? "" : "s"}
+              </span>
+            </span>
+            <span className="font-semibold tabular-nums">{formatCurrency(r.amountCentavos)}</span>
+          </div>
+        ))}
+      </div>
+      {tenders.transfers.length > 0 && (
+        <div className="space-y-1 border-t pt-2 text-xs">
+          <p className="text-muted-foreground">Transfer reference nos.</p>
+          <ul className="max-h-24 space-y-0.5 overflow-y-auto">
+            {tenders.transfers.map((t, i) => (
+              <li key={`${t.receiptNumber}-${i}`} className="flex items-center justify-between gap-2">
+                <span className="truncate font-mono">{t.reference ?? "No reference"}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {formatCurrency(t.amountCentavos)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

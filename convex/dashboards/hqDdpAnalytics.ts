@@ -211,6 +211,7 @@ export const getHQPaymentMethodBreakdown = query({
       cash: { count: 0, revenueCentavos: 0 },
       gcash: { count: 0, revenueCentavos: 0 },
       maya: { count: 0, revenueCentavos: 0 },
+      bankTransfer: { count: 0, revenueCentavos: 0 },
     };
 
     for (const txn of allTxns) {

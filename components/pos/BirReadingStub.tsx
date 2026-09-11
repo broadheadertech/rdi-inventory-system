@@ -41,6 +41,7 @@ export type BirReadingData = {
     cash: { count: number; amountCentavos: Money };
     gcash: { count: number; amountCentavos: Money };
     maya: { count: number; amountCentavos: Money };
+    bankTransfer?: { count: number; amountCentavos: Money };
     grandTotalCentavos: Money;
   };
   cashMovements: {
@@ -165,6 +166,9 @@ export function BirReadingStub({ data }: { data: BirReadingData }) {
         )}
         {t.maya.amountCentavos > 0 && (
           <Row label={`MAYA               ${t.maya.count}`} value={peso(t.maya.amountCentavos)} />
+        )}
+        {t.bankTransfer && t.bankTransfer.amountCentavos > 0 && (
+          <Row label={`BANK TRANSFER      ${t.bankTransfer.count}`} value={peso(t.bankTransfer.amountCentavos)} />
         )}
         {RULE}
         <Row label="Grand Total" value={peso(t.grandTotalCentavos)} />

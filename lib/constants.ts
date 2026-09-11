@@ -28,10 +28,18 @@ export const PAYMENT_METHODS = {
   CASH: "cash",
   GCASH: "gcash",
   MAYA: "maya",
+  BANK_TRANSFER: "bankTransfer",
 } as const;
 
 export type PaymentMethod =
   (typeof PAYMENT_METHODS)[keyof typeof PAYMENT_METHODS];
+
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  cash: "Cash",
+  gcash: "GCash",
+  maya: "Maya",
+  bankTransfer: "Bank Transfer",
+};
 
 export const DISCOUNT_TYPES = {
   SENIOR: "senior",

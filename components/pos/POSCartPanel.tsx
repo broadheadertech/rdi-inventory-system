@@ -964,6 +964,7 @@ const PAYMENT_OPTIONS: { value: PaymentMethod; label: string }[] = [
   { value: "cash", label: "Cash" },
   { value: "gcash", label: "GCash" },
   { value: "maya", label: "Maya" },
+  { value: "bankTransfer", label: "Bank Transfer" },
 ];
 
 function PaymentPanel({
@@ -1006,6 +1007,7 @@ function PaymentPanel({
   const [isSplit, setIsSplit] = useState(false);
   const [splitMethod, setSplitMethod] = useState<PaymentMethod>("gcash");
   const [splitAmountInput, setSplitAmountInput] = useState("");
+  const [paymentReference, setPaymentReference] = useState("");
 
   const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
   const totalCentavos = taxBreakdown.totalCentavos - promoDiscount;
@@ -1036,7 +1038,12 @@ function PaymentPanel({
     splitMethod !== paymentMethod
   );
 
-  const canProcess = isCashSufficient && isSplitValid;
+  // A bank transfer is taken on its reference number.
+  const needsReference =
+    paymentMethod === "bankTransfer" || (isSplit && splitMethod === "bankTransfer");
+  const isReferenceValid = !needsReference || paymentReference.trim().length > 0;
+
+  const canProcess = isCashSufficient && isSplitValid && isReferenceValid;
 
   // When toggling split, auto-pick a secondary method different from primary
   const handleToggleSplit = () => {
@@ -1087,6 +1094,7 @@ function PaymentPanel({
           discountType,
           amountTenderedCentavos: paymentMethod === "cash" ? amountTendered! : undefined,
           splitPayment: splitPaymentArg,
+          paymentReference: needsReference ? paymentReference.trim() : undefined,
           customerName: customerName.trim() || undefined,
           customerTin: customerTin.trim() || undefined,
           customerAddress: customerAddress.trim() || undefined,
@@ -1136,6 +1144,7 @@ function PaymentPanel({
           ? (selectedPromoId as Id<"promotions">)
           : undefined,
         splitPayment: splitPaymentArg,
+        paymentReference: needsReference ? paymentReference.trim() : undefined,
         fashionAssistantId: selectedFaId !== "none"
           ? (selectedFaId as Id<"fashionAssistants">)
           : undefined,
@@ -1382,6 +1391,31 @@ function PaymentPanel({
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Bank transfer reference (either portion paid by transfer) */}
+      {needsReference && (
+        <div className="mb-4">
+          <label className="mb-1 block text-sm text-muted-foreground">
+            Bank transfer reference no.
+          </label>
+          <input
+            type="text"
+            autoComplete="off"
+            maxLength={64}
+            placeholder="From the customer's transfer confirmation"
+            className="h-12 w-full rounded-md border bg-background px-3 font-mono text-lg"
+            value={paymentReference}
+            onChange={(e) => {
+              setPaymentReference(e.target.value);
+              setError(null);
+            }}
+            disabled={isProcessing}
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Check that the transfer has reached the store&apos;s account before completing the sale.
+          </p>
         </div>
       )}
 

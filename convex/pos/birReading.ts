@@ -10,6 +10,7 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { removeVat, calculateVat } from "../_helpers/taxCalculations";
+import { addTenders, emptyTenderTotals } from "../_helpers/tenders";
 import type { Doc } from "../_generated/dataModel";
 
 const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
@@ -30,8 +31,8 @@ function dateRange(dateStr: string): { startMs: number; endMs: number } {
 async function aggregate(ctx: QueryCtx, txns: Doc<"transactions">[]) {
   let gross = 0, returns = 0, scDiscount = 0, pwdDiscount = 0, othersDiscount = 0;
   let vatAdjustments = 0, vatable = 0, vat = 0, vatExempt = 0;
-  let cash = 0, gcash = 0, maya = 0;
-  let cashCount = 0, gcashCount = 0, mayaCount = 0;
+  const tenders = emptyTenderTotals();
+  const tenderCounts = emptyTenderTotals();
   let salesCount = 0, itemsSold = 0, scTxn = 0, pwdTxn = 0, cancelled = 0;
   let firstSI: string | null = null;
   let lastSI: string | null = null;
@@ -44,9 +45,7 @@ async function aggregate(ctx: QueryCtx, txns: Doc<"transactions">[]) {
     if (t.totalCentavos < 0) {
       const amt = Math.abs(t.totalCentavos);
       returns += amt;
-      if (t.paymentMethod === "cash") cash -= amt;
-      else if (t.paymentMethod === "gcash") gcash -= amt;
-      else maya -= amt;
+      addTenders(tenders, t); // negative total: comes off the refunded tender
       continue;
     }
 
@@ -54,17 +53,8 @@ async function aggregate(ctx: QueryCtx, txns: Doc<"transactions">[]) {
     // Gross = pre-discount, VAT-inclusive selling amount (subtotal)
     gross += t.subtotalCentavos;
 
-    const splitAmt = t.splitPayment?.amountCentavos ?? 0;
-    const primary = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
-    if (t.paymentMethod === "cash") { cash += primary; cashCount++; }
-    else if (t.paymentMethod === "gcash") { gcash += primary; gcashCount++; }
-    else { maya += primary; mayaCount++; }
-    if (t.splitPayment) {
-      const m = t.splitPayment.method;
-      if (m === "cash") cash += splitAmt;
-      else if (m === "gcash") gcash += splitAmt;
-      else maya += splitAmt;
-    }
+    addTenders(tenders, t);
+    tenderCounts[t.paymentMethod]++;
 
     if (t.discountType === "senior" || t.discountType === "pwd") {
       // SC/PWD: VAT removed (→ VAT-exempt sale + VAT adjustment) then 20% off
@@ -102,10 +92,11 @@ async function aggregate(ctx: QueryCtx, txns: Doc<"transactions">[]) {
     vatAdjustmentsCentavos: vatAdjustments,
     netSalesCentavos: netSales,
     tender: {
-      cash: { count: cashCount, amountCentavos: cash },
-      gcash: { count: gcashCount, amountCentavos: gcash },
-      maya: { count: mayaCount, amountCentavos: maya },
-      grandTotalCentavos: cash + gcash + maya,
+      cash: { count: tenderCounts.cash, amountCentavos: tenders.cash },
+      gcash: { count: tenderCounts.gcash, amountCentavos: tenders.gcash },
+      maya: { count: tenderCounts.maya, amountCentavos: tenders.maya },
+      bankTransfer: { count: tenderCounts.bankTransfer, amountCentavos: tenders.bankTransfer },
+      grandTotalCentavos: tenders.cash + tenders.gcash + tenders.maya + tenders.bankTransfer,
     },
     details: {
       salesTransactionCount: salesCount,

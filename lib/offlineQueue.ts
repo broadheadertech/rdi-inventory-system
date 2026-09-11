@@ -2,6 +2,8 @@
 // Three stores: transactionQueue, offlineCart, stockSnapshot
 // Native IDBDatabase API — no external library (consistent with Epic 4 mandate)
 
+import type { PaymentMethod } from "./constants";
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface QueuedTransaction {
@@ -18,9 +20,12 @@ export interface CreateTransactionArgs {
     quantity: number;
     unitPriceCentavos: number;
   }>;
-  paymentMethod: "cash" | "gcash" | "maya";
+  paymentMethod: PaymentMethod;
   discountType: "senior" | "pwd" | "none";
   amountTenderedCentavos?: number;
+  splitPayment?: { method: PaymentMethod; amountCentavos: number };
+  // The bank transfer's reference number, when either portion is a transfer
+  paymentReference?: string;
   // BIR Sold-To + SC/PWD details captured at checkout (optional)
   customerName?: string;
   customerTin?: string;

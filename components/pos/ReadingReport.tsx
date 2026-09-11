@@ -10,6 +10,7 @@ import {
   TrendingUp,
   Users,
   Hash,
+  Landmark,
   Printer,
   Receipt,
 } from "lucide-react";
@@ -40,6 +41,7 @@ type CashierEntry = {
   cashSalesCentavos: number;
   gcashSalesCentavos: number;
   mayaSalesCentavos: number;
+  bankTransferSalesCentavos?: number;
   cashFundCentavos: number;
 };
 
@@ -51,6 +53,7 @@ type BaseReading = {
   cashSalesCentavos: number;
   gcashSalesCentavos: number;
   mayaSalesCentavos: number;
+  bankTransferSalesCentavos?: number;
   vatAmountCentavos: number;
   discountAmountCentavos: number;
   firstReceiptNumber: string | null;
@@ -148,12 +151,16 @@ export function ReadingReport({
   showPrint = true,
   onFinalize,
   finalizing = false,
+  hideCash = false,
 }: {
   data: ReadingData;
   onClose?: () => void;
   showPrint?: boolean;
   onFinalize?: () => void;
   finalizing?: boolean;
+  // At the till: leave out the drawer's cash figures, so a reading can't be
+  // used to learn what a blind count should come to.
+  hideCash?: boolean;
 }) {
   const label = READING_LABELS[data.readingType];
 
@@ -209,16 +216,20 @@ export function ReadingReport({
                 </div>
               </>
             )}
-            <div>
-              <span className="text-muted-foreground">Cash Fund</span>
-              <p className="font-medium">{formatCurrency(data.cashFundCentavos)}</p>
-            </div>
-            <div>
-              <span className="text-muted-foreground">Cash in Drawer</span>
-              <p className="font-bold text-green-600">
-                {formatCurrency(data.cashInDrawerCentavos)}
-              </p>
-            </div>
+            {!hideCash && (
+              <>
+                <div>
+                  <span className="text-muted-foreground">Cash Fund</span>
+                  <p className="font-medium">{formatCurrency(data.cashFundCentavos)}</p>
+                </div>
+                <div>
+                  <span className="text-muted-foreground">Cash in Drawer</span>
+                  <p className="font-bold text-green-600">
+                    {formatCurrency(data.cashInDrawerCentavos)}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
           {data.readingType === "Y" && data.notes && (
             <p className="text-xs text-muted-foreground border-t pt-2">
@@ -343,13 +354,15 @@ export function ReadingReport({
       <div className="rounded-lg border p-3 space-y-2">
         <h3 className="text-sm font-semibold">Payment Breakdown</h3>
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-sm">
-            <span className="flex items-center gap-2">
-              <Banknote className="h-4 w-4 text-green-600" />
-              Cash
-            </span>
-            <span className="font-semibold">{formatCurrency(data.cashSalesCentavos)}</span>
-          </div>
+          {!hideCash && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="flex items-center gap-2">
+                <Banknote className="h-4 w-4 text-green-600" />
+                Cash
+              </span>
+              <span className="font-semibold">{formatCurrency(data.cashSalesCentavos)}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between text-sm">
             <span className="flex items-center gap-2">
               <Smartphone className="h-4 w-4 text-blue-600" />
@@ -363,6 +376,15 @@ export function ReadingReport({
               Maya
             </span>
             <span className="font-semibold">{formatCurrency(data.mayaSalesCentavos)}</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="flex items-center gap-2">
+              <Landmark className="h-4 w-4 text-amber-600" />
+              Bank Transfer
+            </span>
+            <span className="font-semibold">
+              {formatCurrency(data.bankTransferSalesCentavos ?? 0)}
+            </span>
           </div>
           <div className="flex items-center justify-between text-sm border-t pt-1.5">
             <span className="text-muted-foreground">VAT Collected</span>
@@ -491,9 +513,13 @@ export function ReadingReport({
                     <span>{formatCurrency(cashier.cashSalesCentavos)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">GCash/Maya</span>
+                    <span className="text-muted-foreground">Non-cash</span>
                     <span>
-                      {formatCurrency(cashier.gcashSalesCentavos + cashier.mayaSalesCentavos)}
+                      {formatCurrency(
+                        cashier.gcashSalesCentavos +
+                          cashier.mayaSalesCentavos +
+                          (cashier.bankTransferSalesCentavos ?? 0)
+                      )}
                     </span>
                   </div>
                 </div>

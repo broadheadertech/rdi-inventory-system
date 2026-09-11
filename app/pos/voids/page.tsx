@@ -7,6 +7,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
 import { getErrorMessage, cn } from "@/lib/utils";
 import { formatCurrency, formatDateTime } from "@/lib/formatters";
+import { PAYMENT_METHOD_LABELS, type PaymentMethod } from "@/lib/constants";
 import { ArrowLeft, Ban, ChevronDown, Loader2 } from "lucide-react";
 import Link from "next/link";
 
@@ -16,7 +17,7 @@ type TxnRow = {
   _id: Id<"transactions">;
   receiptNumber: string;
   totalCentavos: number;
-  paymentMethod: "cash" | "gcash" | "maya";
+  paymentMethod: PaymentMethod;
   cashierName: string;
   status: "completed" | "voided";
   voidedAt?: number;
@@ -145,12 +146,7 @@ function TransactionVoidRow({ txn }: { txn: TxnRow }) {
     }
   }
 
-  const paymentLabel =
-    txn.paymentMethod === "cash"
-      ? "Cash"
-      : txn.paymentMethod === "gcash"
-      ? "GCash"
-      : "Maya";
+  const paymentLabel = PAYMENT_METHOD_LABELS[txn.paymentMethod];
 
   return (
     <div

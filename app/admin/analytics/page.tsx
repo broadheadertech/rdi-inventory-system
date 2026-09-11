@@ -127,12 +127,14 @@ const PAYMENT_COLORS: Record<string, string> = {
   cash: "hsl(var(--primary))",
   gcash: "#3b82f6",
   maya: "#10b981",
+  bankTransfer: "#f59e0b",
 };
 
 const PAYMENT_LABELS: Record<string, string> = {
   cash: "Cash",
   gcash: "GCash",
   maya: "Maya",
+  bankTransfer: "Bank Transfer",
 };
 
 // ─── Date Preset helpers ──────────────────────────────────────────────────────

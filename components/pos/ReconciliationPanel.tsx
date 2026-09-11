@@ -13,6 +13,7 @@ import { friendlyError } from "@/lib/errors";
 import Link from "next/link";
 import {
   ArrowLeft,
+  Landmark,
   Loader2,
   CheckCircle2,
   AlertTriangle,
@@ -354,6 +355,15 @@ export function ReconciliationPanel() {
             </span>
             <span className="font-semibold">
               {formatCurrency(summary.mayaSalesCentavos)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2 text-sm">
+              <Landmark className="h-4 w-4 text-amber-600" />
+              Bank Transfer
+            </span>
+            <span className="font-semibold">
+              {formatCurrency(summary.bankTransferSalesCentavos)}
             </span>
           </div>
         </div>

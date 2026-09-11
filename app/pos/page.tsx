@@ -695,6 +695,7 @@ function PosPageContent() {
               <ReadingReport
                 data={xReading as ReadingData}
                 onClose={() => setShowXReading(false)}
+                hideCash
               />
             )}
           </div>

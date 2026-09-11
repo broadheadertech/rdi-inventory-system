@@ -5,6 +5,7 @@ import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import type { Id } from "../_generated/dataModel";
+import { addTenders, emptyTenderTotals } from "../_helpers/tenders";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -70,30 +71,14 @@ async function _computeDailySummary(
 
   let transactionCount = 0;
   let totalSalesCentavos = 0;
-  let cashSalesCentavos = 0;
-  let gcashSalesCentavos = 0;
-  let mayaSalesCentavos = 0;
+  const tenders = emptyTenderTotals();
 
   for (const txn of transactions) {
+    // A voided sale's money went back — counting it made the drawer read short.
+    if (txn.status === "voided") continue;
     transactionCount++;
     totalSalesCentavos += txn.totalCentavos;
-
-    const splitAmt = txn.splitPayment?.amountCentavos ?? 0;
-    const primaryAmt = splitAmt > 0 ? txn.totalCentavos - splitAmt : txn.totalCentavos;
-
-    if (txn.paymentMethod === "cash") {
-      cashSalesCentavos += primaryAmt;
-    } else if (txn.paymentMethod === "gcash") {
-      gcashSalesCentavos += primaryAmt;
-    } else if (txn.paymentMethod === "maya") {
-      mayaSalesCentavos += primaryAmt;
-    }
-
-    if (txn.splitPayment) {
-      if (txn.splitPayment.method === "cash") cashSalesCentavos += splitAmt;
-      else if (txn.splitPayment.method === "gcash") gcashSalesCentavos += splitAmt;
-      else if (txn.splitPayment.method === "maya") mayaSalesCentavos += splitAmt;
-    }
+    addTenders(tenders, txn);
   }
 
   // Cash funds from this register's shifts that overlap the day.
@@ -116,14 +101,15 @@ async function _computeDailySummary(
   }
 
   // Expected cash in drawer = starting funds + cash sales
-  const expectedCashCentavos = totalCashFundCentavos + cashSalesCentavos;
+  const expectedCashCentavos = totalCashFundCentavos + tenders.cash;
 
   return {
     transactionCount,
     totalSalesCentavos,
-    cashSalesCentavos,
-    gcashSalesCentavos,
-    mayaSalesCentavos,
+    cashSalesCentavos: tenders.cash,
+    gcashSalesCentavos: tenders.gcash,
+    mayaSalesCentavos: tenders.maya,
+    bankTransferSalesCentavos: tenders.bankTransfer,
     totalCashFundCentavos,
     expectedCashCentavos,
   };
@@ -190,6 +176,7 @@ export const submitReconciliation = mutation({
       cashSalesCentavos,
       gcashSalesCentavos,
       mayaSalesCentavos,
+      bankTransferSalesCentavos,
       expectedCashCentavos,
     } = summary;
     const differenceCentavos = args.actualCashCentavos - expectedCashCentavos;
@@ -205,6 +192,7 @@ export const submitReconciliation = mutation({
       cashSalesCentavos,
       gcashSalesCentavos,
       mayaSalesCentavos,
+      bankTransferSalesCentavos,
       totalSalesCentavos,
       notes: args.notes,
       createdAt: Date.now(),

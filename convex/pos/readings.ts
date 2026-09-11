@@ -5,6 +5,12 @@ import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import type { Id, Doc } from "../_generated/dataModel";
+import {
+  addTenders,
+  emptyTenderTotals,
+  tenderPortions,
+  TENDER_SALES_FIELD,
+} from "../_helpers/tenders";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -57,9 +63,7 @@ async function _buildReadingData(
   transactions: Doc<"transactions">[],
 ) {
   let totalSalesCentavos = 0;
-  let cashSalesCentavos = 0;
-  let gcashSalesCentavos = 0;
-  let mayaSalesCentavos = 0;
+  const tenders = emptyTenderTotals();
   let vatAmountCentavos = 0;
   let discountAmountCentavos = 0;
 
@@ -81,18 +85,7 @@ async function _buildReadingData(
     vatAmountCentavos += txn.vatAmountCentavos;
     discountAmountCentavos += txn.discountAmountCentavos;
 
-    const splitAmt = txn.splitPayment?.amountCentavos ?? 0;
-    const primaryAmt = splitAmt > 0 ? txn.totalCentavos - splitAmt : txn.totalCentavos;
-
-    if (txn.paymentMethod === "cash") cashSalesCentavos += primaryAmt;
-    else if (txn.paymentMethod === "gcash") gcashSalesCentavos += primaryAmt;
-    else if (txn.paymentMethod === "maya") mayaSalesCentavos += primaryAmt;
-
-    if (txn.splitPayment) {
-      if (txn.splitPayment.method === "cash") cashSalesCentavos += splitAmt;
-      else if (txn.splitPayment.method === "gcash") gcashSalesCentavos += splitAmt;
-      else if (txn.splitPayment.method === "maya") mayaSalesCentavos += splitAmt;
-    }
+    addTenders(tenders, txn);
 
     // Hourly bucket
     const hour = toPHTHour(txn.createdAt);
@@ -155,9 +148,10 @@ async function _buildReadingData(
   return {
     transactionCount: completedCount,
     totalSalesCentavos,
-    cashSalesCentavos,
-    gcashSalesCentavos,
-    mayaSalesCentavos,
+    cashSalesCentavos: tenders.cash,
+    gcashSalesCentavos: tenders.gcash,
+    mayaSalesCentavos: tenders.maya,
+    bankTransferSalesCentavos: tenders.bankTransfer,
     vatAmountCentavos,
     discountAmountCentavos,
     firstReceiptNumber: firstReceipt,
@@ -349,6 +343,7 @@ export const getZReading = query({
         cashSalesCentavos: number;
         gcashSalesCentavos: number;
         mayaSalesCentavos: number;
+        bankTransferSalesCentavos: number;
         cashFundCentavos: number;
       }
     >();
@@ -370,6 +365,7 @@ export const getZReading = query({
           cashSalesCentavos: 0,
           gcashSalesCentavos: 0,
           mayaSalesCentavos: 0,
+          bankTransferSalesCentavos: 0,
           cashFundCentavos: shift.cashFundCentavos,
         });
       }
@@ -379,21 +375,12 @@ export const getZReading = query({
     for (const txn of allTxns) {
       const key = txn.cashierId as string;
       const cashierData = cashierMap.get(key);
-      if (cashierData) {
+      // A voided sale is not a sale — the reading's totals leave it out too.
+      if (cashierData && txn.status !== "voided") {
         cashierData.transactionCount++;
         cashierData.totalSalesCentavos += txn.totalCentavos;
-
-        const splitAmt = txn.splitPayment?.amountCentavos ?? 0;
-        const primaryAmt = splitAmt > 0 ? txn.totalCentavos - splitAmt : txn.totalCentavos;
-
-        if (txn.paymentMethod === "cash") cashierData.cashSalesCentavos += primaryAmt;
-        else if (txn.paymentMethod === "gcash") cashierData.gcashSalesCentavos += primaryAmt;
-        else if (txn.paymentMethod === "maya") cashierData.mayaSalesCentavos += primaryAmt;
-
-        if (txn.splitPayment) {
-          if (txn.splitPayment.method === "cash") cashierData.cashSalesCentavos += splitAmt;
-          else if (txn.splitPayment.method === "gcash") cashierData.gcashSalesCentavos += splitAmt;
-          else if (txn.splitPayment.method === "maya") cashierData.mayaSalesCentavos += splitAmt;
+        for (const p of tenderPortions(txn)) {
+          cashierData[TENDER_SALES_FIELD[p.method]] += p.amountCentavos;
         }
       }
     }
@@ -559,7 +546,8 @@ export async function fileZReading(
   );
 
   let gross = 0, vatable = 0, vatExempt = 0, vat = 0, discount = 0;
-  let cash = 0, gcash = 0, maya = 0, count = 0, voided = 0;
+  let count = 0, voided = 0;
+  const tenders = emptyTenderTotals();
   let firstSI: string | null = null;
   let lastSI: string | null = null;
 
@@ -575,17 +563,7 @@ export async function fileZReading(
       vatable += t.subtotalCentavos;
       vat += t.vatAmountCentavos;
     }
-    const splitAmt = t.splitPayment?.amountCentavos ?? 0;
-    const primary = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
-    if (t.paymentMethod === "cash") cash += primary;
-    else if (t.paymentMethod === "gcash") gcash += primary;
-    else maya += primary;
-    if (t.splitPayment) {
-      const m = t.splitPayment.method;
-      if (m === "cash") cash += splitAmt;
-      else if (m === "gcash") gcash += splitAmt;
-      else maya += splitAmt;
-    }
+    addTenders(tenders, t);
     if (!firstSI || t.receiptNumber < firstSI) firstSI = t.receiptNumber;
     if (!lastSI || t.receiptNumber > lastSI) lastSI = t.receiptNumber;
   }
@@ -624,9 +602,10 @@ export async function fileZReading(
     zeroRatedSalesCentavos: 0,
     vatAmountCentavos: vat,
     discountCentavos: discount,
-    cashSalesCentavos: cash,
-    gcashSalesCentavos: gcash,
-    mayaSalesCentavos: maya,
+    cashSalesCentavos: tenders.cash,
+    gcashSalesCentavos: tenders.gcash,
+    mayaSalesCentavos: tenders.maya,
+    bankTransferSalesCentavos: tenders.bankTransfer,
     previousGrandTotalCentavos,
     accumulatedGrandTotalCentavos,
     generatedById: args.userId,

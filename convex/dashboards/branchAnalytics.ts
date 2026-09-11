@@ -239,7 +239,7 @@ export const getInventoryHealth = query({
 });
 
 // ─── getPaymentMethodBreakdown ────────────────────────────────────────────────
-// Cash vs GCash vs Maya distribution over the selected period.
+// Cash vs GCash vs Maya vs bank transfer distribution over the selected period.
 
 export const getPaymentMethodBreakdown = query({
   args: {
@@ -265,6 +265,7 @@ export const getPaymentMethodBreakdown = query({
       cash: { count: 0, revenueCentavos: 0 },
       gcash: { count: 0, revenueCentavos: 0 },
       maya: { count: 0, revenueCentavos: 0 },
+      bankTransfer: { count: 0, revenueCentavos: 0 },
     };
 
     for (const txn of txns) {

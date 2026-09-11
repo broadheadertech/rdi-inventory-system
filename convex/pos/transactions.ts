@@ -8,6 +8,7 @@ import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES, requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { calculateTaxBreakdown } from "../_helpers/taxCalculations";
+import { tenderValidator } from "../_helpers/tenders";
 import { requireShiftForSale } from "./shifts";
 import {
   calculatePromoDiscount,
@@ -73,11 +74,7 @@ export const createTransaction = mutation({
         unitPriceCentavos: v.number(),
       })
     ),
-    paymentMethod: v.union(
-      v.literal("cash"),
-      v.literal("gcash"),
-      v.literal("maya")
-    ),
+    paymentMethod: tenderValidator,
     discountType: v.union(
       v.literal("senior"),
       v.literal("pwd"),
@@ -86,9 +83,11 @@ export const createTransaction = mutation({
     amountTenderedCentavos: v.optional(v.number()),
     promotionId: v.optional(v.id("promotions")),
     splitPayment: v.optional(v.object({
-      method: v.union(v.literal("cash"), v.literal("gcash"), v.literal("maya")),
+      method: tenderValidator,
       amountCentavos: v.number(),
     })),
+    // Required when either portion is paid by bank transfer.
+    paymentReference: v.optional(v.string()),
     fashionAssistantId: v.optional(v.id("fashionAssistants")),
     // BIR Sold-To + SC/PWD details (optional, captured at checkout)
     customerName: v.optional(v.string()),
@@ -152,6 +151,42 @@ export const createTransaction = mutation({
         throw new ConvexError({
           code: "INVALID_PAYMENT",
           message: "Split payment method must differ from primary method",
+        });
+      }
+    }
+
+    // 4c. A bank transfer is taken on its reference number: it is what the
+    //     branch matches against the bank statement, and one transfer pays for
+    //     one sale only.
+    const paysByTransfer =
+      args.paymentMethod === "bankTransfer" || args.splitPayment?.method === "bankTransfer";
+    const paymentReference = paysByTransfer
+      ? (args.paymentReference ?? "").replace(/\s+/g, "").toUpperCase()
+      : undefined;
+    if (paymentReference !== undefined) {
+      if (paymentReference === "") {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "Enter the bank transfer's reference number.",
+        });
+      }
+      if (paymentReference.length > 64) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: "That reference number is too long.",
+        });
+      }
+      const reused = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_payment_reference", (q) =>
+          q.eq("branchId", branchId).eq("paymentReference", paymentReference)
+        )
+        .filter((q) => q.neq(q.field("status"), "voided"))
+        .first();
+      if (reused) {
+        throw new ConvexError({
+          code: "INVALID_PAYMENT",
+          message: `Reference ${paymentReference} was already used on receipt ${reused.receiptNumber}.`,
         });
       }
     }
@@ -384,6 +419,7 @@ export const createTransaction = mutation({
       promoDiscountAmountCentavos:
         promoDiscountCentavos > 0 ? promoDiscountCentavos : undefined,
       splitPayment: args.splitPayment,
+      paymentReference,
       fashionAssistantId: args.fashionAssistantId,
       amountTenderedCentavos:
         args.paymentMethod === "cash"
@@ -454,6 +490,7 @@ export const createTransaction = mutation({
         receiptNumber,
         totalCentavos: finalTotalCentavos,
         paymentMethod: args.paymentMethod,
+        paymentReference: paymentReference ?? null,
         itemCount: args.items.length,
         promotionId: appliedPromotionId ?? null,
         promoDiscountCentavos,

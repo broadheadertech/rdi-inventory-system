@@ -23,6 +23,7 @@ import { BRANCH_MANAGEMENT_ROLES, POS_ROLES } from "../_helpers/permissions";
 import { requireTerminal, touchTerminal } from "../_helpers/requireTerminal";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { fileZReading, findZReading } from "./readings";
+import { tenderPortions } from "../_helpers/tenders";
 import {
   closeTurnoverShortDispute,
   raiseCashCountDispute,
@@ -349,6 +350,58 @@ export const getActiveShift = query({
       isPreviousDay: openedDate < todayPht(),
       transactionCount,
     };
+  },
+});
+
+// ─── getShiftTenders ──────────────────────────────────────────────────────────
+// What the open shift took by GCash, Maya and bank transfer, for the cashier to
+// check against the wallet apps and the bank before ending it. Cash stays out:
+// the drawer is still counted blind.
+
+export const getShiftTenders = query({
+  args: { deviceToken: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const scope = await requirePosScope(ctx);
+    const branchId = scope.branchId;
+    if (!branchId) return null;
+
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    const terminalId = terminal?._id ?? null;
+    const shift = await openShiftOnRegister(ctx, branchId, terminalId);
+    if (!shift) return null;
+
+    const matches = onRegister(terminalId);
+    const txns = (
+      await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branchId).gte("createdAt", shift.openedAt)
+        )
+        .collect()
+    ).filter((t) => matches(t) && t.status !== "voided");
+
+    const tally = {
+      gcash: { count: 0, amountCentavos: 0 },
+      maya: { count: 0, amountCentavos: 0 },
+      bankTransfer: { count: 0, amountCentavos: 0 },
+    };
+    const transfers: { receiptNumber: string; reference: string | null; amountCentavos: number }[] = [];
+    for (const t of txns) {
+      for (const p of tenderPortions(t)) {
+        if (p.method === "cash") continue;
+        // A refund comes off the total but is not a payment to tick off.
+        if (p.amountCentavos > 0) tally[p.method].count++;
+        tally[p.method].amountCentavos += p.amountCentavos;
+        if (p.method === "bankTransfer") {
+          transfers.push({
+            receiptNumber: t.receiptNumber,
+            reference: t.paymentReference ?? null,
+            amountCentavos: p.amountCentavos,
+          });
+        }
+      }
+    }
+    return { ...tally, transfers };
   },
 });
 
@@ -733,6 +786,7 @@ export const closeShift = mutation({
         cashSalesCentavos: z.cashSalesCentavos,
         gcashSalesCentavos: z.gcashSalesCentavos,
         mayaSalesCentavos: z.mayaSalesCentavos,
+        bankTransferSalesCentavos: z.bankTransferSalesCentavos,
         totalSalesCentavos: z.grossSalesCentavos,
         notes: args.notes,
         createdAt: now,
@@ -802,6 +856,7 @@ export const closeMissedDay = mutation({
       cashSalesCentavos: z.cashSalesCentavos,
       gcashSalesCentavos: z.gcashSalesCentavos,
       mayaSalesCentavos: z.mayaSalesCentavos,
+      bankTransferSalesCentavos: z.bankTransferSalesCentavos,
       totalSalesCentavos: z.grossSalesCentavos,
       notes: "Counted when closing a day that was never ended",
       createdAt: now,

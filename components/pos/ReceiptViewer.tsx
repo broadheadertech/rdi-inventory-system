@@ -8,6 +8,7 @@ import { Loader2, X, AlertCircle, Gift, Receipt } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatDateTime } from "@/lib/formatters";
+import { PAYMENT_METHOD_LABELS } from "@/lib/constants";
 import { SendReceiptForm } from "@/components/pos/SendReceiptForm";
 import dynamic from "next/dynamic";
 
@@ -314,13 +315,13 @@ function ReceiptViewerInner({
             {txn.splitPayment ? (
               <div className="space-y-0.5">
                 <div className="flex justify-between">
-                  <span>{txn.paymentMethod === "cash" ? "Cash" : txn.paymentMethod === "gcash" ? "GCash" : "Maya"}:</span>
+                  <span>{PAYMENT_METHOD_LABELS[txn.paymentMethod]}:</span>
                   <span className="font-bold">
                     {formatCurrency(txn.totalCentavos - txn.splitPayment.amountCentavos)}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span>{txn.splitPayment.method === "cash" ? "Cash" : txn.splitPayment.method === "gcash" ? "GCash" : "Maya"}:</span>
+                  <span>{PAYMENT_METHOD_LABELS[txn.splitPayment.method]}:</span>
                   <span className="font-bold">
                     {formatCurrency(txn.splitPayment.amountCentavos)}
                   </span>
@@ -354,9 +355,13 @@ function ReceiptViewerInner({
             ) : (
               <div className="flex justify-between">
                 <span>Payment:</span>
-                <span>
-                  {txn.paymentMethod === "gcash" ? "GCash" : "Maya"}
-                </span>
+                <span>{PAYMENT_METHOD_LABELS[txn.paymentMethod]}</span>
+              </div>
+            )}
+            {txn.paymentReference && (
+              <div className="flex justify-between">
+                <span>Ref. No.:</span>
+                <span className="font-mono">{txn.paymentReference}</span>
               </div>
             )}
 

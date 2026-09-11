@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { tenderValidator } from "./_helpers/tenders";
 
 // BIR registration values shown on POS receipts (per branch/outlet).
 const birConfig = v.object({
@@ -46,6 +47,8 @@ export default defineSchema({
     cashSalesCentavos: v.number(),
     gcashSalesCentavos: v.number(),
     mayaSalesCentavos: v.number(),
+    // Optional: readings filed before the POS took bank transfers have none.
+    bankTransferSalesCentavos: v.optional(v.number()),
     previousGrandTotalCentavos: v.number(),
     accumulatedGrandTotalCentavos: v.number(), // non-resetting lifetime total
     generatedById: v.id("users"),
@@ -472,11 +475,10 @@ export default defineSchema({
     vatAmountCentavos: v.number(),
     discountAmountCentavos: v.number(),
     totalCentavos: v.number(),
-    paymentMethod: v.union(
-      v.literal("cash"),
-      v.literal("gcash"),
-      v.literal("maya")
-    ),
+    paymentMethod: tenderValidator,
+    // The bank transfer's reference number, when either portion was paid by
+    // transfer — what the branch matches against the bank statement.
+    paymentReference: v.optional(v.string()),
     discountType: v.optional(
       v.union(
         v.literal("senior"),
@@ -500,7 +502,7 @@ export default defineSchema({
     promotionId: v.optional(v.id("promotions")),
     promoDiscountAmountCentavos: v.optional(v.number()),
     splitPayment: v.optional(v.object({
-      method: v.union(v.literal("cash"), v.literal("gcash"), v.literal("maya")),
+      method: tenderValidator,
       amountCentavos: v.number(),
     })),
     fashionAssistantId: v.optional(v.id("fashionAssistants")),
@@ -514,7 +516,8 @@ export default defineSchema({
     .index("by_branch_date", ["branchId", "createdAt"])
     .index("by_terminal_date", ["terminalId", "createdAt"])
     .index("by_cashier", ["cashierId"])
-    .index("by_receiptNumber", ["receiptNumber"]),
+    .index("by_receiptNumber", ["receiptNumber"])
+    .index("by_branch_payment_reference", ["branchId", "paymentReference"]),
 
   transactionItems: defineTable({
     transactionId: v.id("transactions"),
@@ -691,6 +694,7 @@ export default defineSchema({
     cashSalesCentavos: v.number(),
     gcashSalesCentavos: v.number(),
     mayaSalesCentavos: v.number(),
+    bankTransferSalesCentavos: v.optional(v.number()),
     totalSalesCentavos: v.number(),
     notes: v.optional(v.string()),
     createdAt: v.number(),
@@ -1684,6 +1688,7 @@ export default defineSchema({
     salesCash: v.number(),
     salesGcash: v.number(),
     salesMaya: v.number(),
+    salesBankTransfer: v.optional(v.number()),
     // Inventory health
     totalSkus: v.number(),
     inStockCount: v.number(),

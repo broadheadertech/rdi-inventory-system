@@ -5,6 +5,7 @@ import {
   Text,
   StyleSheet,
 } from "@react-pdf/renderer";
+import { PAYMENT_METHOD_LABELS, type PaymentMethod } from "@/lib/constants";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -16,11 +17,12 @@ export type ReceiptData = {
     vatAmountCentavos: number;
     discountAmountCentavos: number;
     totalCentavos: number;
-    paymentMethod: "cash" | "gcash" | "maya";
+    paymentMethod: PaymentMethod;
     discountType: string;
     amountTenderedCentavos?: number;
     changeCentavos?: number;
-    splitPayment?: { method: "cash" | "gcash" | "maya"; amountCentavos: number } | null;
+    splitPayment?: { method: PaymentMethod; amountCentavos: number } | null;
+    paymentReference?: string | null;
   };
   items: {
     styleName: string;
@@ -296,7 +298,7 @@ export function ReceiptPDF({ data }: { data: ReceiptData }) {
           <>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>
-                {txn.paymentMethod === "cash" ? "Cash" : txn.paymentMethod === "gcash" ? "GCash" : "Maya"}:
+                {PAYMENT_METHOD_LABELS[txn.paymentMethod]}:
               </Text>
               <Text style={styles.summaryValue}>
                 {formatPrice(txn.totalCentavos - txn.splitPayment.amountCentavos)}
@@ -304,7 +306,7 @@ export function ReceiptPDF({ data }: { data: ReceiptData }) {
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>
-                {txn.splitPayment.method === "cash" ? "Cash" : txn.splitPayment.method === "gcash" ? "GCash" : "Maya"}:
+                {PAYMENT_METHOD_LABELS[txn.splitPayment.method]}:
               </Text>
               <Text style={styles.summaryValue}>{formatPrice(txn.splitPayment.amountCentavos)}</Text>
             </View>
@@ -336,8 +338,14 @@ export function ReceiptPDF({ data }: { data: ReceiptData }) {
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Payment:</Text>
             <Text style={styles.summaryValue}>
-              {txn.paymentMethod === "gcash" ? "GCash" : "Maya"}
+              {PAYMENT_METHOD_LABELS[txn.paymentMethod]}
             </Text>
+          </View>
+        )}
+        {txn.paymentReference && (
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Ref. No.:</Text>
+            <Text style={styles.summaryValue}>{txn.paymentReference}</Text>
           </View>
         )}
 

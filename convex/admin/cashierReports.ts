@@ -1,6 +1,7 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
 import { requireRole, ADMIN_ROLES } from "../_helpers/permissions";
+import { addTenders, emptyTenderTotals } from "../_helpers/tenders";
 
 const PHT_OFFSET_MS = 8 * 60 * 60 * 1000; // UTC+8
 
@@ -90,23 +91,12 @@ export const getCashierShiftReport = query({
           .filter((q) => q.lte(q.field("createdAt"), shiftEnd))
           .collect();
 
-        let cashSales = 0;
-        let gcashSales = 0;
-        let mayaSales = 0;
+        const tenders = emptyTenderTotals();
         let voidedCount = 0;
 
         for (const t of txns) {
           if (t.status === "voided") { voidedCount++; continue; }
-          const splitAmt = t.splitPayment?.amountCentavos ?? 0;
-          const primaryAmt = splitAmt > 0 ? t.totalCentavos - splitAmt : t.totalCentavos;
-          if (t.paymentMethod === "cash") cashSales += primaryAmt;
-          else if (t.paymentMethod === "gcash") gcashSales += primaryAmt;
-          else if (t.paymentMethod === "maya") mayaSales += primaryAmt;
-          if (t.splitPayment) {
-            if (t.splitPayment.method === "cash") cashSales += splitAmt;
-            else if (t.splitPayment.method === "gcash") gcashSales += splitAmt;
-            else if (t.splitPayment.method === "maya") mayaSales += splitAmt;
-          }
+          addTenders(tenders, t);
         }
 
         const completedTxns = txns.filter((t) => t.status !== "voided");
@@ -122,10 +112,12 @@ export const getCashierShiftReport = query({
           closeType: shift.closeType ?? null,
           changeFundCentavos: shift.changeFundCentavos ?? shift.cashFundCentavos,
           cashFundCentavos: shift.cashFundCentavos,
-          cashSalesCentavos: cashSales,
-          gcashSalesCentavos: gcashSales,
-          mayaSalesCentavos: mayaSales,
-          totalSalesCentavos: cashSales + gcashSales + mayaSales,
+          cashSalesCentavos: tenders.cash,
+          gcashSalesCentavos: tenders.gcash,
+          mayaSalesCentavos: tenders.maya,
+          bankTransferSalesCentavos: tenders.bankTransfer,
+          totalSalesCentavos:
+            tenders.cash + tenders.gcash + tenders.maya + tenders.bankTransfer,
           transactionCount: completedTxns.length,
           voidedCount,
         };

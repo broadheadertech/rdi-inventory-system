@@ -19,6 +19,12 @@ import { getErrorMessage } from "@/lib/utils";
 import { TerminalEnrollment } from "@/components/pos/TerminalEnrollment";
 import { ReadingReport, type ReadingData } from "@/components/pos/ReadingReport";
 import { BirReadingViewer } from "@/components/pos/BirReadingViewer";
+import {
+  DenominationCounter,
+  confirmEmptyDrawer,
+  countedCentavos,
+  type DenominationCounts,
+} from "@/components/pos/DenominationCounter";
 import { getDeviceToken, clearDeviceToken, getInstallId } from "@/lib/deviceToken";
 import {
   CalendarX,
@@ -120,7 +126,7 @@ export function ShiftGate({
   const [account, setAccount] = useState<VerifiedAccount | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [countInput, setCountInput] = useState("");
+  const [counts, setCounts] = useState<DenominationCounts>({});
   const [changeFundInput, setChangeFundInput] = useState("");
   const [cashFundInput, setCashFundInput] = useState("0");
   const [approval, setApproval] = useState<{
@@ -161,7 +167,7 @@ export function ShiftGate({
     setAccount(null);
     setUsername("");
     setPassword("");
-    setCountInput("");
+    setCounts({});
     setChangeFundInput("");
     setCashFundInput("0");
     setApproval(null);
@@ -281,11 +287,8 @@ export function ShiftGate({
 
   async function handleTurnoverCount() {
     if (!account) return;
-    const counted = pesoToCentavos(countInput);
-    if (counted === null) {
-      setError("Enter the total you counted — 0 if the drawer is empty.");
-      return;
-    }
+    const counted = countedCentavos(counts);
+    if (counted === 0 && !confirmEmptyDrawer()) return;
     setBusy(true);
     setError("");
     try {
@@ -330,11 +333,8 @@ export function ShiftGate({
   }
 
   async function handleCloseMissedDay(date: string) {
-    const declared = pesoToCentavos(countInput);
-    if (declared === null) {
-      setError("Enter the cash in the drawer — 0 if it is empty.");
-      return;
-    }
+    const declared = countedCentavos(counts);
+    if (declared === 0 && !confirmEmptyDrawer()) return;
     setBusy(true);
     setError("");
     try {
@@ -343,7 +343,7 @@ export function ShiftGate({
         declaredCashCentavos: declared,
         deviceToken: deviceToken ?? undefined,
       });
-      setCountInput("");
+      setCounts({});
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -353,7 +353,7 @@ export function ShiftGate({
 
   function recount() {
     setApproval(null);
-    setCountInput("");
+    setCounts({});
     setError("");
     setStep("count");
   }
@@ -431,25 +431,9 @@ export function ShiftGate({
               Day. Count the drawer to close that day — today&apos;s first shift opens after.
             </p>
           </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Cash in the drawer (₱)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              inputMode="decimal"
-              value={countInput}
-              onChange={(e) => setCountInput(e.target.value)}
-              placeholder="0.00"
-              autoFocus
-              className={amountInput}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleCloseMissedDay(date);
-              }}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
+          <div className="space-y-2">
+            <DenominationCounter counts={counts} onChange={setCounts} disabled={busy} />
+            <p className="text-xs text-muted-foreground">
               Count every bill and coin yourself. This becomes {dateLabel(date)}&apos;s cash count.
             </p>
           </div>
@@ -529,25 +513,9 @@ export function ShiftGate({
                 })}`}
             </p>
           </div>
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Cash turned over (₱)
-            </label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              inputMode="decimal"
-              value={countInput}
-              onChange={(e) => setCountInput(e.target.value)}
-              placeholder="0.00"
-              autoFocus
-              className={amountInput}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleTurnoverCount();
-              }}
-            />
-            <p className="mt-1 text-xs text-muted-foreground">
+          <div className="space-y-2">
+            <DenominationCounter counts={counts} onChange={setCounts} disabled={busy} />
+            <p className="text-xs text-muted-foreground">
               Count every bill and coin in the drawer yourself. The amount handed over isn&apos;t
               shown.
             </p>
@@ -664,7 +632,11 @@ export function ShiftGate({
 
   return (
     <div className="flex h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm space-y-5 rounded-xl border bg-card p-6 shadow-lg">
+      <div
+        className={`max-h-full w-full overflow-y-auto space-y-5 rounded-xl border bg-card p-6 shadow-lg ${
+          status?.missingZDate || step === "count" ? "max-w-md" : "max-w-sm"
+        }`}
+      >
         {renderStep()}
       </div>
 
@@ -687,6 +659,7 @@ export function ShiftGate({
               <ReadingReport
                 data={yReading as ReadingData}
                 onClose={() => setShowYReading(false)}
+                hideCash
               />
             )}
           </div>

@@ -5,6 +5,7 @@ import { useQuery, useMutation, useConvex } from "convex/react";
 import { getDeviceToken } from "@/lib/deviceToken";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
+import { PAYMENT_METHOD_LABELS, type PaymentMethod } from "@/lib/constants";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -44,7 +45,7 @@ type TransactionLookup = {
   receiptNumber: string;
   branchId: Id<"branches">;
   totalCentavos: number;
-  paymentMethod: "cash" | "gcash" | "maya";
+  paymentMethod: PaymentMethod;
   discountType?: "senior" | "pwd" | "none";
   createdAt: number;
   items: {
@@ -765,7 +766,7 @@ export default function ReturnsPage() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {new Date(transaction.createdAt).toLocaleString()} ·{" "}
-                    {transaction.paymentMethod.toUpperCase()}
+                    {PAYMENT_METHOD_LABELS[transaction.paymentMethod]}
                   </p>
                 </div>
 
