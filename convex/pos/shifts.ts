@@ -462,31 +462,6 @@ async function requestTurnoverApproval(
   return approvalId;
 }
 
-/**
- * Once a register opens, no count on it is waiting any more. Close any still
- * pending — one whose drawer was superseded by a new day after a Z-reading,
- * say — so a manager is never asked to decide a count that holds nothing.
- */
-async function closeStaleApprovals(
-  ctx: MutationCtx,
-  branchId: Id<"branches">,
-  terminalId: RegisterId
-): Promise<void> {
-  const pending = await ctx.db
-    .query("cashTurnoverApprovals")
-    .withIndex("by_branch_status", (q) => q.eq("branchId", branchId).eq("status", "pending"))
-    .collect();
-  const now = Date.now();
-  for (const a of pending) {
-    if ((a.terminalId ?? null) !== terminalId) continue;
-    await ctx.db.patch(a._id, {
-      status: "rejected",
-      decidedAt: now,
-      note: "No longer waiting — the register opened another way",
-    });
-  }
-}
-
 export const openShift = mutation({
   args: {
     cashierAccountId: v.optional(v.id("cashierAccounts")),
@@ -556,7 +531,6 @@ export const openShift = mutation({
         status: "open",
         openedAt: now,
       });
-      await closeStaleApprovals(ctx, branchId, terminalId);
       await touchTerminal(ctx, terminal);
       return { status: "opened" as const, shiftId };
     }
@@ -650,7 +624,6 @@ export const openShift = mutation({
       },
     });
 
-    await closeStaleApprovals(ctx, branchId, terminalId);
     await touchTerminal(ctx, terminal);
     return { status: "opened" as const, shiftId };
   },
@@ -749,6 +722,88 @@ export const closeShift = mutation({
   },
 });
 
+// ─── closeMissedDay ───────────────────────────────────────────────────────────
+// Closes a business day the register traded on but never ended with End of
+// Day — its last cashier switched out and nobody closed up. The drawer is
+// counted first, blind, like any End of Day, and that count is the day's cash
+// count: a day is never closed on nothing but the last cashier's declaration.
+// A turnover count still waiting for a manager stays with them.
+
+export const closeMissedDay = mutation({
+  args: {
+    date: v.string(), // YYYYMMDD — the day the register reports as never closed
+    declaredCashCentavos: v.number(),
+    deviceToken: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const scope = await requirePosScope(ctx);
+    const branchId = scope.branchId;
+    if (!branchId) throw new ConvexError("No branch assigned");
+
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    const terminalId = terminal?._id ?? null;
+
+    if (await openShiftOnRegister(ctx, branchId, terminalId)) {
+      throw new ConvexError(
+        "A shift is still open on this register. Close it with End of Day instead."
+      );
+    }
+    if ((await missingZReadingDate(ctx, branchId, terminalId)) !== args.date) {
+      throw new ConvexError("That day doesn't need closing on this register.");
+    }
+
+    const declared = args.declaredCashCentavos;
+    if (!Number.isInteger(declared) || declared < 0) {
+      throw new ConvexError("Declare the cash in the drawer — zero or more.");
+    }
+
+    // The drawer as the day's last shift left it.
+    const lastShift = await latestShiftOnRegister(ctx, branchId, terminalId, todayStartMs());
+    if (!lastShift) throw new ConvexError("No shift was found for that day.");
+    const expected = await expectedDrawerCash(ctx, branchId, lastShift);
+
+    const z = await fileZReading(ctx, {
+      branchId,
+      terminalId,
+      dateStr: args.date,
+      userId: scope.userId,
+    });
+
+    const now = Date.now();
+    await ctx.db.insert("reconciliations", {
+      branchId,
+      cashierId: scope.userId,
+      reconciliationDate: args.date,
+      expectedCashCentavos: expected,
+      actualCashCentavos: declared,
+      differenceCentavos: declared - expected,
+      transactionCount: z.transactionCount,
+      cashSalesCentavos: z.cashSalesCentavos,
+      gcashSalesCentavos: z.gcashSalesCentavos,
+      mayaSalesCentavos: z.mayaSalesCentavos,
+      totalSalesCentavos: z.grossSalesCentavos,
+      notes: "Counted when closing a day that was never ended",
+      createdAt: now,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "pos.shift.missedDayClosed",
+      userId: scope.userId,
+      branchId,
+      entityType: "zReadings",
+      entityId: z._id,
+      after: {
+        date: args.date,
+        declaredCashCentavos: declared,
+        expectedCashCentavos: expected,
+        differenceCentavos: declared - expected,
+      },
+    });
+
+    return { zCounter: z.zCounter };
+  },
+});
+
 // ─── Turnover approvals ───────────────────────────────────────────────────────
 
 /** The till's view of its request: the decision only, never the amounts it is checked against. */
@@ -785,21 +840,34 @@ export const listTurnoverApprovals = query({
       .withIndex("by_branch_status", (q) => q.eq("branchId", branchId).eq("status", "pending"))
       .collect();
 
-    // Only counts still holding a register: the one for the drawer its next
-    // cashier must count. Any other is left over — its drawer has since moved
-    // on — and waits on nothing.
+    // Every count that still needs a decision. A count is only left over when
+    // another count of the same drawer has since opened a shift from it — the
+    // old retype loophole — and that one is hidden. A count whose day was
+    // closed before anyone decided stays: no register waits on it any more,
+    // but the decision still belongs on the record.
     const handoverByRegister = new Map<string, Id<"cashierShifts"> | null>();
     const out = [];
     for (const a of pending) {
+      const prev = await ctx.db.get(a.prevShiftId);
+      const openedFromIt = (
+        await ctx.db
+          .query("cashierShifts")
+          .withIndex("by_branch_opened", (q) =>
+            q.eq("branchId", branchId).gte("openedAt", prev?.closedAt ?? a.requestedAt)
+          )
+          .collect()
+      ).some((s) => s.prevShiftId === a.prevShiftId);
+      if (openedFromIt) continue;
+
       const registerKey = (a.terminalId as string | undefined) ?? "unbound";
       if (!handoverByRegister.has(registerKey)) {
         const handover = await pendingHandover(ctx, branchId, a.terminalId ?? null);
         handoverByRegister.set(registerKey, handover?._id ?? null);
       }
-      if (handoverByRegister.get(registerKey) !== a.prevShiftId) continue;
 
-      const prev = await ctx.db.get(a.prevShiftId);
       out.push({
+        // False once the day has been closed: deciding opens nothing.
+        registerWaiting: handoverByRegister.get(registerKey) === a.prevShiftId,
         approvalId: a._id,
         terminalLabel: await terminalLabel(ctx, a.terminalId),
         outgoingCashierName: prev ? await shiftCashierName(ctx, prev) : "Unknown",

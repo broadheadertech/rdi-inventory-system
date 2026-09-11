@@ -99,7 +99,7 @@ export function ShiftGate({
   );
 
   const openShift = useMutation(api.pos.shifts.openShift);
-  const fileZ = useMutation(api.pos.readings.finalizeZReading);
+  const closeMissedDay = useMutation(api.pos.shifts.closeMissedDay);
   const verifyCashierLogin = useAction(api.cashier.authActions.verifyCashierLogin);
   const recordActivity = useMutation(api.pos.terminalSecurity.recordActivity);
 
@@ -329,11 +329,21 @@ export function ShiftGate({
     }
   }
 
-  async function handleFileMissingZ(date: string) {
+  async function handleCloseMissedDay(date: string) {
+    const declared = pesoToCentavos(countInput);
+    if (declared === null) {
+      setError("Enter the cash in the drawer — 0 if it is empty.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      await fileZ({ date, deviceToken: deviceToken ?? undefined });
+      await closeMissedDay({
+        date,
+        declaredCashCentavos: declared,
+        deviceToken: deviceToken ?? undefined,
+      });
+      setCountInput("");
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -417,14 +427,36 @@ export function ShiftGate({
             <Clock className="mx-auto h-10 w-10 text-amber-500" />
             <h1 className="text-xl font-bold">{dateLabel(date)} was never closed</h1>
             <p className="text-sm text-muted-foreground">
-              This register traded on {dateLabel(date)} but its Z-reading was not filed. File it
-              before today&apos;s first shift can open.
+              This register traded on {dateLabel(date)} but the day was never ended with End of
+              Day. Count the drawer to close that day — today&apos;s first shift opens after.
+            </p>
+          </div>
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Cash in the drawer (₱)
+            </label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              inputMode="decimal"
+              value={countInput}
+              onChange={(e) => setCountInput(e.target.value)}
+              placeholder="0.00"
+              autoFocus
+              className={amountInput}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCloseMissedDay(date);
+              }}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">
+              Count every bill and coin yourself. This becomes {dateLabel(date)}&apos;s cash count.
             </p>
           </div>
           {errorLine}
-          <button onClick={() => handleFileMissingZ(date)} disabled={busy} className={primaryButton}>
+          <button onClick={() => handleCloseMissedDay(date)} disabled={busy} className={primaryButton}>
             {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-            File Z-reading for {dateLabel(date)}
+            Count &amp; close {dateLabel(date)}
           </button>
         </>
       );

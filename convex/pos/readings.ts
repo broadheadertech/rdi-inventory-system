@@ -699,6 +699,24 @@ export const finalizeZReading = mutation({
       });
     }
 
+    // No shift ran on this register that day: there is no day to close, and
+    // filing a Z would lock the register for a day that never started.
+    const { startMs, endMs } = getPhilippineDateRange(dateStr);
+    const traded = (
+      await ctx.db
+        .query("cashierShifts")
+        .withIndex("by_branch_opened", (q) =>
+          q.eq("branchId", branchId).gte("openedAt", startMs).lte("openedAt", endMs)
+        )
+        .collect()
+    ).some((s) => (terminal ? s.terminalId === terminal._id : s.terminalId === undefined));
+    if (!traded) {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "No shift ran on this register that day, so there is nothing to close.",
+      });
+    }
+
     const z = await fileZReading(ctx, { branchId, terminalId, dateStr, userId: scope.userId });
     return {
       zCounter: z.zCounter,

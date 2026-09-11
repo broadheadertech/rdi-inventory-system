@@ -55,7 +55,7 @@ export function EndShiftDialog({
       !window.confirm(
         forced
           ? `Close ${dateLabel(shift.openedDate)} on this register?\n\nThis files that day's Z-reading.`
-          : "End the day on this register?\n\nThis files today's Z-reading. No more sales can be rung on this register until tomorrow."
+          : `End ${dateLabel(shift.openedDate)} on this register?\n\nThis files the Z-reading for ${dateLabel(shift.openedDate)}. No more sales can be rung on this register until the next day starts at midnight.`
       )
     ) {
       return;

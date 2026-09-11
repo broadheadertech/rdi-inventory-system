@@ -366,12 +366,17 @@ function CashCountsPanel() {
   function onDecide(
     approvalId: NonNullable<typeof approvals>[number]["approvalId"],
     approve: boolean,
-    label: string
+    label: string,
+    registerWaiting: boolean
   ) {
     const note = window.prompt(
-      approve
-        ? `Approve the short count on ${label}? The shift opens on what the cashier counted.\n\nNote (optional):`
-        : `Send the cashier on ${label} back to recount?\n\nTell them why:`
+      registerWaiting
+        ? approve
+          ? `Approve the short count on ${label}? The shift opens on what the cashier counted.\n\nNote (optional):`
+          : `Send the cashier on ${label} back to recount?\n\nTell them why:`
+        : approve
+          ? `Accept the count on ${label} for the record? That day is already closed.\n\nNote (optional):`
+          : `Reject the count on ${label}? That day is already closed.\n\nNote why:`
     );
     if (note === null) return;
     decide({ approvalId, approve, note: note.trim() || undefined })
@@ -410,19 +415,25 @@ function CashCountsPanel() {
                       ? `The count agrees with the system — ${a.outgoingCashierName} declared more than the drawer should hold.`
                       : "Cash is missing against what the system expects for this drawer."}
                   </p>
+                  {!a.registerWaiting && (
+                    <p className="text-xs font-medium text-amber-700">
+                      That day is already closed, so no register is waiting — your decision goes
+                      on the record.
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <button
-                    onClick={() => onDecide(a.approvalId, true, a.terminalLabel)}
+                    onClick={() => onDecide(a.approvalId, true, a.terminalLabel, a.registerWaiting)}
                     className="rounded-md border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 hover:bg-green-100"
                   >
-                    Approve
+                    {a.registerWaiting ? "Approve" : "Accept count"}
                   </button>
                   <button
-                    onClick={() => onDecide(a.approvalId, false, a.terminalLabel)}
+                    onClick={() => onDecide(a.approvalId, false, a.terminalLabel, a.registerWaiting)}
                     className="rounded-md border px-3 py-1.5 text-xs font-medium hover:bg-muted"
                   >
-                    Recount
+                    {a.registerWaiting ? "Recount" : "Reject count"}
                   </button>
                 </div>
               </div>
