@@ -194,6 +194,8 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
             // Replayed offline sales still belong to the register that took
             // them — this device — so the Z-read attributes them correctly.
             deviceToken: getDeviceToken() ?? undefined,
+            // Judged by the shift open when it was rung, not by what is open now.
+            offlineQueuedAt: entry.timestamp,
             items: payload.items.map((item) => ({
               ...item,
               variantId: item.variantId as Id<"variants">,

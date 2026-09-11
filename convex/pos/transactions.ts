@@ -8,6 +8,7 @@ import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES, requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { calculateTaxBreakdown } from "../_helpers/taxCalculations";
+import { requireShiftForSale } from "./shifts";
 import {
   calculatePromoDiscount,
   type CartItemForPromo,
@@ -63,6 +64,8 @@ async function nextInvoiceNumber(
 export const createTransaction = mutation({
   args: {
     deviceToken: v.optional(v.string()),
+    // Set when a sale queued offline is replayed: when it was rung.
+    offlineQueuedAt: v.optional(v.number()),
     items: v.array(
       v.object({
         variantId: v.id("variants"),
@@ -102,6 +105,11 @@ export const createTransaction = mutation({
       throw new ConvexError({ code: "UNAUTHORIZED" });
     }
     const branchId = scope.branchId!;
+
+    // 1b. Which register rang this up, and the shift it belongs to. A sale
+    //     outside a shift has no cashier and falls in no drawer count.
+    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    await requireShiftForSale(ctx, branchId, terminal?._id ?? null, args.offlineQueuedAt);
 
     // 2. Validate non-empty cart (M1)
     if (args.items.length === 0) {
@@ -348,10 +356,8 @@ export const createTransaction = mutation({
       }
     }
 
-    // 8. Resolve which register rang this up, then issue that machine's next
-    //    invoice serial. The terminal is stamped on the sale so the Z-reading
-    //    can report per machine, as BIR registers them.
-    const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    // 8. Issue this register's next invoice serial. The terminal is stamped on
+    //    the sale so the Z-reading can report per machine, as BIR registers them.
     const receiptNumber = await nextInvoiceNumber(ctx, branchId, terminal?._id);
 
     // 9. Insert transaction record
@@ -390,7 +396,7 @@ export const createTransaction = mutation({
       customerBusinessStyle: args.customerBusinessStyle?.trim() || undefined,
       scPwdName: args.scPwdName?.trim() || undefined,
       scPwdIdNumber: args.scPwdIdNumber?.trim() || undefined,
-      isOffline: false,
+      isOffline: args.offlineQueuedAt !== undefined,
       createdAt: Date.now(),
     });
 

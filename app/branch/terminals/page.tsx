@@ -403,6 +403,12 @@ function CashCountsPanel() {
                     expected {peso(a.expectedCentavos)}
                   </p>
                   <p className="text-xs font-medium text-red-600">Short {peso(a.shortCentavos)}</p>
+                  {/* Which side of the handover is off — the start of settling a dispute. */}
+                  <p className="text-xs text-muted-foreground">
+                    {a.countedCentavos >= a.expectedCentavos
+                      ? `The count agrees with the system — ${a.outgoingCashierName} declared more than the drawer should hold.`
+                      : "Cash is missing against what the system expects for this drawer."}
+                  </p>
                 </div>
                 <div className="flex shrink-0 gap-2">
                   <button

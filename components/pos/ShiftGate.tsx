@@ -525,12 +525,20 @@ export function ShiftGate({
             </p>
           )}
           {errorLine}
-          <button
-            onClick={recount}
-            className="w-full rounded-lg border py-2.5 text-sm font-medium hover:bg-muted"
-          >
-            Count again
-          </button>
+          {/* Counting again waits for the manager: retyping until a number passes
+              would defeat the blind count. */}
+          {rejected ? (
+            <button
+              onClick={recount}
+              className="w-full rounded-lg border py-2.5 text-sm font-medium hover:bg-muted"
+            >
+              Count again
+            </button>
+          ) : (
+            <p className="text-center text-xs text-muted-foreground">
+              You can count again only if the manager asks for a recount.
+            </p>
+          )}
         </>
       );
     }

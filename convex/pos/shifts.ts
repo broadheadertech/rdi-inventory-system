@@ -253,6 +253,59 @@ async function expectedDrawerCash(
   return (start.changeFundCentavos ?? start.cashFundCentavos) + cash + moved;
 }
 
+// ─── requireShiftForSale ──────────────────────────────────────────────────────
+// Every sale and drawer movement at the till happens inside a shift: without
+// one there is no cashier to attribute it to and no drawer count it will ever
+// appear in. The login gate keeps the POS closed without a shift; this is the
+// server holding the same line.
+
+// How long an offline sale may wait to be replayed.
+const OFFLINE_REPLAY_WINDOW_MS = 7 * DAY_MS;
+
+export async function requireShiftForSale(
+  ctx: MutationCtx,
+  branchId: Id<"branches">,
+  terminalId: RegisterId,
+  // For a sale queued offline and replayed on reconnect: when it was rung. It
+  // is judged by the shift open then, since the till only reaches the server
+  // later — possibly after that shift has ended.
+  queuedAt?: number
+): Promise<Doc<"cashierShifts">> {
+  if (queuedAt === undefined) {
+    const shift = await openShiftOnRegister(ctx, branchId, terminalId);
+    if (!shift) {
+      throw new ConvexError({
+        code: "NO_ACTIVE_SHIFT",
+        message: "No shift is open on this register. Log in and open a shift first.",
+      });
+    }
+    const shiftDate = phtDate(shift.openedAt);
+    if (shiftDate < todayPht()) {
+      throw new ConvexError({
+        code: "PREVIOUS_DAY_SHIFT",
+        message: `This shift started on ${formatYmd(shiftDate)}. Close that day with End of Day before ringing sales today.`,
+      });
+    }
+    return shift;
+  }
+
+  const now = Date.now();
+  if (queuedAt > now || queuedAt < now - OFFLINE_REPLAY_WINDOW_MS) {
+    throw new ConvexError({
+      code: "INVALID_OFFLINE_SALE",
+      message: "This offline sale's time is out of range, so it cannot be replayed.",
+    });
+  }
+  const shift = await latestShiftOnRegister(ctx, branchId, terminalId, queuedAt + 1);
+  if (!shift || (shift.closedAt !== undefined && shift.closedAt < queuedAt)) {
+    throw new ConvexError({
+      code: "NO_ACTIVE_SHIFT",
+      message: "This offline sale was rung with no shift open on this register.",
+    });
+  }
+  return shift;
+}
+
 // ─── getActiveShift ───────────────────────────────────────────────────────────
 // The open shift on this register. No cash figures: the till counts blind.
 
@@ -466,6 +519,22 @@ export const openShift = mutation({
     }
     if (!Number.isInteger(counted) || counted < 0) {
       throw new ConvexError("The counted amount must be zero or more.");
+    }
+
+    // One count at a time. While a short count is with a manager, no one may
+    // count this drawer again until the manager decides — otherwise a count
+    // that did not pass could simply be retyped until one does, and the blind
+    // count becomes a guessing game. A manager's "recount" reopens counting.
+    const waiting = (
+      await ctx.db
+        .query("cashTurnoverApprovals")
+        .withIndex("by_prevShift", (q) => q.eq("prevShiftId", handover._id))
+        .collect()
+    ).find((a) => a.status === "pending");
+    if (waiting && waiting.countedCentavos !== counted) {
+      throw new ConvexError(
+        "This drawer's count is with a manager. Wait for their decision before counting again."
+      );
     }
 
     const declared = handover.declaredCashCentavos;

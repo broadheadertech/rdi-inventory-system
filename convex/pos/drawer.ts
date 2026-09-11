@@ -6,6 +6,7 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { requireShiftForSale } from "./shifts";
 
 export const recordDrawerOperation = mutation({
   args: {
@@ -37,6 +38,9 @@ export const recordDrawerOperation = mutation({
 
     const now = Date.now();
     const terminal = await requireTerminal(ctx, args.deviceToken, branchId);
+    // Opening the drawer or moving cash belongs to a shift, like a sale: it
+    // changes what the next count should find.
+    await requireShiftForSale(ctx, branchId, terminal?._id ?? null);
 
     const id = await ctx.db.insert("drawerOperations", {
       terminalId: terminal?._id,
