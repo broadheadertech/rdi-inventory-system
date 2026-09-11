@@ -536,7 +536,8 @@ export default function BranchReportsPage() {
                   <thead>
                     <tr>
                       <Th>Promotion</Th><Th right>Sales</Th>
-                      <Th right>% of Store Sales</Th><Th right>Redemptions</Th>
+                      <Th right>% of Store Sales</Th><Th right>Items Sold</Th>
+                      <Th right>Redemptions</Th>
                     </tr>
                   </thead>
                   <tbody>
@@ -545,6 +546,7 @@ export default function BranchReportsPage() {
                         <Td>{p.offer}</Td>
                         <Td right>{fmt(p.salesCentavos)}</Td>
                         <Td right muted>{p.sharePercent.toFixed(1)}%</Td>
+                        <Td right>{p.itemsSold.toLocaleString("en-PH")}</Td>
                         <Td right>{p.redemptions.toLocaleString("en-PH")}</Td>
                       </tr>
                     ))}
@@ -563,6 +565,11 @@ export default function BranchReportsPage() {
                               100
                             ).toFixed(1)}%`
                           : "—"}
+                      </Td>
+                      <Td right>
+                        <span className="font-semibold">
+                          {promotions.promotions.reduce((sum, p) => sum + p.itemsSold, 0).toLocaleString("en-PH")}
+                        </span>
                       </Td>
                       <Td right muted>
                         {promotions.promotions.reduce((sum, p) => sum + p.redemptions, 0).toLocaleString("en-PH")}

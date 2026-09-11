@@ -1298,11 +1298,40 @@ export const getMovementsSummary = query({
 //   (3) the line passes the promo's branch/brand scope where set.
 // Multiple promos can match the same line; the line is split equally across
 // all matching promos so totals stay consistent.
+//
+// A sale that recorded its promotion skips the heuristic and is credited to it
+// directly. Barcode, style code and size narrow the report to matching lines;
+// totals and share % narrow with them, exactly as the brand filter does.
+
+const SIZE_ORDER = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "2XL", "XXXL", "3XL", "4XL"];
+
+/** Numeric sizes by value, lettered sizes smallest first, anything else A–Z. */
+function compareSizes(a: string, b: string): number {
+  const na = Number(a);
+  const nb = Number(b);
+  if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
+  const rank = (s: string) => {
+    const i = SIZE_ORDER.indexOf(s.toUpperCase());
+    return i === -1 ? SIZE_ORDER.length : i;
+  };
+  return rank(a) - rank(b) || a.localeCompare(b);
+}
 
 export const getPromotionContributions = query({
-  args: filterArgs,
+  args: {
+    ...filterArgs,
+    barcode: v.optional(v.string()),
+    styleCode: v.optional(v.string()),
+    size: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const scope = await resolveReportScope(ctx);
+
+    // Barcode is matched exactly, since it is scanned. Style code matches any
+    // part, case-insensitively. Size is picked from the sizes that sold.
+    const barcodeFilter = args.barcode?.trim() || null;
+    const styleCodeFilter = args.styleCode?.trim().toLowerCase() || null;
+    const sizeFilter = args.size?.trim().toLowerCase() || null;
 
     const startMs = ymdToMs(args.dateStart);
     const endMs = ymdToMs(args.dateEnd, true);
@@ -1316,11 +1345,13 @@ export const getPromotionContributions = query({
     if (allowedIds.length === 0) {
       return {
         totalSalesCentavos: 0,
+        availableSizes: [] as string[],
         promotions: [] as Array<{
           promotionId: string;
           offer: string;
           salesCentavos: number;
           sharePercent: number;
+          itemsSold: number;
           redemptions: number;
         }>,
       };
@@ -1336,6 +1367,7 @@ export const getPromotionContributions = query({
 
     // Caches
     const variantCache = new Map<string, Doc<"variants"> | null>();
+    const styleCache = new Map<string, Doc<"styles"> | null>();
     const styleBrandCache = new Map<string, Id<"brands"> | null>();
     const categoryBrandCache = new Map<string, Id<"brands"> | null>();
 
@@ -1343,6 +1375,7 @@ export const getPromotionContributions = query({
       promotionId: string;
       offer: string;
       salesCentavos: number;
+      itemsSold: number;
       txnIds: Set<string>;
     };
     const perPromo = new Map<string, PromoAgg>();
@@ -1354,6 +1387,7 @@ export const getPromotionContributions = query({
           promotionId: key,
           offer: p.name,
           salesCentavos: 0,
+          itemsSold: 0,
           txnIds: new Set<string>(),
         };
         perPromo.set(key, cur);
@@ -1363,6 +1397,9 @@ export const getPromotionContributions = query({
 
     // Accumulate total period sales (for share%) across allowed branches
     let totalSalesCentavos = 0;
+    // Sizes sold that pass every filter but size — the Size dropdown's options,
+    // so picking one never leads to an empty report.
+    const sizesSeen = new Set<string>();
 
     for (const bId of allowedIds) {
       const txns = await ctx.db
@@ -1394,9 +1431,14 @@ export const getPromotionContributions = query({
           }
           if (!variant) continue;
 
+          let style = styleCache.get(variant.styleId as string);
+          if (style === undefined) {
+            style = await ctx.db.get(variant.styleId);
+            styleCache.set(variant.styleId as string, style);
+          }
+
           let brandId = styleBrandCache.get(variant.styleId as string);
           if (brandId === undefined) {
-            const style = await ctx.db.get(variant.styleId);
             brandId = style
               ? await resolveStyleBrandId(ctx as any, style, categoryBrandCache)
               : null;
@@ -1404,6 +1446,17 @@ export const getPromotionContributions = query({
           }
 
           if (args.brandId && brandId !== args.brandId) continue;
+          // The unit barcode is on the variant; fall back to the style's for
+          // variants that were never given one.
+          if (barcodeFilter && (variant.barcode ?? style?.barcode) !== barcodeFilter) continue;
+          if (
+            styleCodeFilter &&
+            !(style?.styleCode ?? "").toLowerCase().includes(styleCodeFilter)
+          ) {
+            continue;
+          }
+          sizesSeen.add(variant.size);
+          if (sizeFilter && variant.size.toLowerCase() !== sizeFilter) continue;
 
           totalSalesCentavos += it.lineTotalCentavos;
 
@@ -1428,6 +1481,7 @@ export const getPromotionContributions = query({
             if (txnSales > 0) {
               const agg = ensure(promo);
               agg.salesCentavos += txnSales;
+              agg.itemsSold += lineCtxs.reduce((s, l) => s + l.item.quantity, 0);
               agg.txnIds.add(t._id as string);
             }
             continue; // direct attribution wins — skip the heuristic for this txn
@@ -1474,6 +1528,8 @@ export const getPromotionContributions = query({
           for (const p of matching) {
             const agg = ensure(p);
             agg.salesCentavos += split;
+            // Split the same way as sales, so items reconcile across promos.
+            agg.itemsSold += ctxLine.item.quantity / matching.length;
             agg.txnIds.add(t._id as string);
           }
         }
@@ -1487,12 +1543,14 @@ export const getPromotionContributions = query({
         salesCentavos: Math.round(a.salesCentavos),
         sharePercent:
           totalSalesCentavos > 0 ? (a.salesCentavos / totalSalesCentavos) * 100 : 0,
+        itemsSold: Math.round(a.itemsSold),
         redemptions: a.txnIds.size,
       }))
       .sort((x, y) => y.salesCentavos - x.salesCentavos);
 
     return {
       totalSalesCentavos,
+      availableSizes: [...sizesSeen].sort(compareSizes),
       promotions,
     };
   },

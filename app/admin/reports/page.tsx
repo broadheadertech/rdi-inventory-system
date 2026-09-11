@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { api as _api } from "@/convex/_generated/api";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -165,6 +165,22 @@ export default function HqReportsPage() {
   const [branchId, setBranchId] = useState<string | undefined>(undefined);
   const [dimension, setDimension] = useState<Dimension>("people");
 
+  // Promotion Contributions filters. The typed ones wait for a pause in typing,
+  // so the report is not recomputed on every keystroke.
+  const [promoBarcode, setPromoBarcode] = useState("");
+  const [promoStyleCode, setPromoStyleCode] = useState("");
+  const [promoSize, setPromoSize] = useState("");
+  const [promoTextFilters, setPromoTextFilters] = useState({ barcode: "", styleCode: "" });
+  useEffect(() => {
+    const timer = setTimeout(
+      () =>
+        setPromoTextFilters({ barcode: promoBarcode.trim(), styleCode: promoStyleCode.trim() }),
+      400,
+    );
+    return () => clearTimeout(timer);
+  }, [promoBarcode, promoStyleCode]);
+  const hasPromoFilters = Boolean(promoBarcode.trim() || promoStyleCode.trim() || promoSize);
+
   function applyPreset(preset: Exclude<Preset, "custom">) {
     const { start, end } = getPresetDates(preset);
     setDateStart(start);
@@ -230,18 +246,31 @@ export default function HqReportsPage() {
         returnRatePercent: number;
       }[]
     | undefined;
-  const promoContribs = useQuery(api.dashboards.reportsV2.getPromotionContributions, filterArgs) as
+  const promoContribs = useQuery(api.dashboards.reportsV2.getPromotionContributions, {
+    ...filterArgs,
+    ...(promoTextFilters.barcode ? { barcode: promoTextFilters.barcode } : {}),
+    ...(promoTextFilters.styleCode ? { styleCode: promoTextFilters.styleCode } : {}),
+    ...(promoSize ? { size: promoSize } : {}),
+  }) as
     | {
         totalSalesCentavos: number;
+        // Sizes sold in the period that pass the other filters.
+        availableSizes: string[];
         promotions: {
           promotionId: string;
           offer: string;
           salesCentavos: number;
           sharePercent: number;
+          itemsSold: number;
           redemptions: number;
         }[];
       }
     | undefined;
+  // Keep a chosen size in the list even when other filters no longer turn it up.
+  const promoSizeOptions = useMemo(() => {
+    const sizes = promoContribs?.availableSizes ?? [];
+    return promoSize && !sizes.includes(promoSize) ? [promoSize, ...sizes] : sizes;
+  }, [promoContribs, promoSize]);
   const movements = useQuery(api.dashboards.reportsV2.getMovementsSummary, filterArgs) as
     | {
         bom: number;
@@ -1033,7 +1062,56 @@ export default function HqReportsPage() {
 
       {/* ── Promotion Contributions ── */}
       <div>
-        <h2 className="text-base font-semibold mb-3">Promotion Contributions</h2>
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+          <h2 className="text-base font-semibold">Promotion Contributions</h2>
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="space-y-1">
+              <span className="block text-xs text-muted-foreground">Barcode</span>
+              <input
+                value={promoBarcode}
+                onChange={(e) => setPromoBarcode(e.target.value)}
+                placeholder="Scan or type"
+                className="w-40 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="block text-xs text-muted-foreground">Style Code</span>
+              <input
+                value={promoStyleCode}
+                onChange={(e) => setPromoStyleCode(e.target.value)}
+                placeholder="Any part of the code"
+                className="w-40 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="block text-xs text-muted-foreground">Size</span>
+              <select
+                value={promoSize}
+                onChange={(e) => setPromoSize(e.target.value)}
+                className="w-28 rounded-md border border-input bg-background px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
+              >
+                <option value="">All sizes</option>
+                {promoSizeOptions.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {hasPromoFilters && (
+              <button
+                onClick={() => {
+                  setPromoBarcode("");
+                  setPromoStyleCode("");
+                  setPromoSize("");
+                }}
+                className="rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-muted"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
         <div className="rounded-lg border p-4">
           {promoContribs === undefined ? (
             <div className="space-y-2">
@@ -1070,6 +1148,7 @@ export default function HqReportsPage() {
                         }
                       })()}
                     </th>
+                    <th className="pb-2 text-right font-medium">Items Sold</th>
                     <th className="pb-2 text-right font-medium">Redemption</th>
                   </tr>
                 </thead>
@@ -1082,6 +1161,9 @@ export default function HqReportsPage() {
                       </td>
                       <td className="py-2 text-right tabular-nums text-muted-foreground">
                         {p.sharePercent.toFixed(1)}%
+                      </td>
+                      <td className="py-2 text-right tabular-nums">
+                        {p.itemsSold.toLocaleString("en-PH")}
                       </td>
                       <td className="py-2 text-right tabular-nums">
                         {p.redemptions.toLocaleString("en-PH")}
@@ -1108,6 +1190,11 @@ export default function HqReportsPage() {
                     </td>
                     <td className="pt-2 text-right tabular-nums">
                       {promoContribs.promotions
+                        .reduce((s, p) => s + p.itemsSold, 0)
+                        .toLocaleString("en-PH")}
+                    </td>
+                    <td className="pt-2 text-right tabular-nums">
+                      {promoContribs.promotions
                         .reduce((s, p) => s + p.redemptions, 0)
                         .toLocaleString("en-PH")}
                     </td>
@@ -1115,9 +1202,11 @@ export default function HqReportsPage() {
                 </tfoot>
               </table>
               <p className="mt-2 text-xs text-muted-foreground">
-                Attribution: a discounted line is credited to a promo when its scope
-                (branch/brand/variant) and date window match the transaction. Lines
-                matching multiple promos are split equally so totals reconcile.
+                Attribution: a sale that recorded its promo is credited to that promo.
+                For a sale without one, each discounted line is credited to the promos
+                whose scope (branch/brand/variant) and dates match it, split equally
+                when several do, so totals reconcile. Barcode, style code and size
+                narrow the lines counted, and % is of sales matching the same filters.
               </p>
             </div>
           )}
