@@ -2,6 +2,7 @@ import { query, mutation, MutationCtx } from "../_generated/server";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import { Id } from "../_generated/dataModel";
+import { evaluateVoucher, redeemVoucher, releaseVoucherForOrder } from "./vouchers";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -358,11 +359,27 @@ export const createOrder = mutation({
           ? 0
           : 9900;
 
-    // VAT calculation (already included in price, 12%)
-    const vatAmountCentavos = Math.round(subtotalCentavos - subtotalCentavos / 1.12);
+    // Voucher: checked again here, against the cart being ordered, so what the
+    // customer saw at checkout is what they are charged — or the order is
+    // refused rather than placed at a different price.
+    let discountCentavos = 0;
+    const voucher = args.voucherCode?.trim()
+      ? await evaluateVoucher(ctx, {
+          code: args.voucherCode,
+          customerId: customer._id,
+          lines: orderItemsData,
+        })
+      : null;
+    if (voucher && !voucher.ok) throw new ConvexError(voucher.reason);
+    if (voucher?.ok) discountCentavos = voucher.discountCentavos;
+
+    // VAT calculation (already included in price, 12%) — on what is actually
+    // charged for the goods, after the voucher.
+    const taxableCentavos = subtotalCentavos - discountCentavos;
+    const vatAmountCentavos = Math.round(taxableCentavos - taxableCentavos / 1.12);
 
     const now = Date.now();
-    const totalCentavos = subtotalCentavos + shippingFeeCentavos;
+    const totalCentavos = subtotalCentavos - discountCentavos + shippingFeeCentavos;
 
     // Create order
     const orderId = await ctx.db.insert("orders", {
@@ -372,8 +389,15 @@ export const createOrder = mutation({
       subtotalCentavos,
       vatAmountCentavos,
       shippingFeeCentavos,
-      discountAmountCentavos: 0,
+      discountAmountCentavos: discountCentavos,
       totalCentavos,
+      ...(voucher?.ok
+        ? {
+            promotionId: voucher.promotion._id,
+            voucherCode: voucher.voucher.code,
+            promoDiscountCentavos: discountCentavos,
+          }
+        : {}),
       // Address fields — only set for delivery orders
       ...(address
         ? {
@@ -406,6 +430,8 @@ export const createOrder = mutation({
         ...item,
       });
     }
+
+    if (voucher?.ok) await redeemVoucher(ctx, voucher.voucher, customer._id, orderId);
 
     // Clear cart
     for (const ci of cartItems) {
@@ -442,6 +468,9 @@ export const cancelOrder = mutation({
       cancelReason: args.reason ?? "Cancelled by customer",
       updatedAt: Date.now(),
     });
+
+    // A cancelled order never used its voucher.
+    await releaseVoucherForOrder(ctx, order);
 
     return { success: true };
   },

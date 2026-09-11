@@ -23,6 +23,8 @@ import {
   Clock,
   Store,
   Phone,
+  Ticket,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatPrice, cn } from "@/lib/utils";
@@ -205,6 +207,15 @@ export default function CheckoutPage() {
   });
   const [savingAddress, setSavingAddress] = useState(false);
 
+  // Voucher: checked against the bag by the server as it is typed in, and
+  // checked again when the order is placed.
+  const [voucherInput, setVoucherInput] = useState("");
+  const [appliedVoucher, setAppliedVoucher] = useState<string | null>(null);
+  const voucher = useQuery(
+    api.storefront.vouchers.previewVoucher,
+    appliedVoucher ? { code: appliedVoucher } : "skip"
+  );
+
   const sameDayAvailable = useMemo(() => isSameDayAvailable(), []);
 
   // Show sign-in wall for guests
@@ -269,7 +280,8 @@ export default function CheckoutPage() {
 
   const isPickup = fulfillmentType === "pickup";
   const shippingFee = isPickup ? 0 : getShippingFee(selectedDelivery, cart.totalCentavos);
-  const total = cart.totalCentavos + shippingFee;
+  const voucherDiscount = voucher?.ok ? voucher.discountCentavos : 0;
+  const total = cart.totalCentavos - voucherDiscount + shippingFee;
   const deliveryEstimate = isPickup ? null : getDeliveryEstimate(selectedDelivery);
   const selectedBranch = isPickup && retailBranches
     ? retailBranches.find((b: RetailBranch) => b._id === selectedPickupBranchId) ?? null
@@ -295,6 +307,7 @@ export default function CheckoutPage() {
           : { fulfillmentType: "delivery" as const, addressId: selectedAddressId!, deliveryMethod: selectedDelivery }),
         paymentMethod: selectedPayment,
         shippingFeeCentavos: shippingFee,
+        ...(voucher?.ok ? { voucherCode: voucher.code } : {}),
       });
       toast.success(`Order ${result.orderNumber} placed!`);
       router.push(`/account/orders/${result.orderId}`);
@@ -656,6 +669,58 @@ export default function CheckoutPage() {
           ))}
         </div>
 
+        {/* Voucher */}
+        <div className="mt-4 border-t border-border pt-4">
+          {voucher?.ok ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2 text-sm">
+              <span className="flex min-w-0 items-center gap-2">
+                <Ticket className="h-4 w-4 flex-shrink-0 text-primary" />
+                <span className="truncate">
+                  <span className="font-mono font-semibold">{voucher.code}</span> · {voucher.description}
+                </span>
+              </span>
+              <button
+                onClick={() => {
+                  setAppliedVoucher(null);
+                  setVoucherInput("");
+                }}
+                className="flex-shrink-0 text-muted-foreground hover:text-foreground"
+                aria-label="Remove voucher"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex gap-2">
+                <Input
+                  value={voucherInput}
+                  onChange={(e) => setVoucherInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && voucherInput.trim()) setAppliedVoucher(voucherInput.trim());
+                  }}
+                  placeholder="Voucher code"
+                  className="font-mono uppercase"
+                />
+                <Button
+                  variant="outline"
+                  onClick={() => setAppliedVoucher(voucherInput.trim() || null)}
+                  disabled={!voucherInput.trim() || (appliedVoucher !== null && voucher === undefined)}
+                >
+                  {appliedVoucher !== null && voucher === undefined ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    "Apply"
+                  )}
+                </Button>
+              </div>
+              {appliedVoucher && voucher && !voucher.ok && (
+                <p className="mt-1.5 text-xs text-red-400">{voucher.reason}</p>
+              )}
+            </>
+          )}
+        </div>
+
         <div className="mt-4 space-y-2 border-t border-border pt-4 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Subtotal</span>
@@ -671,6 +736,12 @@ export default function CheckoutPage() {
               {shippingFee === 0 ? "FREE" : formatPrice(shippingFee)}
             </span>
           </div>
+          {voucherDiscount > 0 && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Voucher discount</span>
+              <span className="font-medium text-green-400">−{formatPrice(voucherDiscount)}</span>
+            </div>
+          )}
           <div className="flex justify-between border-t border-border pt-2 text-base font-bold">
             <span>Total</span>
             <span className="font-mono text-primary">{formatPrice(total)}</span>
