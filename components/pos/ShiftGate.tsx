@@ -18,6 +18,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { getErrorMessage } from "@/lib/utils";
 import { TerminalEnrollment } from "@/components/pos/TerminalEnrollment";
 import { ReadingReport, type ReadingData } from "@/components/pos/ReadingReport";
+import { BirReadingViewer } from "@/components/pos/BirReadingViewer";
 import { getDeviceToken, clearDeviceToken, getInstallId } from "@/lib/deviceToken";
 import {
   CalendarX,
@@ -25,6 +26,7 @@ import {
   FileBarChart,
   Loader2,
   LogIn,
+  Printer,
   ShieldAlert,
   Users,
   Wallet,
@@ -133,9 +135,14 @@ export function ShiftGate({
     api.pos.shifts.getTurnoverApproval,
     approval ? { approvalId: approval.id } : "skip"
   );
+  // The day's Z, printable from the Closed-for-today screen.
+  const [showZReading, setShowZReading] = useState(false);
+  // The Y of the shift that just ended — or, on a register closed for the day,
+  // of its last shift, so it can still be printed after a reload.
+  const yShiftId = lastClosed?.shiftId ?? status?.closedToday?.lastShiftId ?? null;
   const yReading = useQuery(
     api.pos.readings.getYReading,
-    showYReading && lastClosed ? { shiftId: lastClosed.shiftId } : "skip"
+    showYReading && yShiftId ? { shiftId: yShiftId } : "skip"
   );
 
   // A cashier's session is their shift. When it ends the gate must forget who
@@ -254,7 +261,17 @@ export function ShiftGate({
         }).catch(() => {});
       }
       onDismissClosed();
-      setStep(handover ? "count" : "funds");
+      // A count of this drawer is already with a manager (the till was reloaded,
+      // or the cashier logged in again): wait on it instead of counting afresh.
+      if (handover?.pendingCount) {
+        setApproval({
+          id: handover.pendingCount.approvalId,
+          countedCentavos: handover.pendingCount.countedCentavos,
+        });
+        setStep("approval");
+      } else {
+        setStep(handover ? "count" : "funds");
+      }
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -369,11 +386,24 @@ export function ShiftGate({
             <h1 className="text-xl font-bold">Closed for today</h1>
             <p className="text-sm text-muted-foreground">
               This register filed today&apos;s Z-reading (#
-              {String(status.closedToday.zCounter).padStart(8, "0")}). The next shift starts
-              tomorrow.
+              {String(status.closedToday.zCounter).padStart(8, "0")}). It reopens at 12:00
+              midnight, when the next business day starts.
             </p>
           </div>
-          {closedBanner}
+          <div className="grid grid-cols-2 gap-2">
+            <button onClick={() => setShowZReading(true)} className={primaryButton}>
+              <Printer className="h-4 w-4" />
+              Print Z-Reading
+            </button>
+            <button
+              onClick={() => setShowYReading(true)}
+              disabled={!yShiftId}
+              className="flex items-center justify-center gap-2 rounded-lg border py-2.5 text-sm font-semibold hover:bg-muted disabled:opacity-50"
+            >
+              <FileBarChart className="h-4 w-4" />
+              Y-Reading
+            </button>
+          </div>
         </>
       );
     }
@@ -607,7 +637,7 @@ export function ShiftGate({
       </div>
 
       {/* Y-Reading of the shift that just ended */}
-      {showYReading && lastClosed && (
+      {showYReading && yShiftId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:bg-white print:p-0">
           <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border bg-card p-5 shadow-xl print:max-h-none print:max-w-none print:rounded-none print:border-none print:shadow-none">
             <button
@@ -627,6 +657,26 @@ export function ShiftGate({
                 onClose={() => setShowYReading(false)}
               />
             )}
+          </div>
+        </div>
+      )}
+
+      {/* The day's BIR Z-reading — its own Print button prints only the stub */}
+      {showZReading && status?.closedToday && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 print:bg-white print:p-0">
+          <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl border bg-card p-5 shadow-xl print:max-h-none print:max-w-none print:rounded-none print:border-none print:shadow-none">
+            <button
+              onClick={() => setShowZReading(false)}
+              className="absolute left-3 top-3 rounded-full p-1 hover:bg-muted print:hidden"
+              aria-label="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            <BirReadingViewer
+              readingType="Z"
+              date={status.closedToday.date}
+              deviceToken={deviceToken ?? undefined}
+            />
           </div>
         </div>
       )}

@@ -346,6 +346,7 @@ const VARIANCE_KIND_LABEL = {
   switchCashier: "Switch cashier count",
   endOfDay: "End of day count",
   turnoverApproved: "Short turnover, approved",
+  turnoverOver: "Turnover counted over",
 } as const;
 
 /**

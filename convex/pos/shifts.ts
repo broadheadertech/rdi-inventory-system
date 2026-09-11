@@ -365,8 +365,28 @@ export const getRegisterStatus = query({
     const handover =
       closedToday || missingZDate ? null : await pendingHandover(ctx, branchId, terminalId);
 
+    // A count of this drawer already with a manager: the till resumes waiting on
+    // it after a login or reload, rather than taking a new count the server would
+    // refuse. The amount is the cashier's own count, not what was handed over.
+    const waiting = handover
+      ? ((
+          await ctx.db
+            .query("cashTurnoverApprovals")
+            .withIndex("by_prevShift", (q) => q.eq("prevShiftId", handover._id))
+            .collect()
+        ).find((a) => a.status === "pending") ?? null)
+      : null;
+
     return {
-      closedToday: closedToday ? { zCounter: closedToday.zCounter } : null,
+      // Closed for the day — its Z and its last shift's Y stay printable, even
+      // after the till has been reloaded.
+      closedToday: closedToday
+        ? {
+            zCounter: closedToday.zCounter,
+            date: closedToday.date,
+            lastShiftId: (await latestShiftOnRegister(ctx, branchId, terminalId))?._id ?? null,
+          }
+        : null,
       missingZDate,
       // Who handed over and when — never how much: the next cashier counts blind.
       handover: handover
@@ -374,6 +394,9 @@ export const getRegisterStatus = query({
             shiftId: handover._id,
             cashierName: await shiftCashierName(ctx, handover),
             closedAt: handover.closedAt ?? null,
+            pendingCount: waiting
+              ? { approvalId: waiting._id, countedCentavos: waiting.countedCentavos }
+              : null,
           }
         : null,
     };
@@ -437,6 +460,31 @@ async function requestTurnoverApproval(
   });
 
   return approvalId;
+}
+
+/**
+ * Once a register opens, no count on it is waiting any more. Close any still
+ * pending — one whose drawer was superseded by a new day after a Z-reading,
+ * say — so a manager is never asked to decide a count that holds nothing.
+ */
+async function closeStaleApprovals(
+  ctx: MutationCtx,
+  branchId: Id<"branches">,
+  terminalId: RegisterId
+): Promise<void> {
+  const pending = await ctx.db
+    .query("cashTurnoverApprovals")
+    .withIndex("by_branch_status", (q) => q.eq("branchId", branchId).eq("status", "pending"))
+    .collect();
+  const now = Date.now();
+  for (const a of pending) {
+    if ((a.terminalId ?? null) !== terminalId) continue;
+    await ctx.db.patch(a._id, {
+      status: "rejected",
+      decidedAt: now,
+      note: "No longer waiting — the register opened another way",
+    });
+  }
 }
 
 export const openShift = mutation({
@@ -508,6 +556,7 @@ export const openShift = mutation({
         status: "open",
         openedAt: now,
       });
+      await closeStaleApprovals(ctx, branchId, terminalId);
       await touchTerminal(ctx, terminal);
       return { status: "opened" as const, shiftId };
     }
@@ -601,6 +650,7 @@ export const openShift = mutation({
       },
     });
 
+    await closeStaleApprovals(ctx, branchId, terminalId);
     await touchTerminal(ctx, terminal);
     return { status: "opened" as const, shiftId };
   },
@@ -735,8 +785,19 @@ export const listTurnoverApprovals = query({
       .withIndex("by_branch_status", (q) => q.eq("branchId", branchId).eq("status", "pending"))
       .collect();
 
+    // Only counts still holding a register: the one for the drawer its next
+    // cashier must count. Any other is left over — its drawer has since moved
+    // on — and waits on nothing.
+    const handoverByRegister = new Map<string, Id<"cashierShifts"> | null>();
     const out = [];
     for (const a of pending) {
+      const registerKey = (a.terminalId as string | undefined) ?? "unbound";
+      if (!handoverByRegister.has(registerKey)) {
+        const handover = await pendingHandover(ctx, branchId, a.terminalId ?? null);
+        handoverByRegister.set(registerKey, handover?._id ?? null);
+      }
+      if (handoverByRegister.get(registerKey) !== a.prevShiftId) continue;
+
       const prev = await ctx.db.get(a.prevShiftId);
       out.push({
         approvalId: a._id,
@@ -804,14 +865,25 @@ export const listCashVariances = query({
 
     const since = Date.now() - 7 * DAY_MS;
 
-    const closes = (
-      await ctx.db
-        .query("cashierShifts")
-        .withIndex("by_branch_opened", (q) =>
-          q.eq("branchId", branchId).gte("openedAt", since - DAY_MS)
-        )
-        .collect()
-    ).filter(
+    const recentShifts = await ctx.db
+      .query("cashierShifts")
+      .withIndex("by_branch_opened", (q) =>
+        q.eq("branchId", branchId).gte("openedAt", since - DAY_MS)
+      )
+      .collect();
+
+    // Turnover counts above what the drawer should hold: cash that appeared
+    // between cashiers needs explaining as much as cash that went. They open
+    // without approval — only short counts are held — so this is where they show.
+    const overCounts = recentShifts.filter(
+      (s) =>
+        s.openedAt >= since &&
+        s.prevShiftId !== undefined &&
+        s.handoverCashInRegisterCentavos !== undefined &&
+        (s.changeFundCentavos ?? 0) > s.handoverCashInRegisterCentavos
+    );
+
+    const closes = recentShifts.filter(
       (s) =>
         s.status === "closed" &&
         (s.closedAt ?? 0) >= since &&
@@ -850,6 +922,21 @@ export const listCashVariances = query({
         expectedCentavos: a.expectedCentavos,
         countedCentavos: a.countedCentavos,
         differenceCentavos: a.countedCentavos - a.expectedCentavos,
+      });
+    }
+
+    for (const s of overCounts) {
+      const expected = s.handoverCashInRegisterCentavos ?? 0;
+      const counted = s.changeFundCentavos ?? 0;
+      rows.push({
+        key: `${s._id as string}-open`,
+        kind: "turnoverOver" as const,
+        at: s.openedAt,
+        terminalLabel: await terminalLabel(ctx, s.terminalId),
+        cashierName: await shiftCashierName(ctx, s),
+        expectedCentavos: expected,
+        countedCentavos: counted,
+        differenceCentavos: counted - expected,
       });
     }
 

@@ -64,6 +64,12 @@ export function ReconciliationPanel() {
     date: todayDate,
   });
   const zReading = useQuery(api.pos.readings.getZReading, { date: todayDate });
+  // End of Day at the register is how a day closes: it counts the drawer,
+  // records the day's cash count and files the Z together. While a shift is
+  // still open this page is a report, not a second way to close the day.
+  const openShift = useQuery(api.pos.shifts.getActiveShift, {
+    deviceToken: getDeviceToken() ?? undefined,
+  });
   const submitReconciliation = useMutation(
     api.pos.reconciliation.submitReconciliation
   );
@@ -213,7 +219,7 @@ export function ReconciliationPanel() {
                   <ReadingReport
                     data={zReading as ReadingData}
                     showPrint
-                    onFinalize={handleFinalizeZ}
+                    onFinalize={openShift ? undefined : handleFinalizeZ}
                     finalizing={finalizing}
                   />
                 </div>
@@ -270,7 +276,7 @@ export function ReconciliationPanel() {
               <ReadingReport
                 data={zReading as ReadingData}
                 showPrint
-                onFinalize={handleFinalizeZ}
+                onFinalize={openShift ? undefined : handleFinalizeZ}
                 finalizing={finalizing}
               />
             </div>
@@ -353,7 +359,18 @@ export function ReconciliationPanel() {
         </div>
       </div>
 
-      {/* Reconciliation Form */}
+      {openShift && (
+        <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+          <p className="font-medium">A shift is still open on this register.</p>
+          <p className="mt-1 text-muted-foreground">
+            Close the day from the POS: End Shift → End of Day. It counts the drawer, records
+            the day&apos;s cash count and files the Z-reading in one step.
+          </p>
+        </div>
+      )}
+
+      {/* Reconciliation Form — only once no shift is open */}
+      {!openShift && (
       <div className="space-y-4">
         <h2 className="text-lg font-semibold">Cash Reconciliation</h2>
 
@@ -471,6 +488,7 @@ export function ReconciliationPanel() {
           )}
         </Button>
       </div>
+      )}
     </div>
   );
 }
