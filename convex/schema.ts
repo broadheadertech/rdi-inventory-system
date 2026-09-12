@@ -372,7 +372,6 @@ export default defineSchema({
     yearId: v.optional(v.id("productCodes")),
     productionId: v.optional(v.id("productCodes")),
     outlierId: v.optional(v.id("productCodes")),
-    fitId: v.optional(v.id("productCodes")),
     styleCode: v.optional(v.string()),
     sequenceNumber: v.optional(v.number()),
     name: v.string(),

@@ -440,7 +440,6 @@ export const getReportsSummary = query({
 //   sku      → variantId
 //   size     → variant.size
 //   color    → variant.color
-//   fit      → style.fitId
 
 export const getPerformanceByDimension = query({
   args: {
@@ -454,7 +453,6 @@ export const getPerformanceByDimension = query({
       v.literal("sku"),
       v.literal("size"),
       v.literal("color"),
-      v.literal("fit"),
     ),
   },
   handler: async (ctx, args) => {
@@ -896,16 +894,6 @@ export const getPerformanceByDimension = query({
             bump(rowKey, label, item.lineTotalCentavos, item.quantity);
           bumpCost(rowKey, label, item, variant.costPriceCentavos);
           }
-        } else if (args.dimension === "fit") {
-          if (!style.fitId) {
-            rowKey = "(none)";
-            bump(rowKey, "(none)", item.lineTotalCentavos, item.quantity);
-          } else {
-            const label = await getPC(style.fitId);
-            rowKey = style.fitId as string;
-            bump(rowKey, label, item.lineTotalCentavos, item.quantity);
-          bumpCost(rowKey, label, item, variant.costPriceCentavos);
-          }
         }
         if (rowKey) {
           const code = calendarCodeForVariant(item.variantId);
@@ -972,13 +960,6 @@ export const getPerformanceByDimension = query({
         } else {
           const label = await getPC(style.departmentId);
           bumpSoh(style.departmentId as string, label, inv.quantity);
-        }
-      } else if (args.dimension === "fit") {
-        if (!style.fitId) {
-          bumpSoh("(none)", "(none)", inv.quantity);
-        } else {
-          const label = await getPC(style.fitId);
-          bumpSoh(style.fitId as string, label, inv.quantity);
         }
       }
     }

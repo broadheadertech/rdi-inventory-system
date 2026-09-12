@@ -46,7 +46,6 @@ const CODE_TYPES: { value: CodeType; label: string; description: string; hasCode
   { value: "year", label: "Year", description: "Production year", hasCode: true },
   { value: "production", label: "Production", description: "Production batch or run", hasCode: true },
   { value: "outlier", label: "Outlier", description: "Special classification codes", hasCode: true },
-  { value: "fit", label: "Fit", description: "Garment fit — used in Fit Performance reports", hasCode: false },
 ];
 
 type ProductCode = {
