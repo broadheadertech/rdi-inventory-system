@@ -103,7 +103,7 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
 
   if (variant === "desktop") {
     return (
-      <div className="relative flex h-full flex-col border-l bg-background">
+      <div className="relative flex h-full w-full flex-col border-l bg-background">
         {isRushMode ? (
           <RushModeCart
             items={items}
@@ -1022,8 +1022,8 @@ function CartContent({
       {items.length > 0 && (
         <div
           className={cn(
-            "shrink-0 overflow-y-auto border-t px-3 pb-3",
-            showPayment ? "max-h-[80%]" : "max-h-[65%]"
+            "flex shrink-0 flex-col border-t px-3 pb-3",
+            showPayment ? "max-h-[80%] overflow-y-auto" : "max-h-[65%]"
           )}
         >
           {showPayment ? (
@@ -1038,18 +1038,20 @@ function CartContent({
             />
           ) : (
             <>
-              <DiscountToggle
-                discountType={discountType}
-                setDiscountType={setDiscountType}
-              />
-              <PromoSelector
-                discountType={discountType}
-                activePromos={activePromos}
-                selectedPromoId={selectedPromoId}
-                setPromoId={setPromoId}
-                promoPreview={promoPreview}
-                promoSuggestions={promoSuggestions}
-              />
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <DiscountToggle
+                  discountType={discountType}
+                  setDiscountType={setDiscountType}
+                />
+                <PromoSelector
+                  discountType={discountType}
+                  activePromos={activePromos}
+                  selectedPromoId={selectedPromoId}
+                  setPromoId={setPromoId}
+                  promoPreview={promoPreview}
+                  promoSuggestions={promoSuggestions}
+                />
+              </div>
               <CartActions
                 items={items}
                 taxBreakdown={taxBreakdown}
