@@ -181,16 +181,6 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
                 onDismiss={handleDismissSuccess}
                 onViewReceipt={handleViewReceipt}
               />
-            ) : showPayment ? (
-              <PaymentPanel
-                items={items}
-                taxBreakdown={taxBreakdown}
-                discountType={isRushMode ? "none" : discountType}
-                selectedPromoId={isRushMode ? null : selectedPromoId}
-                promoPreview={isRushMode ? null : promoPreview}
-                onComplete={handlePaymentComplete}
-                onCancel={handlePaymentCancel}
-              />
             ) : isRushMode ? (
               <>
                 {items.length === 0 ? (
@@ -333,6 +323,18 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
           )}
         </div>
       </button>
+
+      {showPayment && !transactionResult && (
+        <PaymentModal
+          items={items}
+          taxBreakdown={taxBreakdown}
+          discountType={isRushMode ? "none" : discountType}
+          selectedPromoId={isRushMode ? null : selectedPromoId}
+          promoPreview={isRushMode ? null : promoPreview}
+          onComplete={handlePaymentComplete}
+          onCancel={handlePaymentCancel}
+        />
+      )}
     </div>
   );
 }
@@ -998,7 +1000,7 @@ function CartContent({
 
       {/* Items — always at least a third of the panel, so a long promo list
           or the payment form can't squeeze the cart out of view. */}
-      <div className={cn("flex-1 overflow-y-auto p-3", showPayment ? "min-h-[20%]" : "min-h-[35%]")}>
+      <div className="min-h-[35%] flex-1 overflow-y-auto p-3">
         {items.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <ShoppingCart className="mb-2 h-10 w-10 opacity-30" />
@@ -1018,26 +1020,9 @@ function CartContent({
         )}
       </div>
 
-      {/* Footer — Payment panel OR discount toggle + cart actions */}
+      {/* Footer — discount, promotions, totals and actions */}
       {items.length > 0 && (
-        <div
-          className={cn(
-            "flex shrink-0 flex-col border-t px-3 pb-3",
-            showPayment ? "max-h-[80%] overflow-y-auto" : "max-h-[65%]"
-          )}
-        >
-          {showPayment ? (
-            <PaymentPanel
-              items={items}
-              taxBreakdown={taxBreakdown}
-              discountType={discountType}
-              selectedPromoId={selectedPromoId}
-              promoPreview={promoPreview}
-              onComplete={onPaymentComplete}
-              onCancel={onPaymentCancel}
-            />
-          ) : (
-            <>
+        <div className="flex max-h-[65%] shrink-0 flex-col border-t px-3 pb-3">
               <div className="min-h-0 flex-1 overflow-y-auto">
                 <DiscountToggle
                   discountType={discountType}
@@ -1063,9 +1048,19 @@ function CartContent({
                 handleClearCart={handleClearCart}
                 onCompleteSale={onCompleteSale}
               />
-            </>
-          )}
         </div>
+      )}
+
+      {showPayment && (
+        <PaymentModal
+          items={items}
+          taxBreakdown={taxBreakdown}
+          discountType={discountType}
+          selectedPromoId={selectedPromoId}
+          promoPreview={promoPreview}
+          onComplete={onPaymentComplete}
+          onCancel={onPaymentCancel}
+        />
       )}
     </>
   );
@@ -1097,6 +1092,8 @@ function PaymentPanel({
   promoPreview,
   onComplete,
   onCancel,
+  variant = "inline",
+  onProcessingChange,
 }: {
   items: CartItem[];
   taxBreakdown: TaxBreakdown;
@@ -1105,6 +1102,10 @@ function PaymentPanel({
   promoPreview: PromoResult | null;
   onComplete: (result: TransactionResult) => void;
   onCancel: () => void;
+  // "modal": inside PaymentModal, which has its own back and close, and
+  // keeps Process Payment pinned while the form scrolls.
+  variant?: "inline" | "modal";
+  onProcessingChange?: (processing: boolean) => void;
 }) {
   const createTransaction = useMutation(api.pos.transactions.createTransaction);
   const currentUser = useQuery(api.auth.users.getCurrentUser);
@@ -1114,6 +1115,9 @@ function PaymentPanel({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [amountTendered, setAmountTendered] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  useEffect(() => {
+    onProcessingChange?.(isProcessing);
+  }, [isProcessing, onProcessingChange]);
   const [error, setError] = useState<string | null>(null);
   const [selectedFaId, setSelectedFaId] = useState<string>("none");
 
@@ -1319,72 +1323,24 @@ function PaymentPanel({
   const secondaryOptions = PAYMENT_OPTIONS.filter((o) => o.value !== paymentMethod);
 
   return (
-    <div className="border-t pt-4">
+    <div className={variant === "modal" ? "" : "border-t pt-4"}>
       {/* Back button */}
-      <button
-        onClick={onCancel}
-        disabled={isProcessing}
-        className="mb-3 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:pointer-events-none"
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Back to cart
-      </button>
+      {variant === "inline" && (
+        <button
+          onClick={onCancel}
+          disabled={isProcessing}
+          className="mb-3 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:pointer-events-none"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to cart
+        </button>
+      )}
 
       {/* Total due */}
       <div className="mb-4 text-center">
         <p className="text-sm text-muted-foreground">Amount Due</p>
         <p className="text-2xl font-bold">{formatCurrency(totalCentavos)}</p>
       </div>
-
-      {/* Customer / BIR details (optional; SC/PWD required for discounted sales) */}
-      <details className="mb-3 rounded-md border p-2">
-        <summary className="cursor-pointer text-sm font-medium">
-          {isDiscounted ? "Sold To & SC/PWD details" : "Sold To details (optional)"}
-        </summary>
-        <div className="mt-2 space-y-2">
-          <input
-            value={customerName}
-            onChange={(e) => setCustomerName(e.target.value)}
-            placeholder="Customer name"
-            disabled={isProcessing}
-            className="w-full rounded border px-2 py-1.5 text-sm"
-          />
-          <div className="flex gap-2">
-            <input
-              value={customerTin}
-              onChange={(e) => setCustomerTin(e.target.value)}
-              placeholder="TIN"
-              disabled={isProcessing}
-              className="w-1/2 rounded border px-2 py-1.5 text-sm"
-            />
-            <input
-              value={customerAddress}
-              onChange={(e) => setCustomerAddress(e.target.value)}
-              placeholder="Address"
-              disabled={isProcessing}
-              className="w-1/2 rounded border px-2 py-1.5 text-sm"
-            />
-          </div>
-          {isDiscounted && (
-            <div className="flex gap-2">
-              <input
-                value={scPwdName}
-                onChange={(e) => setScPwdName(e.target.value)}
-                placeholder={discountType === "senior" ? "Senior name" : "PWD name"}
-                disabled={isProcessing}
-                className="w-1/2 rounded border px-2 py-1.5 text-sm"
-              />
-              <input
-                value={scPwdId}
-                onChange={(e) => setScPwdId(e.target.value)}
-                placeholder={discountType === "senior" ? "OSCA/SC ID No." : "PWD ID No."}
-                disabled={isProcessing}
-                className="w-1/2 rounded border px-2 py-1.5 text-sm"
-              />
-            </div>
-          )}
-        </div>
-      </details>
 
       {/* Payment method selector */}
       <div className="mb-2 flex gap-1 rounded-md border p-1">
@@ -1624,6 +1580,56 @@ function PaymentPanel({
         </div>
       )}
 
+      {/* Customer / BIR details (optional; SC/PWD required for discounted sales) */}
+      <details className="mb-3 rounded-md border p-2">
+        <summary className="cursor-pointer text-sm font-medium">
+          {isDiscounted ? "Sold To & SC/PWD details" : "Sold To details (optional)"}
+        </summary>
+        <div className="mt-2 space-y-2">
+          <input
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Customer name"
+            disabled={isProcessing}
+            className="w-full rounded border px-2 py-1.5 text-sm"
+          />
+          <div className="flex gap-2">
+            <input
+              value={customerTin}
+              onChange={(e) => setCustomerTin(e.target.value)}
+              placeholder="TIN"
+              disabled={isProcessing}
+              className="w-1/2 rounded border px-2 py-1.5 text-sm"
+            />
+            <input
+              value={customerAddress}
+              onChange={(e) => setCustomerAddress(e.target.value)}
+              placeholder="Address"
+              disabled={isProcessing}
+              className="w-1/2 rounded border px-2 py-1.5 text-sm"
+            />
+          </div>
+          {isDiscounted && (
+            <div className="flex gap-2">
+              <input
+                value={scPwdName}
+                onChange={(e) => setScPwdName(e.target.value)}
+                placeholder={discountType === "senior" ? "Senior name" : "PWD name"}
+                disabled={isProcessing}
+                className="w-1/2 rounded border px-2 py-1.5 text-sm"
+              />
+              <input
+                value={scPwdId}
+                onChange={(e) => setScPwdId(e.target.value)}
+                placeholder={discountType === "senior" ? "OSCA/SC ID No." : "PWD ID No."}
+                disabled={isProcessing}
+                className="w-1/2 rounded border px-2 py-1.5 text-sm"
+              />
+            </div>
+          )}
+        </div>
+      </details>
+
       {/* Error message */}
       {error && (
         <div className="mb-3 whitespace-pre-line rounded-md border border-destructive bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -1631,21 +1637,164 @@ function PaymentPanel({
         </div>
       )}
 
-      {/* Process Payment button */}
-      <Button
-        className="h-14 w-full text-lg"
-        disabled={!canProcess || isProcessing}
-        onClick={handleProcess}
+      {/* Process Payment button — pinned in the modal while the form scrolls */}
+      <div className={variant === "modal" ? "sticky bottom-0 bg-card pb-4 pt-2" : ""}>
+        <Button
+          className="h-14 w-full text-lg"
+          disabled={!canProcess || isProcessing}
+          onClick={handleProcess}
+        >
+          {isProcessing ? (
+            <>
+              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+              Processing...
+            </>
+          ) : (
+            `Process Payment \u00B7 ${formatCurrency(totalCentavos)}`
+          )}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Payment Modal ────────────────────────────────────────────────────────────
+// Payment takes over the screen: the order on the left, read back to the
+// customer, and the payment on the right with Process Payment pinned. It
+// can't be closed while a payment is processing.
+
+function PaymentModal({
+  items,
+  taxBreakdown,
+  discountType,
+  selectedPromoId,
+  promoPreview,
+  onComplete,
+  onCancel,
+}: {
+  items: CartItem[];
+  taxBreakdown: TaxBreakdown;
+  discountType: DiscountType;
+  selectedPromoId: string | null;
+  promoPreview: PromoResult | null;
+  onComplete: (result: TransactionResult) => void;
+  onCancel: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  const isDiscounted = discountType !== "none";
+  const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
+  const total = taxBreakdown.totalCentavos - promoDiscount;
+  const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/50 sm:items-center sm:p-4"
+      onClick={() => !busy && onCancel()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Payment"
+        className="flex h-full w-full flex-col overflow-hidden bg-card shadow-xl sm:h-auto sm:max-h-[92vh] sm:max-w-5xl sm:rounded-xl sm:border"
+        onClick={(e) => e.stopPropagation()}
       >
-        {isProcessing ? (
-          <>
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-            Processing...
-          </>
-        ) : (
-          `Process Payment \u00B7 ${formatCurrency(totalCentavos)}`
-        )}
-      </Button>
+        <div className="flex items-center justify-between border-b px-5 py-3">
+          <h2 className="text-lg font-bold">Payment</h2>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            aria-label="Close payment"
+            className="rounded-full p-1.5 hover:bg-muted disabled:opacity-50"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] md:overflow-hidden">
+          {/* Order */}
+          <div className="flex min-h-0 flex-col border-b bg-muted/20 md:border-b-0 md:border-r">
+            <p className="px-5 pt-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Order · {itemCount} item{itemCount === 1 ? "" : "s"}
+            </p>
+            <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto px-5 py-3 text-sm">
+              {items.map((item) => (
+                <li key={item.variantId} className="flex items-baseline justify-between gap-3">
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{item.styleName}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {item.size} · {item.color} · {item.quantity} × {formatCurrency(item.unitPriceCentavos)}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-semibold tabular-nums">
+                    {formatCurrency(item.unitPriceCentavos * item.quantity)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="space-y-0.5 border-t px-5 py-3 text-sm">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Subtotal</span>
+                <span className="tabular-nums">{formatCurrency(taxBreakdown.subtotalCentavos)}</span>
+              </div>
+              {isDiscounted ? (
+                <div className="flex justify-between text-destructive">
+                  <span>Discount ({discountType === "senior" ? "SC" : "PWD"} 20%)</span>
+                  <span className="tabular-nums">-{formatCurrency(taxBreakdown.discountAmountCentavos)}</span>
+                </div>
+              ) : (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">VAT (12%)</span>
+                  <span className="tabular-nums">{formatCurrency(taxBreakdown.vatAmountCentavos)}</span>
+                </div>
+              )}
+              {promoDiscount > 0 && (
+                <div className="flex justify-between gap-2 text-orange-600">
+                  <span className="truncate" title={promoPreview?.description}>
+                    Promo ({promoPreview?.description})
+                  </span>
+                  <span className="shrink-0 tabular-nums">-{formatCurrency(promoDiscount)}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-1 text-lg font-bold">
+                <span>Total</span>
+                <span className="tabular-nums">{formatCurrency(total)}</span>
+              </div>
+              <button
+                onClick={onCancel}
+                disabled={busy}
+                className="mt-2 flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to cart
+              </button>
+            </div>
+          </div>
+
+          {/* Payment */}
+          <div className="min-h-0 px-5 pt-4 md:overflow-y-auto">
+            <PaymentPanel
+              items={items}
+              taxBreakdown={taxBreakdown}
+              discountType={discountType}
+              selectedPromoId={selectedPromoId}
+              promoPreview={promoPreview}
+              onComplete={onComplete}
+              onCancel={onCancel}
+              variant="modal"
+              onProcessingChange={setBusy}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1671,20 +1820,6 @@ function RushModeCart({
   onPaymentCancel: () => void;
   clearCart: () => void;
 }) {
-  if (showPayment) {
-    return (
-      <PaymentPanel
-        items={items}
-        taxBreakdown={taxBreakdown}
-        discountType="none"
-        selectedPromoId={null}
-        promoPreview={null}
-        onComplete={onPaymentComplete}
-        onCancel={onPaymentCancel}
-      />
-    );
-  }
-
   return (
     <>
       {/* Rush header */}
@@ -1754,6 +1889,17 @@ function RushModeCart({
           </Button>
         </div>
       </div>
+      {showPayment && (
+        <PaymentModal
+          items={items}
+          taxBreakdown={taxBreakdown}
+          discountType="none"
+          selectedPromoId={null}
+          promoPreview={null}
+          onComplete={onPaymentComplete}
+          onCancel={onPaymentCancel}
+        />
+      )}
     </>
   );
 }
