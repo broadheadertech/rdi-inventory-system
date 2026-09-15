@@ -3,10 +3,11 @@
 // A variant's base price is variants.priceCentavos. A branch sells at its own
 // price when it has a branchPrices row, and at the base price otherwise —
 // following the base when it changes. Resetting a branch price removes its
-// row. Every change is written to priceChanges, and each call to the audit log.
+// row. A branch price under the Base SRP is saved only once confirmed. Every
+// change is written to priceChanges, and each call to the audit log.
 
 import { v, ConvexError } from "convex/values";
-import { query, mutation, type QueryCtx } from "../_generated/server";
+import { query, mutation, type QueryCtx, type MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { requireRole, ADMIN_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
@@ -178,7 +179,9 @@ export const listMatchingVariantIds = query({
   },
 });
 
-// ─── changePrices ─────────────────────────────────────────────────────────────
+// ─── Planning a change ────────────────────────────────────────────────────────
+// What a change does to each product and branch, worked out without writing
+// anything — so the page's check before applying and the save itself agree.
 
 const priceOpValidator = v.union(
   v.object({ type: v.literal("set"), priceCentavos: v.number() }),
@@ -187,143 +190,225 @@ const priceOpValidator = v.union(
   v.object({ type: v.literal("reset") })
 );
 
+const changeArgs = {
+  variantIds: v.array(v.id("variants")),
+  target: v.union(
+    v.object({ kind: v.literal("base") }),
+    v.object({ kind: v.literal("branches"), branchIds: v.array(v.id("branches")) })
+  ),
+  op: priceOpValidator,
+  rounding: v.optional(v.union(v.literal("none"), v.literal("peso"), v.literal("end9"))),
+};
+
+type ChangeArgs = {
+  variantIds: Id<"variants">[];
+  target: { kind: "base" } | { kind: "branches"; branchIds: Id<"branches">[] };
+  op: PriceOp;
+  rounding?: Rounding;
+};
+
+type Skipped = {
+  variantId: Id<"variants">;
+  sku: string;
+  branchName: string | null;
+  reason: string;
+};
+
+/** One price that the change moves. `branch` is null for the Base SRP. */
+type PlannedCell = {
+  variant: Doc<"variants">;
+  branch: Doc<"branches"> | null;
+  own: Doc<"branchPrices"> | null;
+  current: number;
+  next: number;
+  /** A branch price that would sell under the product's Base SRP. */
+  belowBase: boolean;
+};
+
+async function planChange(
+  ctx: QueryCtx | MutationCtx,
+  args: ChangeArgs
+): Promise<{ cells: PlannedCell[]; unchanged: number; skipped: Skipped[] }> {
+  if (args.variantIds.length > MAX_CHANGE_VARIANTS) {
+    throw new ConvexError({
+      code: "INVALID_INPUT",
+      message: `Change at most ${MAX_CHANGE_VARIANTS} products at a time.`,
+    });
+  }
+  const op = args.op;
+  const rounding: Rounding = args.rounding ?? "none";
+  if (op.type === "reset" && args.target.kind === "base") {
+    throw new ConvexError({
+      code: "INVALID_INPUT",
+      message: "Only a branch price can be reset to the Base SRP.",
+    });
+  }
+  if (op.type === "set") {
+    const problem = invalidPrice(op.priceCentavos);
+    if (problem) throw new ConvexError({ code: "INVALID_INPUT", message: problem });
+  }
+
+  const branches: Doc<"branches">[] = [];
+  if (args.target.kind === "branches") {
+    if (args.target.branchIds.length === 0) {
+      throw new ConvexError({ code: "INVALID_INPUT", message: "Choose at least one branch." });
+    }
+    for (const id of args.target.branchIds.slice(0, MAX_BRANCH_COLUMNS)) {
+      const branch = await ctx.db.get(id);
+      if (!branch || !branch.isActive || branch.channel === "warehouse") {
+        throw new ConvexError({
+          code: "INVALID_INPUT",
+          message: "A chosen branch is inactive or is the warehouse.",
+        });
+      }
+      branches.push(branch);
+    }
+  }
+
+  const cells: PlannedCell[] = [];
+  const skipped: Skipped[] = [];
+  let unchanged = 0;
+
+  for (const variantId of args.variantIds) {
+    const variant = await ctx.db.get(variantId);
+    if (!variant || !variant.isActive) {
+      skipped.push({ variantId, sku: variant?.sku ?? "", branchName: null, reason: "Product not found or inactive." });
+      continue;
+    }
+    const base = variant.priceCentavos;
+
+    if (args.target.kind === "base") {
+      const next = applyPriceOp(base, base, op, rounding);
+      const problem = invalidPrice(next);
+      if (problem) skipped.push({ variantId, sku: variant.sku, branchName: null, reason: problem });
+      else if (next === base) unchanged++;
+      else cells.push({ variant, branch: null, own: null, current: base, next, belowBase: false });
+      continue;
+    }
+
+    for (const branch of branches) {
+      const own = await branchPriceRow(ctx, branch._id, variantId);
+      const current = own?.priceCentavos ?? base;
+
+      if (op.type === "reset") {
+        if (!own) unchanged++;
+        else cells.push({ variant, branch, own, current, next: base, belowBase: false });
+        continue;
+      }
+
+      const next = applyPriceOp(current, base, op, rounding);
+      const problem = invalidPrice(next);
+      if (problem) {
+        skipped.push({ variantId, sku: variant.sku, branchName: branch.name, reason: problem });
+      } else if (next === current) {
+        // Already selling at that price. A branch on the Base SRP stays on it,
+        // so it keeps following the Base SRP.
+        unchanged++;
+      } else {
+        cells.push({ variant, branch, own, current, next, belowBase: next < base });
+      }
+    }
+  }
+
+  return { cells, unchanged, skipped };
+}
+
+// ─── previewPriceChange ───────────────────────────────────────────────────────
+// What applying a change would do, without saving: how many prices move, and
+// which branch prices would drop under the Base SRP and need confirming.
+
+export const previewPriceChange = query({
+  args: changeArgs,
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ADMIN_ROLES);
+    const plan = await planChange(ctx, args);
+    const below = plan.cells.filter((c) => c.belowBase);
+    const examples: {
+      sku: string;
+      name: string;
+      branchName: string;
+      baseCentavos: number;
+      newCentavos: number;
+    }[] = [];
+    for (const c of below.slice(0, 10)) {
+      const style = await ctx.db.get(c.variant.styleId);
+      examples.push({
+        sku: c.variant.sku,
+        name: style ? `${style.name} · ${c.variant.color} · ${c.variant.size}` : c.variant.sku,
+        branchName: c.branch?.name ?? "",
+        baseCentavos: c.variant.priceCentavos,
+        newCentavos: c.next,
+      });
+    }
+    return {
+      changes: plan.cells.length,
+      unchanged: plan.unchanged,
+      skipped: plan.skipped.length,
+      belowBase: below.length,
+      belowBaseExamples: examples,
+    };
+  },
+});
+
+// ─── changePrices ─────────────────────────────────────────────────────────────
+
 export const changePrices = mutation({
   args: {
-    variantIds: v.array(v.id("variants")),
-    target: v.union(
-      v.object({ kind: v.literal("base") }),
-      v.object({ kind: v.literal("branches"), branchIds: v.array(v.id("branches")) })
-    ),
-    op: priceOpValidator,
-    rounding: v.optional(v.union(v.literal("none"), v.literal("peso"), v.literal("end9"))),
+    ...changeArgs,
+    // A branch price under the Base SRP is saved only when confirmed; otherwise
+    // it is skipped, so it can never happen by accident.
+    belowBase: v.optional(v.union(v.literal("allow"), v.literal("skip"))),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, ADMIN_ROLES);
-    if (args.variantIds.length > MAX_CHANGE_VARIANTS) {
-      throw new ConvexError({
-        code: "INVALID_INPUT",
-        message: `Change at most ${MAX_CHANGE_VARIANTS} products at a time.`,
-      });
-    }
-    const op = args.op as PriceOp;
-    const rounding: Rounding = args.rounding ?? "none";
-    if (op.type === "reset" && args.target.kind === "base") {
-      throw new ConvexError({
-        code: "INVALID_INPUT",
-        message: "Only a branch price can be reset to the base price.",
-      });
-    }
-    if (op.type === "set") {
-      const problem = invalidPrice(op.priceCentavos);
-      if (problem) throw new ConvexError({ code: "INVALID_INPUT", message: problem });
-    }
-
-    const branches: Doc<"branches">[] = [];
-    if (args.target.kind === "branches") {
-      if (args.target.branchIds.length === 0) {
-        throw new ConvexError({ code: "INVALID_INPUT", message: "Choose at least one branch." });
-      }
-      for (const id of args.target.branchIds.slice(0, MAX_BRANCH_COLUMNS)) {
-        const branch = await ctx.db.get(id);
-        if (!branch || !branch.isActive || branch.channel === "warehouse") {
-          throw new ConvexError({
-            code: "INVALID_INPUT",
-            message: "A chosen branch is inactive or is the warehouse.",
-          });
-        }
-        branches.push(branch);
-      }
-    }
-
+    const plan = await planChange(ctx, args);
+    const allowBelowBase = args.belowBase === "allow";
     const now = Date.now();
     let changed = 0;
-    let unchanged = 0;
-    const skipped: { variantId: Id<"variants">; sku: string; branchName: string | null; reason: string }[] = [];
+    let belowBaseSaved = 0;
+    const skipped = [...plan.skipped];
 
-    const log = (
-      variantId: Id<"variants">,
-      branchId: Id<"branches"> | undefined,
-      action: "set" | "reset",
-      oldPriceCentavos: number,
-      newPriceCentavos: number
-    ) =>
-      ctx.db.insert("priceChanges", {
-        variantId,
-        branchId,
-        action,
-        oldPriceCentavos,
-        newPriceCentavos,
+    for (const cell of plan.cells) {
+      const { variant, branch, own, current, next } = cell;
+
+      if (cell.belowBase && !allowBelowBase) {
+        skipped.push({
+          variantId: variant._id,
+          sku: variant.sku,
+          branchName: branch?.name ?? null,
+          reason: `Below the Base SRP (₱${(variant.priceCentavos / 100).toFixed(2)}) — not confirmed.`,
+        });
+        continue;
+      }
+
+      if (!branch) {
+        await ctx.db.patch(variant._id, { priceCentavos: next, updatedAt: now });
+      } else if (args.op.type === "reset") {
+        await ctx.db.delete(own!._id);
+      } else if (own) {
+        await ctx.db.patch(own._id, { priceCentavos: next, updatedById: user._id, updatedAt: now });
+      } else {
+        await ctx.db.insert("branchPrices", {
+          branchId: branch._id,
+          variantId: variant._id,
+          styleId: variant.styleId,
+          priceCentavos: next,
+          updatedById: user._id,
+          updatedAt: now,
+        });
+      }
+
+      await ctx.db.insert("priceChanges", {
+        variantId: variant._id,
+        branchId: branch?._id,
+        action: args.op.type === "reset" ? "reset" : "set",
+        oldPriceCentavos: current,
+        newPriceCentavos: next,
         changedById: user._id,
         changedAt: now,
       });
-
-    for (const variantId of args.variantIds) {
-      const variant = await ctx.db.get(variantId);
-      if (!variant || !variant.isActive) {
-        skipped.push({ variantId, sku: variant?.sku ?? "", branchName: null, reason: "Product not found or inactive." });
-        continue;
-      }
-      const base = variant.priceCentavos;
-
-      if (args.target.kind === "base") {
-        const next = applyPriceOp(base, base, op, rounding);
-        const problem = invalidPrice(next);
-        if (problem) {
-          skipped.push({ variantId, sku: variant.sku, branchName: null, reason: problem });
-          continue;
-        }
-        if (next === base) {
-          unchanged++;
-          continue;
-        }
-        await ctx.db.patch(variantId, { priceCentavos: next, updatedAt: now });
-        await log(variantId, undefined, "set", base, next);
-        changed++;
-        continue;
-      }
-
-      for (const branch of branches) {
-        const own = await branchPriceRow(ctx, branch._id, variantId);
-        const current = own?.priceCentavos ?? base;
-
-        if (op.type === "reset") {
-          if (!own) {
-            unchanged++;
-            continue;
-          }
-          await ctx.db.delete(own._id);
-          await log(variantId, branch._id, "reset", current, base);
-          changed++;
-          continue;
-        }
-
-        const next = applyPriceOp(current, base, op, rounding);
-        const problem = invalidPrice(next);
-        if (problem) {
-          skipped.push({ variantId, sku: variant.sku, branchName: branch.name, reason: problem });
-          continue;
-        }
-        // Already selling at that price. A branch on the base price stays on
-        // it, so it keeps following the base.
-        if (next === current) {
-          unchanged++;
-          continue;
-        }
-        if (own) {
-          await ctx.db.patch(own._id, { priceCentavos: next, updatedById: user._id, updatedAt: now });
-        } else {
-          await ctx.db.insert("branchPrices", {
-            branchId: branch._id,
-            variantId,
-            styleId: variant.styleId,
-            priceCentavos: next,
-            updatedById: user._id,
-            updatedAt: now,
-          });
-        }
-        await log(variantId, branch._id, "set", current, next);
-        changed++;
-      }
+      if (cell.belowBase) belowBaseSaved++;
+      changed++;
     }
 
     await _logAuditEntry(ctx, {
@@ -332,17 +417,19 @@ export const changePrices = mutation({
       entityType: "priceChanges",
       entityId: args.variantIds.length === 1 ? args.variantIds[0] : `${args.variantIds.length} products`,
       after: {
-        target: args.target.kind === "base" ? "base" : branches.map((b) => b.name),
-        op,
-        rounding,
+        target: args.target.kind,
+        branchIds: args.target.kind === "branches" ? args.target.branchIds : undefined,
+        op: args.op,
+        rounding: args.rounding ?? "none",
         products: args.variantIds.length,
         changed,
-        unchanged,
+        unchanged: plan.unchanged,
         skipped: skipped.length,
+        belowBaseConfirmed: belowBaseSaved,
       },
     });
 
-    return { changed, unchanged, skipped };
+    return { changed, unchanged: plan.unchanged, skipped };
   },
 });
 

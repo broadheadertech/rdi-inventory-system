@@ -9,7 +9,7 @@
 // convex/admin/prices.ts applies the change with the same arithmetic the
 // preview here uses (convex/_helpers/priceMath.ts).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useConvex, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { History, Loader2, RotateCcw, Search } from "lucide-react";
@@ -57,7 +57,11 @@ const ROUNDING_LABELS: Record<Rounding, string> = {
   end9: "Nearest price ending in 9",
 };
 
-type EditingCell = { variantId: Id<"variants">; branchId: Id<"branches"> | "base" };
+type EditingCell = {
+  variantId: Id<"variants">;
+  branchId: Id<"branches"> | "base";
+  baseCentavos: number;
+};
 
 function pesosToCentavos(input: string): number | null {
   const n = Number(input.replace(/[₱,\s]/g, ""));
@@ -172,6 +176,8 @@ export default function PricesPage() {
   const [editing, setEditing] = useState<EditingCell | null>(null);
   const [editValue, setEditValue] = useState("");
   const [savingCell, setSavingCell] = useState(false);
+  // The confirm dialog takes focus, which would blur the input and save twice.
+  const confirmingEdit = useRef(false);
 
   function startEdit(cell: EditingCell, currentCentavos: number) {
     setEditing(cell);
@@ -179,7 +185,7 @@ export default function PricesPage() {
   }
 
   async function saveEdit() {
-    if (!editing || savingCell) return;
+    if (!editing || savingCell || confirmingEdit.current) return;
     const cell = editing;
     const centavos = pesosToCentavos(editValue);
     const problem = centavos === null ? "Enter a price." : invalidPrice(centavos);
@@ -187,12 +193,26 @@ export default function PricesPage() {
       toast.error(problem);
       return;
     }
+    // A branch price under the Base SRP is allowed, but only on purpose.
+    const belowBase = cell.branchId !== "base" && centavos! < cell.baseCentavos;
+    if (belowBase) {
+      confirmingEdit.current = true;
+      const ok = window.confirm(
+        `${formatCurrency(centavos!)} is below the Base SRP of ${formatCurrency(cell.baseCentavos)}.\n\nSet this branch price anyway?`
+      );
+      confirmingEdit.current = false;
+      if (!ok) {
+        setEditing(null);
+        return;
+      }
+    }
     setSavingCell(true);
     try {
       const r = await changePrices({
         variantIds: [cell.variantId],
         target: cell.branchId === "base" ? { kind: "base" } : { kind: "branches", branchIds: [cell.branchId] },
         op: { type: "set", priceCentavos: centavos! },
+        belowBase: belowBase ? "allow" : "skip",
       });
       if (r.skipped.length > 0) toast.error(r.skipped[0].reason);
       setEditing(null);
@@ -239,11 +259,35 @@ export default function PricesPage() {
         const cell = targetKind === "base" ? null : r.prices.find((p) => p.branchId === firstBranch);
         const current = cell ? cell.priceCentavos : r.basePriceCentavos;
         const next = applyPriceOp(current, r.basePriceCentavos, op, usesRounding ? rounding : "none");
-        return { r, current, next, problem: invalidPrice(next) };
+        const belowBase = targetKind === "branches" && next < r.basePriceCentavos;
+        return { r, current, next, problem: invalidPrice(next), belowBase };
       });
   }, [op, rows, selected, allMatching, targetKind, targetBranchIds, rounding, usesRounding]);
 
-  async function applyBulk() {
+  type PendingBulk = {
+    ids: Id<"variants">[];
+    changes: number;
+    unchanged: number;
+    skipped: number;
+    belowBase: number;
+    examples: { sku: string; name: string; branchName: string; baseCentavos: number; newCentavos: number }[];
+  };
+  const [checking, setChecking] = useState(false);
+  const [pending, setPending] = useState<PendingBulk | null>(null);
+
+  const bulkTarget = () =>
+    targetKind === "base"
+      ? ({ kind: "base" } as const)
+      : ({ kind: "branches", branchIds: targetBranchIds } as const);
+  const perCall = () =>
+    targetKind === "base"
+      ? 100
+      : Math.max(1, Math.min(100, Math.floor(MAX_CELLS_PER_CALL / Math.max(1, targetBranchIds.length))));
+
+  // Works out what the change would do across the whole selection — nothing
+  // is saved — and asks for confirmation, calling out any branch price that
+  // would drop under the Base SRP.
+  async function checkBulk() {
     if (typeof op === "string") {
       toast.error(op);
       return;
@@ -252,37 +296,61 @@ export default function PricesPage() {
       toast.error("Choose at least one branch.");
       return;
     }
-    setApplying(true);
+    setChecking(true);
     try {
       const ids = allMatching
         ? (await convex.query(api.admin.prices.listMatchingVariantIds, filters)).variantIds
         : [...selected];
       if (ids.length === 0) return;
-
-      const where =
-        targetKind === "base"
-          ? "the Base SRP"
-          : `${targetBranchIds.length} branch${targetBranchIds.length === 1 ? "" : "es"}`;
-      if (
-        !window.confirm(
-          `${OP_LABELS[effectiveOpType]}${effectiveOpType === "reset" ? "" : ` ${opValue}`} — ${ids.length} product${ids.length === 1 ? "" : "s"}, ${where}.\n\nApply this change?`
-        )
-      ) {
+      const summary: PendingBulk = { ids, changes: 0, unchanged: 0, skipped: 0, belowBase: 0, examples: [] };
+      for (const part of chunk(ids, perCall())) {
+        const r = await convex.query(api.admin.prices.previewPriceChange, {
+          variantIds: part,
+          target: bulkTarget(),
+          op,
+          rounding: usesRounding ? rounding : "none",
+        });
+        summary.changes += r.changes;
+        summary.unchanged += r.unchanged;
+        summary.skipped += r.skipped;
+        summary.belowBase += r.belowBase;
+        if (summary.examples.length < 10) {
+          summary.examples.push(...r.belowBaseExamples.slice(0, 10 - summary.examples.length));
+        }
+      }
+      if (summary.changes === 0) {
+        toast.info(
+          summary.skipped > 0
+            ? `Nothing to change · ${summary.skipped} can't take this price`
+            : "Nothing to change — already at those prices."
+        );
         return;
       }
+      setPending(summary);
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setChecking(false);
+    }
+  }
 
-      const perCall =
-        targetKind === "base" ? 100 : Math.max(1, Math.min(100, Math.floor(MAX_CELLS_PER_CALL / targetBranchIds.length)));
-      setProgress({ done: 0, total: ids.length });
+  async function runBulk(belowBase: "allow" | "skip") {
+    if (!pending || typeof op === "string") return;
+    const ids = pending.ids;
+    setPending(null);
+    setApplying(true);
+    setProgress({ done: 0, total: ids.length });
+    try {
       let changed = 0;
       let unchanged = 0;
       const skipped: typeof lastSkipped = [];
-      for (const part of chunk(ids, perCall)) {
+      for (const part of chunk(ids, perCall())) {
         const r = await changePrices({
           variantIds: part,
-          target: targetKind === "base" ? { kind: "base" } : { kind: "branches", branchIds: targetBranchIds },
+          target: bulkTarget(),
           op,
           rounding: usesRounding ? rounding : "none",
+          belowBase,
         });
         changed += r.changed;
         unchanged += r.unchanged;
@@ -293,7 +361,7 @@ export default function PricesPage() {
       toast.success(
         `${changed} price${changed === 1 ? "" : "s"} changed` +
           (unchanged ? ` · ${unchanged} already at that price` : "") +
-          (skipped.length ? ` · ${skipped.length} skipped` : "")
+          (skipped.length ? ` · ${skipped.length} not changed` : "")
       );
       clearSelection();
     } catch (err) {
@@ -454,7 +522,7 @@ export default function PricesPage() {
                   inputMode="decimal"
                   value={opValue}
                   onChange={(e) => setOpValue(e.target.value)}
-                  placeholder={effectiveOpType.endsWith("Pct") ? "10" : "1,199.00"}
+                  placeholder={effectiveOpType.endsWith("Pct") ? "e.g. 10" : "e.g. 1,199.00"}
                   className="w-32"
                 />
               </div>
@@ -478,9 +546,9 @@ export default function PricesPage() {
               </div>
             )}
 
-            <Button onClick={applyBulk} disabled={applying || typeof op === "string"}>
-              {applying && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {applying ? `Applying ${progress.done} / ${progress.total}…` : "Apply"}
+            <Button onClick={checkBulk} disabled={applying || checking || typeof op === "string"}>
+              {(applying || checking) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {applying ? `Applying ${progress.done} / ${progress.total}…` : checking ? "Checking…" : "Apply"}
             </Button>
           </div>
 
@@ -517,13 +585,18 @@ export default function PricesPage() {
                 :
               </p>
               <ul className="space-y-0.5">
-                {preview.map(({ r, current, next, problem }) => (
+                {preview.map(({ r, current, next, problem, belowBase }) => (
                   <li key={r.variantId} className="flex flex-wrap gap-2">
                     <span className="font-mono">{r.sku}</span>
                     <span>
                       {formatCurrency(current)} → <span className="font-semibold">{formatCurrency(next)}</span>
                     </span>
                     {problem && <span className="text-red-600">{problem}</span>}
+                    {!problem && belowBase && (
+                      <span className="text-amber-700">
+                        below Base SRP {formatCurrency(r.basePriceCentavos)}
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -622,7 +695,7 @@ export default function PricesPage() {
                       )}
                       <button
                         title={branchId === "base" ? "Base SRP" : own ? "This branch's own price" : "Follows the Base SRP"}
-                        onClick={() => startEdit({ variantId: r.variantId, branchId }, centavos)}
+                        onClick={() => startEdit({ variantId: r.variantId, branchId, baseCentavos: r.basePriceCentavos }, centavos)}
                         className={cn(
                           "rounded px-1.5 py-0.5 tabular-nums hover:bg-muted",
                           branchId === "base" || own ? "font-semibold text-foreground" : "text-muted-foreground"
@@ -704,6 +777,68 @@ export default function PricesPage() {
           </Button>
         </div>
       </div>
+
+      {/* Confirm a bulk change */}
+      <Dialog open={pending !== null} onOpenChange={(open) => !open && setPending(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Apply this price change?</DialogTitle>
+            <DialogDescription>
+              {pending &&
+                `${OP_LABELS[effectiveOpType]}${effectiveOpType === "reset" ? "" : ` ${opValue}`} · ` +
+                  (targetKind === "base"
+                    ? "Base SRP"
+                    : `${targetBranchIds.length} branch${targetBranchIds.length === 1 ? "" : "es"}`)}
+            </DialogDescription>
+          </DialogHeader>
+          {pending && (
+            <div className="space-y-3 text-sm">
+              <p>
+                <span className="font-semibold">{pending.changes}</span> price
+                {pending.changes === 1 ? "" : "s"} will change
+                {pending.unchanged > 0 && ` · ${pending.unchanged} already at that price`}
+                {pending.skipped > 0 && ` · ${pending.skipped} can't take this price`}.
+              </p>
+              {pending.belowBase > 0 && (
+                <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                  <p className="font-medium">
+                    {pending.belowBase} of them would be below the Base SRP.
+                  </p>
+                  <ul className="max-h-40 space-y-0.5 overflow-y-auto text-xs">
+                    {pending.examples.map((e, i) => (
+                      <li key={i}>
+                        <span className="font-mono">{e.sku}</span> · {e.branchName}:{" "}
+                        <span className="font-semibold">{formatCurrency(e.newCentavos)}</span> (Base SRP{" "}
+                        {formatCurrency(e.baseCentavos)})
+                      </li>
+                    ))}
+                    {pending.belowBase > pending.examples.length && (
+                      <li>…and {pending.belowBase - pending.examples.length} more</li>
+                    )}
+                  </ul>
+                </div>
+              )}
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button variant="outline" onClick={() => setPending(null)}>
+                  Cancel
+                </Button>
+                {pending.belowBase > 0 ? (
+                  <>
+                    {pending.belowBase < pending.changes && (
+                      <Button variant="outline" onClick={() => runBulk("skip")}>
+                        Skip the {pending.belowBase} below Base SRP
+                      </Button>
+                    )}
+                    <Button onClick={() => runBulk("allow")}>Apply all {pending.changes}</Button>
+                  </>
+                ) : (
+                  <Button onClick={() => runBulk("skip")}>Apply</Button>
+                )}
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* History */}
       <Dialog open={historyFor !== null} onOpenChange={(open) => !open && setHistoryFor(null)}>
