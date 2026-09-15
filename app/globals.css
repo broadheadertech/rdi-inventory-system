@@ -255,3 +255,13 @@
     border-color: #000 !important;
   }
 }
+
+/* ─── Print portals ──────────────────────────────────────────────────────────
+   A receipt printed from the receipt modal prints a copy placed directly under
+   <body>. While that copy is there it is the only thing on the page, so the POS
+   screen behind the modal never comes out of the printer. */
+@media print {
+  body:has(> .print-portal) > *:not(.print-portal) {
+    display: none !important;
+  }
+}

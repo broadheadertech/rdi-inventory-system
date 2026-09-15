@@ -17,7 +17,6 @@ import {
   Play,
   XCircle,
   ArrowLeft,
-  Check,
   Loader2,
   Tag,
   X,
@@ -94,13 +93,6 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
     setViewingReceiptId(null);
   }, []);
 
-  const handleViewReceipt = useCallback(() => {
-    if (transactionResult) {
-      setViewingReceiptId(transactionResult.transactionId);
-      setTransactionResult(null);
-    }
-  }, [transactionResult]);
-
   if (variant === "desktop") {
     return (
       <div className="relative flex h-full w-full flex-col border-l bg-background">
@@ -143,10 +135,10 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
         />
         )}
         {transactionResult && (
-          <TransactionSuccess
-            result={transactionResult}
-            onDismiss={handleDismissSuccess}
-            onViewReceipt={handleViewReceipt}
+          <ReceiptViewer
+            transactionId={transactionResult.transactionId}
+            sale={transactionResult}
+            onClose={handleDismissSuccess}
           />
         )}
         {viewingReceiptId && (
@@ -174,12 +166,6 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
               <ReceiptViewer
                 transactionId={viewingReceiptId}
                 onClose={() => setViewingReceiptId(null)}
-              />
-            ) : transactionResult ? (
-              <TransactionSuccess
-                result={transactionResult}
-                onDismiss={handleDismissSuccess}
-                onViewReceipt={handleViewReceipt}
               />
             ) : isRushMode ? (
               <>
@@ -323,6 +309,14 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
           )}
         </div>
       </button>
+
+      {transactionResult && (
+        <ReceiptViewer
+          transactionId={transactionResult.transactionId}
+          sale={transactionResult}
+          onClose={handleDismissSuccess}
+        />
+      )}
 
       {showPayment && !transactionResult && (
         <PaymentModal
@@ -1904,142 +1898,3 @@ function RushModeCart({
   );
 }
 
-// ─── Transaction Success Overlay ────────────────────────────────────────────
-
-function TransactionSuccess({
-  result,
-  onDismiss,
-  onViewReceipt,
-}: {
-  result: TransactionResult;
-  onDismiss: () => void;
-  onViewReceipt: () => void;
-}) {
-  const sendDigitalReceipt = useMutation(api.pos.receipts.sendDigitalReceipt);
-  const [digitalMode, setDigitalMode] = useState<"email" | "sms" | null>(null);
-  const [destination, setDestination] = useState("");
-  const [sending, setSending] = useState(false);
-
-  useEffect(() => {
-    if (digitalMode) return; // Don't auto-dismiss while entering digital receipt info
-    const timer = setTimeout(onDismiss, 8000);
-    return () => clearTimeout(timer);
-  }, [onDismiss, digitalMode]);
-
-  async function handleSendDigital() {
-    if (!digitalMode || !destination.trim()) return;
-    setSending(true);
-    try {
-      await sendDigitalReceipt({
-        transactionId: result.transactionId,
-        type: digitalMode,
-        destination: destination.trim(),
-      });
-      toast.success(
-        digitalMode === "email"
-          ? `Receipt sent to ${destination}`
-          : `Receipt sent to ${destination}`
-      );
-      setDigitalMode(null);
-      setDestination("");
-    } catch {
-      toast.error("Failed to send receipt");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  return (
-    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-background/95">
-      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-        <Check className="h-8 w-8 text-green-600" />
-      </div>
-      <p className="mt-4 text-2xl font-bold">Sale Complete!</p>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Receipt #{result.receiptNumber}
-      </p>
-      {result.paymentMethod === "cash" && result.changeCentavos > 0 && (
-        <p className="mt-3 text-xl font-bold text-green-600">
-          Change: {formatCurrency(result.changeCentavos)}
-        </p>
-      )}
-      <p className="mt-2 text-lg font-semibold">
-        {formatCurrency(result.totalCentavos)}
-      </p>
-
-      {/* Digital receipt entry */}
-      {digitalMode && (
-        <div className="mt-4 w-72 rounded-lg border border-border bg-card p-4 space-y-3">
-          <p className="text-sm font-medium text-center">
-            {digitalMode === "email" ? "Email Receipt" : "SMS Receipt"}
-          </p>
-          <input
-            type={digitalMode === "email" ? "email" : "tel"}
-            placeholder={digitalMode === "email" ? "customer@email.com" : "09XX-XXX-XXXX"}
-            value={destination}
-            onChange={(e) => setDestination(e.target.value)}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-            autoFocus
-          />
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              className="flex-1"
-              onClick={handleSendDigital}
-              disabled={sending || !destination.trim()}
-            >
-              {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Send"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => { setDigitalMode(null); setDestination(""); }}
-            >
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Action buttons */}
-      {!digitalMode && (
-        <div className="mt-4 flex flex-col items-center gap-2">
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              className="min-h-14 gap-2"
-              onClick={onViewReceipt}
-            >
-              View Receipt
-            </Button>
-            <Button
-              variant="ghost"
-              className="min-h-14"
-              onClick={onDismiss}
-            >
-              Dismiss
-            </Button>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-xs"
-              onClick={() => setDigitalMode("email")}
-            >
-              Email Receipt
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-xs"
-              onClick={() => setDigitalMode("sms")}
-            >
-              SMS Receipt
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}

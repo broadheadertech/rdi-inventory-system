@@ -1,10 +1,12 @@
 "use client";
 
-import { Component, useState, type ReactNode } from "react";
+import { Component, useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
-import { Loader2, X, AlertCircle, Gift, Receipt } from "lucide-react";
+import type { FunctionReturnType } from "convex/server";
+import { Loader2, X, AlertCircle, Gift, Receipt, Printer, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatDateTime } from "@/lib/formatters";
@@ -34,6 +36,27 @@ const DownloadGiftPDFSection = dynamic(
   )}
 );
 
+// ─── Receipt modal ───────────────────────────────────────────────────────────
+// One modal for a receipt, whether the sale was just rung or is being looked
+// up again: the receipt (or gift receipt) on the left, and printing, PDF and
+// digital sending on the right. Printing prints a copy placed directly under
+// <body> (see .print-portal in globals.css), so only the receipt comes out of
+// the printer — not the POS screen behind it.
+//
+// After a sale the first print is the original. Any later print, and every
+// print of a receipt looked up again, is a reprint and is logged for BIR.
+
+type ReceiptData = NonNullable<FunctionReturnType<typeof api.pos.receipts.getReceiptData>>;
+type ReceiptTab = "receipt" | "gift";
+
+/** The sale that was just completed, when the modal opens straight after it. */
+export type SaleSummary = {
+  receiptNumber: string;
+  totalCentavos: number;
+  changeCentavos: number;
+  paymentMethod: string;
+};
+
 // ─── Error Boundary ─────────────────────────────────────────────────────────
 
 class ReceiptErrorBoundary extends Component<
@@ -50,17 +73,17 @@ class ReceiptErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/95">
-          <AlertCircle className="h-8 w-8 text-destructive" />
-          <p className="mt-2 text-sm font-medium text-destructive">
-            Failed to load receipt
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            The receipt could not be found or you do not have access.
-          </p>
-          <Button variant="outline" className="mt-4 min-h-14" onClick={this.props.onClose}>
-            Close
-          </Button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="flex w-full max-w-sm flex-col items-center rounded-xl border bg-card p-6 text-center shadow-xl">
+            <AlertCircle className="h-8 w-8 text-destructive" />
+            <p className="mt-2 text-sm font-medium text-destructive">Failed to load receipt</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              The receipt could not be found or you do not have access.
+            </p>
+            <Button variant="outline" className="mt-4 min-h-12" onClick={this.props.onClose}>
+              Close
+            </Button>
+          </div>
         </div>
       );
     }
@@ -68,64 +91,14 @@ class ReceiptErrorBoundary extends Component<
   }
 }
 
-// ─── Component ──────────────────────────────────────────────────────────────
+// ─── The receipt itself ──────────────────────────────────────────────────────
 
-export function ReceiptViewer({
-  transactionId,
-  onClose,
-}: {
-  transactionId: Id<"transactions">;
-  onClose: () => void;
-}) {
-  return (
-    <ReceiptErrorBoundary onClose={onClose}>
-      <ReceiptViewerInner transactionId={transactionId} onClose={onClose} />
-    </ReceiptErrorBoundary>
-  );
-}
-
-function ReceiptViewerInner({
-  transactionId,
-  onClose,
-}: {
-  transactionId: Id<"transactions">;
-  onClose: () => void;
-}) {
-  const [tab, setTab] = useState<"receipt" | "gift">("receipt");
-
-  const receiptData = useQuery(api.pos.receipts.getReceiptData, {
-    transactionId,
-  });
-  const logReprint = useMutation(api.pos.receipts.logReprint);
-
-  async function handleReprint() {
-    try {
-      await logReprint({ transactionId });
-    } catch {
-      // non-blocking — still let them print
-    }
-    window.print();
-  }
-
-  // Loading state
-  if (receiptData === undefined) {
-    return (
-      <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/95">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-        <p className="mt-2 text-sm text-muted-foreground">
-          Loading receipt...
-        </p>
-      </div>
-    );
-  }
-
-  const { transaction: txn, items, branch, business, businessAddress, cashierName } =
-    receiptData;
+function ReceiptDocument({ receiptData, tab }: { receiptData: ReceiptData; tab: ReceiptTab }) {
+  const { transaction: txn, items, branch, business, businessAddress, cashierName } = receiptData;
   const bir = receiptData.bir ?? {};
   const customer = receiptData.customer ?? {};
   const scPwd = receiptData.scPwd ?? {};
-  const isDiscounted =
-    txn.discountType === "senior" || txn.discountType === "pwd";
+  const isDiscounted = txn.discountType === "senior" || txn.discountType === "pwd";
 
   // Mirror ReceiptPDF: accredited only when a PTU / Accreditation No. exists.
   const accredited = !!(bir.accreditationNumber || bir.ptuNumber);
@@ -136,45 +109,7 @@ function ReceiptViewerInner({
   const fieldOrBlank = (v?: string) => (v && v.trim() ? v : "__________");
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-background">
-      {/* Top bar */}
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-lg font-bold">Receipt</h2>
-        <Button variant="ghost" size="icon" onClick={onClose}>
-          <X className="h-5 w-5" />
-        </Button>
-      </div>
-
-      {/* Tab switcher */}
-      <div className="flex border-b">
-        <button
-          onClick={() => setTab("receipt")}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors",
-            tab === "receipt"
-              ? "border-b-2 border-primary text-primary"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <Receipt className="h-4 w-4" />
-          Receipt
-        </button>
-        <button
-          onClick={() => setTab("gift")}
-          className={cn(
-            "flex flex-1 items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors",
-            tab === "gift"
-              ? "border-b-2 border-primary text-primary"
-              : "text-muted-foreground hover:text-foreground"
-          )}
-        >
-          <Gift className="h-4 w-4" />
-          Gift Receipt
-        </button>
-      </div>
-
-      {/* Scrollable receipt preview */}
-      <div className="flex-1 overflow-y-auto p-4">
+    <>
         {tab === "receipt" ? (
           /* ── Sales Invoice / Order Slip ── */
           <div className="thermal-receipt mx-auto w-full max-w-[320px] rounded-md border bg-white p-4 font-mono text-xs shadow-sm">
@@ -473,32 +408,187 @@ function ReceiptViewerInner({
             </div>
           </div>
         )}
-      </div>
+    </>
+  );
+}
 
-      {/* Digital receipt sending — only on the invoice tab */}
-      {tab === "receipt" && (
-        <div className="border-t p-4">
-          <p className="mb-2 text-sm font-medium">Send Digital Receipt</p>
-          <SendReceiptForm transactionId={transactionId} />
+// ─── Component ──────────────────────────────────────────────────────────────
+
+export function ReceiptViewer({
+  transactionId,
+  onClose,
+  sale,
+}: {
+  transactionId: Id<"transactions">;
+  onClose: () => void;
+  sale?: SaleSummary;
+}) {
+  return (
+    <ReceiptErrorBoundary onClose={onClose}>
+      <ReceiptViewerInner transactionId={transactionId} onClose={onClose} sale={sale} />
+    </ReceiptErrorBoundary>
+  );
+}
+
+function ReceiptViewerInner({
+  transactionId,
+  onClose,
+  sale,
+}: {
+  transactionId: Id<"transactions">;
+  onClose: () => void;
+  sale?: SaleSummary;
+}) {
+  const [tab, setTab] = useState<ReceiptTab>("receipt");
+  const [printedOnce, setPrintedOnce] = useState(false);
+  const receiptData = useQuery(api.pos.receipts.getReceiptData, { transactionId });
+  const logReprint = useMutation(api.pos.receipts.logReprint);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // The sales invoice printed straight after the sale is the original; any
+  // other print of it is a reprint. Gift receipts are not counted.
+  const isReprint = tab === "receipt" && (!sale || printedOnce);
+
+  async function handlePrint() {
+    if (isReprint) {
+      try {
+        await logReprint({ transactionId });
+      } catch {
+        // non-blocking — still let them print
+      }
+    }
+    if (tab === "receipt") setPrintedOnce(true);
+    // Let the print copy settle before the print dialog opens.
+    requestAnimationFrame(() => window.print());
+  }
+
+  const printLabel = tab === "gift" ? "Print gift receipt" : isReprint ? "Reprint receipt" : "Print receipt";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/50 sm:items-center sm:p-4 print:hidden"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Receipt"
+        className="flex h-full w-full flex-col overflow-hidden bg-card shadow-xl sm:h-auto sm:max-h-[92vh] sm:max-w-3xl sm:rounded-xl sm:border"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 border-b px-5 py-3">
+          {sale ? (
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-100">
+                <Check className="h-5 w-5 text-green-600" />
+              </div>
+              <div>
+                <p className="text-lg font-bold">Sale complete</p>
+                <p className="text-xs text-muted-foreground">
+                  Receipt #{sale.receiptNumber} · {formatCurrency(sale.totalCentavos)}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <h2 className="text-lg font-bold">
+              Receipt{receiptData ? ` #${receiptData.transaction.receiptNumber}` : ""}
+            </h2>
+          )}
+          <div className="flex items-center gap-3">
+            {sale && sale.paymentMethod === "cash" && sale.changeCentavos > 0 && (
+              <div className="text-right">
+                <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Change</p>
+                <p className="text-2xl font-bold tabular-nums text-green-600">
+                  {formatCurrency(sale.changeCentavos)}
+                </p>
+              </div>
+            )}
+            <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close receipt">
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
-      )}
 
-      {/* Bottom actions */}
-      <div className="border-t p-4 space-y-2">
-        {tab === "receipt" ? (
-          <>
-            <DownloadPDFSection receiptData={receiptData} />
-            <button
-              onClick={handleReprint}
-              className="w-full rounded-lg border py-2.5 text-sm font-medium hover:bg-muted transition-colors"
-            >
-              Reprint Receipt
-            </button>
-          </>
+        {receiptData === undefined ? (
+          <div className="flex flex-1 flex-col items-center justify-center py-16">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <p className="mt-2 text-sm text-muted-foreground">Loading receipt...</p>
+          </div>
         ) : (
-          <DownloadGiftPDFSection receiptData={receiptData} />
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_17rem] md:overflow-hidden">
+            {/* Receipt preview */}
+            <div className="flex min-h-0 flex-col border-b md:border-b-0 md:border-r">
+              <div className="flex border-b">
+                {(
+                  [
+                    { key: "receipt", label: "Receipt", icon: Receipt },
+                    { key: "gift", label: "Gift Receipt", icon: Gift },
+                  ] as const
+                ).map((t) => (
+                  <button
+                    key={t.key}
+                    onClick={() => setTab(t.key)}
+                    className={cn(
+                      "flex flex-1 items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors",
+                      tab === t.key
+                        ? "border-b-2 border-primary text-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <t.icon className="h-4 w-4" />
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto bg-muted/30 p-4">
+                <ReceiptDocument receiptData={receiptData} tab={tab} />
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex min-h-0 flex-col gap-3 p-4 md:overflow-y-auto">
+              <Button className="h-12 w-full gap-2 text-base" onClick={handlePrint}>
+                <Printer className="h-5 w-5" />
+                {printLabel}
+              </Button>
+              {tab === "receipt" ? (
+                <DownloadPDFSection receiptData={receiptData} />
+              ) : (
+                <DownloadGiftPDFSection receiptData={receiptData} />
+              )}
+              {tab === "receipt" && (
+                <div className="border-t pt-3">
+                  <p className="mb-2 text-sm font-medium">Send digital receipt</p>
+                  <SendReceiptForm transactionId={transactionId} />
+                </div>
+              )}
+              <div className="mt-auto pt-2">
+                <Button variant={sale ? "default" : "outline"} className="h-12 w-full" onClick={onClose}>
+                  {sale ? "New sale" : "Close"}
+                </Button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
+
+      {/* The copy that prints — directly under <body>, hidden on screen */}
+      {receiptData &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div className="print-portal hidden print:block">
+            <ReceiptDocument receiptData={receiptData} tab={tab} />
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
