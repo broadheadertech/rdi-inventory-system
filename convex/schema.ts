@@ -874,6 +874,48 @@ export default defineSchema({
     .index("by_branch_variant_received", ["branchId", "variantId", "receivedAt"])
     .index("by_branch_variant", ["branchId", "variantId"]),
 
+  // ─── Legacy stock uploads ──────────────────────────────────────────────────
+  // A stock movement report from the old system, uploaded for one month. Each
+  // row sets its branch's stock to the row's EndingBalance, and the row's
+  // movement columns are kept as that month's history.
+  legacyStockUploads: defineTable({
+    fileName: v.string(),
+    period: v.string(), // "YYYY-MM"
+    uploadedById: v.id("users"),
+    rowCount: v.number(), // rows sent to be applied
+    appliedCount: v.number(), // rows that changed a branch's stock
+    unchangedCount: v.number(), // rows whose stock already matched
+    skippedCount: v.number(),
+    unitsBefore: v.number(), // on hand before, across applied + unchanged rows
+    unitsAfter: v.number(),
+    status: v.union(v.literal("applying"), v.literal("completed")),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+  }).index("by_createdAt", ["createdAt"]),
+
+  legacyStockMovements: defineTable({
+    uploadId: v.id("legacyStockUploads"),
+    branchId: v.id("branches"),
+    variantId: v.id("variants"),
+    period: v.string(), // "YYYY-MM"
+    productCode: v.string(),
+    productDesc: v.optional(v.string()),
+    brand: v.optional(v.string()),
+    store: v.string(), // the STORE value as written in the file
+    beginningInv: v.number(),
+    sale: v.number(),
+    container: v.number(), // delivered from the warehouse
+    returned: v.number(), // customer returns ("Return")
+    movementOut: v.number(), // sent to other stores
+    movementIn: v.number(), // received from other stores
+    rpo: v.number(), // pulled out to the warehouse
+    endingBalance: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_upload", ["uploadId"])
+    .index("by_branch_period", ["branchId", "period"])
+    .index("by_branch_variant_period", ["branchId", "variantId", "period"]),
+
   // ─── Registered POS terminals (device binding) ────────────────────────────
   // One row per physical register. A device is enrolled once by a manager or
   // admin, receives a high-entropy deviceToken stored in its localStorage, and

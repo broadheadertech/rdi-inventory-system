@@ -40,7 +40,9 @@ import {
   Trash2,
   PackagePlus,
   Loader2,
+  FileSpreadsheet,
 } from "lucide-react";
+import Link from "next/link";
 import { StatusPill } from "@/components/inventory/StatusPill";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -680,11 +682,19 @@ function ReceiveStockTab() {
 export default function InventoryPage() {
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Inventory</h1>
-        <p className="text-sm text-muted-foreground">
-          View stock levels across branches and receive supplier deliveries.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Inventory</h1>
+          <p className="text-sm text-muted-foreground">
+            View stock levels across branches and receive supplier deliveries.
+          </p>
+        </div>
+        <Button asChild variant="outline">
+          <Link href="/admin/inventory/legacy-upload">
+            <FileSpreadsheet className="mr-2 h-4 w-4" />
+            Upload legacy stock
+          </Link>
+        </Button>
       </div>
 
       <Tabs defaultValue="stock-levels">
