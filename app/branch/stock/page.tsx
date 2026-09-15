@@ -218,7 +218,7 @@ export default function BranchStockPage() {
           <Input
             value={searchText}
             onChange={(e) => handleSearchChange(e.target.value)}
-            placeholder="Search by style name or SKU…"
+            placeholder="Search by style code, name or SKU…"
             className="w-full max-w-sm"
           />
           {searchText && (
@@ -304,7 +304,10 @@ export default function BranchStockPage() {
           <thead>
             <tr className="border-b bg-muted/50">
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                Style Name
+                Style Code
+              </th>
+              <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                Name
               </th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">
                 Brand
@@ -346,7 +349,7 @@ export default function BranchStockPage() {
             {stock === undefined &&
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} className="border-b animate-pulse">
-                  {Array.from({ length: 10 }).map((_, j) => (
+                  {Array.from({ length: 11 }).map((_, j) => (
                     <td key={j} className="px-4 py-3">
                       <div className="h-4 rounded bg-muted w-full" />
                     </td>
@@ -357,7 +360,7 @@ export default function BranchStockPage() {
             {/* Empty state */}
             {stock !== undefined && sortedStock.length === 0 && (
               <tr>
-                <td colSpan={10} className="px-4 py-12 text-center text-muted-foreground">
+                <td colSpan={11} className="px-4 py-12 text-center text-muted-foreground">
                   <p className="text-sm">No products match your filters.</p>
                   {hasActiveFilters && (
                     <Button
@@ -385,6 +388,7 @@ export default function BranchStockPage() {
                     : "transition-colors"
                 )}
               >
+                <td className="px-4 py-3 font-mono text-xs">{item.styleCode ?? "—"}</td>
                 <td className="px-4 py-3 font-medium">{item.styleName}</td>
                 <td className="px-4 py-3 text-muted-foreground">{item.brandName}</td>
                 <td className="px-4 py-3">{item.size}</td>

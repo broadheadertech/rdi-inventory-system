@@ -61,6 +61,7 @@ type InventoryRow = {
   inventoryId: Id<"inventory">;
   branchId: Id<"branches">;
   branchName: string;
+  styleCode: string | null;
   styleName: string;
   sku: string;
   size: string;
@@ -202,7 +203,7 @@ function StockLevelsTab() {
             <div className="relative flex-1 max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search by SKU or style..."
+                placeholder="Search by style code, name or SKU..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
@@ -241,7 +242,8 @@ function StockLevelsTab() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Style</TableHead>
+                  <TableHead>Style Code</TableHead>
+                  <TableHead>Name</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Size</TableHead>
                   <TableHead>Color</TableHead>
@@ -254,6 +256,9 @@ function StockLevelsTab() {
                 {pagination.paginatedData.length > 0 ? (
                   pagination.paginatedData.map((item) => (
                     <TableRow key={item.inventoryId}>
+                      <TableCell className="font-mono text-xs">
+                        {item.styleCode ?? "—"}
+                      </TableCell>
                       <TableCell className="font-medium">
                         {item.styleName}
                       </TableCell>
@@ -285,7 +290,7 @@ function StockLevelsTab() {
                 ) : (
                   <TableRow>
                     <TableCell
-                      colSpan={7}
+                      colSpan={8}
                       className="text-center text-muted-foreground py-8"
                     >
                       {searchQuery || statusFilter !== "all"

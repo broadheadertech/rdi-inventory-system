@@ -66,7 +66,8 @@ export const getBranchStock = query({
           const needle = args.searchText.slice(0, 200).toLowerCase();
           const matchesName = style.name.toLowerCase().includes(needle);
           const matchesSku = variant.sku.toLowerCase().includes(needle);
-          if (!matchesName && !matchesSku) return null;
+          const matchesCode = style.styleCode?.toLowerCase().includes(needle) ?? false;
+          if (!matchesName && !matchesSku && !matchesCode) return null;
         }
 
         // Load brand only for items that pass all filters
@@ -77,6 +78,7 @@ export const getBranchStock = query({
           variantId: variant._id,
           styleId: style._id,
           styleName: style.name,
+          styleCode: style.styleCode ?? null,
           brandId: resolvedBrandId,
           brandName: brand?.name ?? "Unknown",
           categoryId: style.categoryId,
@@ -222,7 +224,8 @@ export const getAllInventory = query({
           const needle = args.searchText.slice(0, 200).toLowerCase();
           const matchesName = style.name.toLowerCase().includes(needle);
           const matchesSku = variant.sku.toLowerCase().includes(needle);
-          if (!matchesName && !matchesSku) return null;
+          const matchesCode = style.styleCode?.toLowerCase().includes(needle) ?? false;
+          if (!matchesName && !matchesSku && !matchesCode) return null;
         }
 
         const brand = style.brandId
@@ -237,6 +240,7 @@ export const getAllInventory = query({
           variantId: variant._id,
           styleId: style._id,
           styleName: style.name,
+          styleCode: style.styleCode ?? null,
           brandName: brand?.name ?? "Unknown",
           categoryName: category?.name ?? "",
           size: variant.size,
@@ -286,6 +290,7 @@ export const searchVariants = query({
             size: variant.size,
             color: variant.color,
             styleName: style.name,
+            styleCode: style.styleCode ?? null,
             priceCentavos: variant.priceCentavos,
             costPriceCentavos: variant.costPriceCentavos ?? 0,
           };
@@ -344,6 +349,7 @@ export const searchBranchInventory = query({
           size: variant.size,
           color: variant.color,
           styleName: style.name,
+          styleCode: style.styleCode ?? null,
           availableQty: quantity,
         };
       })
