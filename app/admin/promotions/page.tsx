@@ -342,46 +342,83 @@ export default function PromotionsPage() {
 
   // ── Scope summary for table ─────────────────────────────────────────────
 
+  // What a promotion covers, in plain words — "All Men's Aeropostale products ·
+  // all branches", "Aeropostale — Aero Walking Short · Manila Flagship". Names
+  // rather than counts, so a promo named for shorts but scoped to a whole
+  // brand is obvious before it goes live.
   function scopeSummary(promo: {
     branchIds: Id<"branches">[];
     branchClassifications?: string[];
     brandIds: Id<"brands">[];
     categoryIds?: Id<"categories">[];
     styleIds?: Id<"styles">[];
+    variantIds?: Id<"variants">[];
     genders?: string[];
     colors?: string[];
     sizes?: string[];
     agingTiers?: string[];
   }): string {
-    const parts: string[] = [];
-    const hasClassifications = promo.branchClassifications && promo.branchClassifications.length > 0;
-    const hasBranchIds = promo.branchIds.length > 0;
-    if (!hasClassifications && !hasBranchIds) {
-      parts.push("All branches");
+    const names = (list: { _id: string; name: string }[] | undefined, ids: string[], max = 3) => {
+      const found = ids.map((id) => list?.find((x) => x._id === id)?.name ?? "…");
+      return found.length > max
+        ? `${found.slice(0, max).join(", ")} +${found.length - max} more`
+        : found.join(", ");
+    };
+    const GENDERS: Record<string, string> = {
+      mens: "Men's",
+      womens: "Women's",
+      unisex: "Unisex",
+      kids: "Kids'",
+      boys: "Boys'",
+      girls: "Girls'",
+    };
+
+    const lead = [
+      (promo.genders ?? []).map((g) => GENDERS[g] ?? g).join(" / "),
+      promo.brandIds.length > 0 ? names(brands, promo.brandIds) : "",
+      promo.categoryIds && promo.categoryIds.length > 0 ? names(categories, promo.categoryIds) : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    let product: string;
+    if (promo.styleIds && promo.styleIds.length > 0) {
+      product = `${lead ? `${lead} — ` : ""}${names(styles, promo.styleIds)}`;
+    } else if (promo.variantIds && promo.variantIds.length > 0) {
+      const n = promo.variantIds.length;
+      product = `${lead ? `${lead} — ` : ""}${n} specific SKU${n === 1 ? "" : "s"}`;
     } else {
-      const branchParts: string[] = [];
-      if (hasClassifications) {
-        const classLabels: Record<string, string> = { premium: "Premium", aclass: "A-Class", bnc: "BNC", outlet: "Outlet" };
-        branchParts.push(promo.branchClassifications!.map((c) => classLabels[c] ?? c).join(", "));
-      }
-      if (hasBranchIds) {
-        branchParts.push(`${promo.branchIds.length} branch${promo.branchIds.length !== 1 ? "es" : ""}`);
-      }
-      parts.push(branchParts.join(" + "));
+      product = lead ? `All ${lead} products` : "All products";
     }
-    const productParts: string[] = [];
-    if (promo.brandIds.length > 0) productParts.push(`${promo.brandIds.length} brand(s)`);
-    if (promo.categoryIds && promo.categoryIds.length > 0) productParts.push(`${promo.categoryIds.length} cat(s)`);
-    if (promo.styleIds && promo.styleIds.length > 0) productParts.push(`${promo.styleIds.length} style(s)`);
-    if (promo.genders && promo.genders.length > 0) productParts.push(promo.genders.join(", "));
-    if (promo.colors && promo.colors.length > 0) productParts.push(`${promo.colors.length} color(s)`);
-    if (promo.sizes && promo.sizes.length > 0) productParts.push(`${promo.sizes.length} size(s)`);
-    parts.push(productParts.length > 0 ? productParts.join(", ") : "All products");
+    if (promo.colors && promo.colors.length > 0) product += ` in ${promo.colors.join(", ")}`;
+    if (promo.sizes && promo.sizes.length > 0) product += ` (sizes ${promo.sizes.join(", ")})`;
     if (promo.agingTiers && promo.agingTiers.length > 0) {
-      const tierLabels: Record<string, string> = { green: "Green", yellow: "Yellow", red: "Red" };
-      parts.push(promo.agingTiers.map((t) => tierLabels[t] ?? t).join(", ") + " stock");
+      product += ` · ${promo.agingTiers.join("/")} aging stock only`;
     }
-    return parts.join(" / ");
+
+    const classLabels: Record<string, string> = { premium: "Premium", aclass: "A-Class", bnc: "BNC", outlet: "Outlet" };
+    const where: string[] = [];
+    if (promo.branchClassifications && promo.branchClassifications.length > 0) {
+      where.push(`${promo.branchClassifications.map((c) => classLabels[c] ?? c).join(", ")} branches`);
+    }
+    if (promo.branchIds.length > 0) where.push(names(branches, promo.branchIds));
+
+    return `${product.charAt(0).toUpperCase()}${product.slice(1)} · ${where.length > 0 ? where.join(" + ") : "all branches"}`;
+  }
+
+  /** The scope the form describes right now, for its "Applies to" line. */
+  function formScope() {
+    return {
+      branchIds: form.branchScopeMode === "specific" ? form.branchIds : [],
+      branchClassifications: form.branchScopeMode === "byClassification" ? form.branchClassifications : [],
+      brandIds: form.allProducts ? [] : form.brandIds,
+      categoryIds: form.allProducts ? [] : form.categoryIds,
+      styleIds: form.allProducts ? [] : form.styleIds,
+      genders: form.allProducts ? [] : form.genders,
+      colors: form.allProducts ? [] : form.selectedColors,
+      sizes: form.allProducts ? [] : form.selectedSizes,
+      agingTiers: form.allStock ? [] : form.agingTiers,
+    };
   }
 
   // ── Form helpers ────────────────────────────────────────────────────────
@@ -1815,6 +1852,12 @@ export default function PromotionsPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* What this promotion will cover, as the POS will apply it */}
+          <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+            <span className="font-medium">Applies to: </span>
+            <span className="text-muted-foreground">{scopeSummary(formScope())}</span>
           </div>
 
           <DialogFooter>
