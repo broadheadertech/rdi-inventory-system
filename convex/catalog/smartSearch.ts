@@ -1,6 +1,7 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Smart Search (No Auth Required) ─────────────────────────────────────────
 // Lightweight autocomplete query for the customer-facing search bar.
@@ -18,6 +19,7 @@ type SearchResult = {
 export const searchProducts = query({
   args: { term: v.string() },
   handler: async (ctx, args): Promise<SearchResult[]> => {
+    const online = await onlinePricing(ctx);
     const term = args.term.toLowerCase().trim();
     if (term.length < 2) return [];
 
@@ -70,7 +72,7 @@ export const searchProducts = query({
           id: String(style._id),
           name: style.name,
           brandName: brand?.name,
-          priceCentavos: style.basePriceCentavos,
+          priceCentavos: await online.style(style),
           imageUrl: imageUrl ?? undefined,
         };
       })

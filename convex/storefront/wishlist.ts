@@ -2,12 +2,14 @@ import { query, mutation } from "../_generated/server";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import { Doc } from "../_generated/dataModel";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 export const getMyWishlist = query({
   args: {},
   handler: async (ctx) => {
+    const online = await onlinePricing(ctx);
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
 
@@ -67,7 +69,7 @@ export const getMyWishlist = query({
           brandName: brand?.name ?? "",
           color: variant.color,
           size: variant.size,
-          priceCentavos: variant.priceCentavos,
+          priceCentavos: await online.variant(variant),
           imageUrl,
           brandLogoUrl,
           totalStock,
@@ -212,6 +214,7 @@ export const generateShareLink = mutation({
 export const getSharedWishlist = query({
   args: { token: v.string() },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     const customer = await ctx.db
       .query("customers")
       .withIndex("by_wishlistShareToken", (q) =>
@@ -258,7 +261,7 @@ export const getSharedWishlist = query({
           brandName: brand?.name ?? "",
           color: variant.color,
           size: variant.size,
-          priceCentavos: variant.priceCentavos,
+          priceCentavos: await online.variant(variant),
           imageUrl,
           brandLogoUrl,
         };

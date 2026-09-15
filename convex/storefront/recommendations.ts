@@ -1,6 +1,7 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── "Complete the Look" Cross-Sell Recommendations ─────────────────────────
 // Suggests complementary items that are currently in stock to create a complete
@@ -36,6 +37,7 @@ function getComplementaryKeywords(catName: string): string[] {
 export const getCompleteTheLook = query({
   args: { styleId: v.id("styles") },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     // 1. Load the source style
     const style = await ctx.db.get(args.styleId);
     if (!style || !style.isActive) return [];
@@ -137,7 +139,7 @@ export const getCompleteTheLook = query({
           styleName: s.name,
           brandName: brand.name,
           categoryName: s.categoryName,
-          priceCentavos: s.basePriceCentavos,
+          priceCentavos: await online.style(s),
           imageUrl,
         };
       })
@@ -155,6 +157,7 @@ export const getCompleteTheLook = query({
 export const getFrequentlyBoughtTogether = query({
   args: { styleId: v.id("styles") },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     // 1. Load the source style
     const style = await ctx.db.get(args.styleId);
     if (!style || !style.isActive) return [];
@@ -250,7 +253,7 @@ export const getFrequentlyBoughtTogether = query({
           name: s.name,
           brandName: brand?.name ?? "Unknown",
           primaryImageUrl,
-          basePriceCentavos: s.basePriceCentavos,
+          basePriceCentavos: await online.style(s),
           defaultVariantId: defaultVariant?._id ?? null,
         };
       })

@@ -4,6 +4,7 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { POS_ROLES, BRANCH_MANAGEMENT_ROLES } from "../_helpers/permissions";
 import { requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { branchPrice } from "../_helpers/branchPricing";
 
 // ─── Queries ────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,7 @@ export const listBranchReservations = query({
           styleName: style?.name ?? "Unknown",
           size: variant?.size ?? "",
           color: variant?.color ?? "",
-          priceCentavos: variant?.priceCentavos ?? 0,
+          priceCentavos: variant ? await branchPrice(ctx, r.branchId, variant) : 0,
           branchName: branch?.name ?? "Unknown",
         };
       })

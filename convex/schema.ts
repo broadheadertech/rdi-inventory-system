@@ -874,6 +874,36 @@ export default defineSchema({
     .index("by_branch_variant_received", ["branchId", "variantId", "receivedAt"])
     .index("by_branch_variant", ["branchId", "variantId"]),
 
+  // ─── Branch prices ─────────────────────────────────────────────────────────
+  // A branch's own selling price for a variant. With no row the branch sells at
+  // the variant's base price (variants.priceCentavos), and follows it when the
+  // base changes. The online store is the branch on the "online" channel.
+  branchPrices: defineTable({
+    branchId: v.id("branches"),
+    variantId: v.id("variants"),
+    styleId: v.id("styles"), // for pricing a style's card without reading every variant
+    priceCentavos: v.number(),
+    updatedById: v.id("users"),
+    updatedAt: v.number(),
+  })
+    .index("by_branch_variant", ["branchId", "variantId"])
+    .index("by_branch_style", ["branchId", "styleId"])
+    .index("by_branch", ["branchId"])
+    .index("by_variant", ["variantId"]),
+
+  // Every price change, base or branch: who set a price, from what, and when.
+  priceChanges: defineTable({
+    variantId: v.id("variants"),
+    branchId: v.optional(v.id("branches")), // absent: the base price
+    action: v.union(v.literal("set"), v.literal("reset")), // reset: back to the base price
+    oldPriceCentavos: v.number(), // the price in effect before
+    newPriceCentavos: v.number(), // the price in effect after
+    changedById: v.id("users"),
+    changedAt: v.number(),
+  })
+    .index("by_variant", ["variantId", "changedAt"])
+    .index("by_changedAt", ["changedAt"]),
+
   // ─── Legacy stock uploads ──────────────────────────────────────────────────
   // A stock movement report from the old system, uploaded for one month. Each
   // row sets its branch's stock to the row's EndingBalance, and the row's

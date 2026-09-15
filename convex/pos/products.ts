@@ -2,6 +2,7 @@ import { v, ConvexError } from "convex/values";
 import { query } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireRole, POS_ROLES } from "../_helpers/permissions";
+import { branchPrice } from "../_helpers/branchPricing";
 
 // Helper: resolve brandId from a style (new: style.brandId, legacy: category.brandId)
 async function resolveBrandId(
@@ -65,6 +66,16 @@ export const searchPOSProducts = query({
       for (const inv of inventory) {
         inventoryByVariant[inv.variantId] = inv.quantity;
       }
+    }
+
+    // 2b. The branch's own prices; everything else sells at its base price.
+    const ownPriceByVariant = new Map<string, number>();
+    if (branchId) {
+      const rows = await ctx.db
+        .query("branchPrices")
+        .withIndex("by_branch", (q) => q.eq("branchId", branchId))
+        .collect();
+      for (const r of rows) ownPriceByVariant.set(r.variantId, r.priceCentavos);
     }
 
     // 3. Batch-load primary images
@@ -158,16 +169,20 @@ export const searchPOSProducts = query({
         sku: v.sku,
         size: v.size,
         color: v.color,
-        priceCentavos: v.priceCentavos,
+        priceCentavos: ownPriceByVariant.get(v._id) ?? v.priceCentavos,
         stock: inventoryByVariant[v._id] ?? 0,
       }));
+      const hasOwnPrice = variants.some((v) => ownPriceByVariant.has(v._id));
 
       results.push({
         styleId: style._id,
         styleName: style.name,
         brandName: brand?.name ?? "",
         categoryName: category?.name ?? "",
-        basePriceCentavos: style.basePriceCentavos,
+        // The card's price: the style's, unless this branch prices a size itself.
+        basePriceCentavos: hasOwnPrice
+          ? Math.min(...sizes.map((s) => s.priceCentavos))
+          : style.basePriceCentavos,
         imageUrl: imageUrlByStyle[styleId],
         sizes,
       });
@@ -304,7 +319,7 @@ async function resolveVariantForPOS(
     barcode: variant.barcode ?? "",
     size: variant.size,
     color: variant.color,
-    priceCentavos: variant.priceCentavos,
+    priceCentavos: await branchPrice(ctx, branchId, variant),
     styleName: style.name,
     brandName: brand.name,
     categoryName,

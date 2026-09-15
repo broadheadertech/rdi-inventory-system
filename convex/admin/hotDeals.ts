@@ -2,6 +2,7 @@ import { v, ConvexError } from "convex/values";
 import { query, mutation } from "../_generated/server";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Queries ────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,7 @@ export const listHotDeals = query({
 export const getActiveHotDeals = query({
   args: {},
   handler: async (ctx) => {
+    const online = await onlinePricing(ctx);
     const now = Date.now();
     const all = await ctx.db
       .query("hotDeals")
@@ -86,7 +88,7 @@ export const getActiveHotDeals = query({
         const activeVariants = variants.filter((v) => v.isActive);
         const minPrice =
           activeVariants.length > 0
-            ? Math.min(...activeVariants.map((v) => v.priceCentavos))
+            ? Math.min(...(await Promise.all(activeVariants.map((v) => online.variant(v)))))
             : style.basePriceCentavos;
 
         return {
@@ -97,7 +99,7 @@ export const getActiveHotDeals = query({
           label: deal.label,
           imageUrl,
           brandLogoUrl,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           minPriceCentavos: minPrice,
           sortOrder: deal.sortOrder,
         };

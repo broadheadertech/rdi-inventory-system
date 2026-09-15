@@ -8,6 +8,7 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireRole, ADMIN_ROLES, BRANCH_VIEW_ROLES } from "../_helpers/permissions";
 import { GARMENT_SIZE_ORDER } from "../_helpers/constants";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { branchPrice } from "../_helpers/branchPricing";
 
 export const getBranchStock = query({
   args: {
@@ -84,7 +85,7 @@ export const getBranchStock = query({
           color: variant.color,
           gender: variant.gender ?? null,
           sku: variant.sku,
-          priceCentavos: variant.priceCentavos,
+          priceCentavos: await branchPrice(ctx, inv.branchId, variant),
           quantity: inv.quantity,
           lowStockThreshold: inv.lowStockThreshold ?? 5,
           updatedAt: inv.updatedAt,
@@ -241,7 +242,7 @@ export const getAllInventory = query({
           size: variant.size,
           color: variant.color,
           sku: variant.sku,
-          priceCentavos: variant.priceCentavos,
+          priceCentavos: await branchPrice(ctx, inv.branchId, variant),
           quantity: inv.quantity,
           lowStockThreshold: inv.lowStockThreshold ?? 5,
           updatedAt: inv.updatedAt,

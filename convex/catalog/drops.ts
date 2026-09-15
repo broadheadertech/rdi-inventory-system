@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { query, mutation } from "../_generated/server";
 import { requireRole } from "../_helpers/permissions";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 const ADMIN_ROLES = ["admin"] as const;
 
@@ -45,6 +46,7 @@ export const getUpcomingDrops = query({
 export const listExclusiveDrops = query({
   args: {},
   handler: async (ctx) => {
+    const online = await onlinePricing(ctx);
     await requireRole(ctx, [...ADMIN_ROLES]);
 
     const styles = await ctx.db.query("styles").collect();
@@ -71,7 +73,7 @@ export const listExclusiveDrops = query({
         name: style.name,
         brandName: brand?.name ?? "Unknown",
         categoryName: category?.name ?? "Unknown",
-        priceCentavos: style.basePriceCentavos,
+        priceCentavos: await online.style(style),
         exclusiveBranchIds: style.exclusiveBranchIds ?? [],
         exclusiveBranchNames: branchNames,
         isActive: style.isActive,

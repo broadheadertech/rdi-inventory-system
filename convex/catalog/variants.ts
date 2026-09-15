@@ -321,6 +321,18 @@ export const updateVariant = mutation({
       updatedAt: Date.now(),
     });
 
+    // Base price edits belong in the price history with the Prices page's.
+    if (args.priceCentavos !== undefined && args.priceCentavos !== existing.priceCentavos) {
+      await ctx.db.insert("priceChanges", {
+        variantId: args.variantId,
+        action: "set",
+        oldPriceCentavos: existing.priceCentavos,
+        newPriceCentavos: args.priceCentavos,
+        changedById: user._id,
+        changedAt: Date.now(),
+      });
+    }
+
     await _logAuditEntry(ctx, {
       action: "variant.update",
       userId: user._id,

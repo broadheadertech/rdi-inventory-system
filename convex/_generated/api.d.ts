@@ -9,10 +9,12 @@
  */
 
 import type * as _helpers_auditLog from "../_helpers/auditLog.js";
+import type * as _helpers_branchPricing from "../_helpers/branchPricing.js";
 import type * as _helpers_constants from "../_helpers/constants.js";
 import type * as _helpers_internalInvoice from "../_helpers/internalInvoice.js";
 import type * as _helpers_passwordHash from "../_helpers/passwordHash.js";
 import type * as _helpers_permissions from "../_helpers/permissions.js";
+import type * as _helpers_priceMath from "../_helpers/priceMath.js";
 import type * as _helpers_promoCalculations from "../_helpers/promoCalculations.js";
 import type * as _helpers_requireTerminal from "../_helpers/requireTerminal.js";
 import type * as _helpers_taxCalculations from "../_helpers/taxCalculations.js";
@@ -27,6 +29,7 @@ import type * as admin_cashierAccountsActions from "../admin/cashierAccountsActi
 import type * as admin_cashierReports from "../admin/cashierReports.js";
 import type * as admin_colors from "../admin/colors.js";
 import type * as admin_hotDeals from "../admin/hotDeals.js";
+import type * as admin_prices from "../admin/prices.js";
 import type * as admin_promotions from "../admin/promotions.js";
 import type * as admin_settings from "../admin/settings.js";
 import type * as admin_sizes from "../admin/sizes.js";
@@ -173,10 +176,12 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "_helpers/auditLog": typeof _helpers_auditLog;
+  "_helpers/branchPricing": typeof _helpers_branchPricing;
   "_helpers/constants": typeof _helpers_constants;
   "_helpers/internalInvoice": typeof _helpers_internalInvoice;
   "_helpers/passwordHash": typeof _helpers_passwordHash;
   "_helpers/permissions": typeof _helpers_permissions;
+  "_helpers/priceMath": typeof _helpers_priceMath;
   "_helpers/promoCalculations": typeof _helpers_promoCalculations;
   "_helpers/requireTerminal": typeof _helpers_requireTerminal;
   "_helpers/taxCalculations": typeof _helpers_taxCalculations;
@@ -191,6 +196,7 @@ declare const fullApi: ApiFromModules<{
   "admin/cashierReports": typeof admin_cashierReports;
   "admin/colors": typeof admin_colors;
   "admin/hotDeals": typeof admin_hotDeals;
+  "admin/prices": typeof admin_prices;
   "admin/promotions": typeof admin_promotions;
   "admin/settings": typeof admin_settings;
   "admin/sizes": typeof admin_sizes;

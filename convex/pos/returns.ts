@@ -5,6 +5,7 @@ import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { requireShiftForSale } from "./shifts";
+import { branchPrice } from "../_helpers/branchPricing";
 
 // ─── Return reasons ─────────────────────────────────────────────────────────
 
@@ -340,13 +341,15 @@ export const processReturn = mutation({
           });
         }
 
-        const lineTotal = variant.priceCentavos * exchangeItem.quantity;
+        // The replacement sells at this branch's price.
+        const unitPriceCentavos = await branchPrice(ctx, branchId, variant);
+        const lineTotal = unitPriceCentavos * exchangeItem.quantity;
         exchangeTotalCentavos += lineTotal;
 
         validatedExchangeItems.push({
           variantId: exchangeItem.variantId,
           quantity: exchangeItem.quantity,
-          unitPriceCentavos: variant.priceCentavos,
+          unitPriceCentavos,
           inventoryId: inventoryRecord._id as string,
           inventoryQty: inventoryRecord.quantity,
         });

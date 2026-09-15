@@ -1,6 +1,7 @@
 import { query, mutation } from "../_generated/server";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Mutations ───────────────────────────────────────────────────────────────
 
@@ -35,6 +36,7 @@ export const generateShareLink = mutation({
 export const getSharedWishlist = query({
   args: { shareToken: v.string() },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     const customer = await ctx.db
       .query("customers")
       .withIndex("by_wishlistShareToken", (q) =>
@@ -88,7 +90,7 @@ export const getSharedWishlist = query({
           brandName: brand?.name ?? "",
           size: variant.size,
           color: variant.color,
-          priceCentavos: variant.priceCentavos,
+          priceCentavos: await online.variant(variant),
           imageUrl,
           inStock: totalQuantity > 0,
         };

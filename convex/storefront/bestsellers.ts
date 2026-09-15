@@ -1,4 +1,5 @@
 import { query } from "../_generated/server";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Bestsellers Query ──────────────────────────────────────────────────────
 // Aggregates POS transaction data from the last 30 days, groups by style,
@@ -8,6 +9,7 @@ import { query } from "../_generated/server";
 export const getBestsellers = query({
   args: {},
   handler: async (ctx) => {
+    const online = await onlinePricing(ctx);
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
     // ── Fetch recent transactions ──
@@ -138,7 +140,7 @@ export const getBestsellers = query({
           brandName: brand?.name ?? "",
           primaryImageUrl,
           brandLogoUrl,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           soldCount,
           variantCount: styleVars.length,
           genders: Array.from(genderSet),

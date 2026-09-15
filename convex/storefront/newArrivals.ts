@@ -1,4 +1,5 @@
 import { query } from "../_generated/server";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── New Arrivals Query ──────────────────────────────────────────────────────
 // Returns active styles created within the last 30 days.
@@ -7,6 +8,7 @@ import { query } from "../_generated/server";
 export const getNewArrivals = query({
   args: {},
   handler: async (ctx) => {
+    const online = await onlinePricing(ctx);
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
     // ── Load active brands & categories ──
@@ -117,7 +119,7 @@ export const getNewArrivals = query({
           categoryName: category?.name ?? "",
           primaryImageUrl,
           brandLogoUrl,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           createdAt: style.createdAt,
           genders: Array.from(genderSet),
           tags: Array.from(tagSet),

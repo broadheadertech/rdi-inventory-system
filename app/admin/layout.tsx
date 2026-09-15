@@ -30,6 +30,7 @@ import {
   ChevronDown,
   Target,
   Scale,
+  PhilippinePeso,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -55,6 +56,7 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/branch-goals", label: "Branch Goals", icon: Target, roles: ["admin"] },
   { href: "/admin/catalog", label: "Catalog", icon: Package, roles: ["admin"] },
   { href: "/admin/inventory", label: "Inventory", icon: PackageSearch, roles: ["admin"] },
+  { href: "/admin/prices", label: "Prices", icon: PhilippinePeso, roles: ["admin"] },
   { href: "/admin/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 

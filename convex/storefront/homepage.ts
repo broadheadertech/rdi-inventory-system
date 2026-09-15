@@ -1,5 +1,6 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Homepage Data Query ─────────────────────────────────────────────────────
 // Single query that returns all data needed for the Zalora-style homepage.
@@ -8,6 +9,7 @@ import { v } from "convex/values";
 export const getHomepageData = query({
   args: {},
   handler: async (ctx) => {
+    const online = await onlinePricing(ctx);
     // ── Brands ──
     const allBrands = await ctx.db.query("brands").collect();
     const activeBrands = allBrands
@@ -210,7 +212,7 @@ export const getHomepageData = query({
         );
         const minPrice =
           styleVars.length > 0
-            ? Math.min(...styleVars.map((v) => v.priceCentavos))
+            ? Math.min(...(await Promise.all(styleVars.map((v) => online.variant(v)))))
             : style.basePriceCentavos;
 
         const genders = Array.from(
@@ -224,7 +226,7 @@ export const getHomepageData = query({
         return {
           _id: style._id,
           name: style.name,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           minPriceCentavos: minPrice,
           brandName: brand?.name ?? "",
           categoryName: category?.name ?? "",
@@ -314,6 +316,7 @@ export const getHomepageData = query({
 export const getTrendingProducts = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     const limit = args.limit ?? 12;
     const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
@@ -411,7 +414,7 @@ export const getTrendingProducts = query({
           name: style.name,
           brandName: brand?.name ?? "",
           primaryImageUrl,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           brandLogoUrl,
           soldCount,
           variantCount: styleVariantCount.get(styleId) ?? 0,

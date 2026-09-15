@@ -1,5 +1,6 @@
 import { query, mutation } from "../_generated/server";
 import { v } from "convex/values";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Track a product view ────────────────────────────────────────────────────
 
@@ -53,6 +54,7 @@ export const trackView = mutation({
 export const getRecentlyViewed = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
 
@@ -106,7 +108,7 @@ export const getRecentlyViewed = query({
           styleId: style._id,
           name: style.name,
           brandName: brand?.name ?? "",
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           primaryImageUrl,
           brandLogoUrl,
           variantCount: activeVariants.length,

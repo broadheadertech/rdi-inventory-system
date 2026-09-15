@@ -10,6 +10,7 @@ import { _logAuditEntry } from "../_helpers/auditLog";
 import { calculateTaxBreakdown } from "../_helpers/taxCalculations";
 import { tenderValidator } from "../_helpers/tenders";
 import { requireShiftForSale } from "./shifts";
+import { branchPrice } from "../_helpers/branchPricing";
 import {
   calculatePromoDiscount,
   type CartItemForPromo,
@@ -206,7 +207,7 @@ export const createTransaction = mutation({
     }[] = [];
 
     for (const item of args.items) {
-      // Look up authoritative price from variants table
+      // The authoritative price: what this branch sells the variant at
       const variant = await ctx.db.get(item.variantId);
       if (!variant || !variant.isActive) {
         throw new ConvexError({
@@ -232,7 +233,7 @@ export const createTransaction = mutation({
         validatedItems.push({
           variantId: item.variantId,
           quantity: item.quantity,
-          unitPriceCentavos: variant.priceCentavos,
+          unitPriceCentavos: await branchPrice(ctx, branchId, variant),
           inventoryId: inventoryRecord._id,
           inventoryQuantity: inventoryRecord.quantity,
         });

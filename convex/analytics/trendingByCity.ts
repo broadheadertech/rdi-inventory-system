@@ -1,6 +1,7 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Trending in Your City ──────────────────────────────────────────────────
 // Public query that surfaces the top-selling styles in a given city over the
@@ -11,6 +12,7 @@ export const getTrendingInCity = query({
     city: v.optional(v.string()),
   },
   handler: async (ctx, { city }) => {
+    const online = await onlinePricing(ctx);
     const targetCity = city ?? "Manila";
     const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
 
@@ -123,7 +125,7 @@ export const getTrendingInCity = query({
         styleName: style.name,
         brandName,
         totalSold,
-        priceCentavos: style.basePriceCentavos,
+        priceCentavos: await online.style(style),
         imageUrl,
         city: targetCity,
       });

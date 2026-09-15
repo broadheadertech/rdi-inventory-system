@@ -28,7 +28,7 @@ const PAYMENT_ICONS = {
 } as const;
 
 export default function CartPage() {
-  const cart = useQuery(api.storefront.cart.getMyCart);
+  const cart = useQuery(api.storefront.cart.getMyCart, {});
   const wishlist = useQuery(api.storefront.wishlist.getMyWishlist);
   const updateQty = useMutation(api.storefront.cart.updateCartItemQuantity);
   const removeItem = useMutation(api.storefront.cart.removeFromCart);

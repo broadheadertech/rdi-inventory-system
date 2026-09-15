@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import { Id } from "../_generated/dataModel";
 import { evaluateVoucher, redeemVoucher, releaseVoucherForOrder } from "./vouchers";
+import { checkoutPricing, onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,7 @@ async function requireCustomer(ctx: MutationCtx) {
 export const getBuyAgainProducts = query({
   args: {},
   handler: async (ctx) => {
+    const online = await onlinePricing(ctx);
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return [];
 
@@ -120,7 +122,7 @@ export const getBuyAgainProducts = query({
         name: style.name,
         brandName: brand?.name ?? "",
         primaryImageUrl,
-        basePriceCentavos: style.basePriceCentavos,
+        basePriceCentavos: await online.style(style),
       });
     }
 
@@ -325,6 +327,9 @@ export const createOrder = mutation({
       .collect();
     if (cartItems.length === 0) throw new ConvexError("Cart is empty");
 
+    // Priced at the pickup branch's prices for pickup, the online store's for delivery.
+    const pricing = await checkoutPricing(ctx, isPickup ? args.pickupBranchId : undefined);
+
     // Build order items and calculate totals
     let subtotalCentavos = 0;
     const orderItemsData: Array<{
@@ -340,13 +345,14 @@ export const createOrder = mutation({
         throw new ConvexError(`Product "${ci.variantId}" is no longer available`);
       }
 
-      const lineTotal = variant.priceCentavos * ci.quantity;
+      const unitPriceCentavos = await pricing.variant(variant);
+      const lineTotal = unitPriceCentavos * ci.quantity;
       subtotalCentavos += lineTotal;
 
       orderItemsData.push({
         variantId: ci.variantId,
         quantity: ci.quantity,
-        unitPriceCentavos: variant.priceCentavos,
+        unitPriceCentavos,
         lineTotalCentavos: lineTotal,
       });
     }

@@ -1,5 +1,6 @@
 import { v, ConvexError } from "convex/values";
 import { mutation, query } from "../_generated/server";
+import { branchPrice } from "../_helpers/branchPricing";
 
 // ─── Try-On Ahead ────────────────────────────────────────────────────────────
 // Customers reserve multiple items online to try on at a specific branch.
@@ -214,7 +215,8 @@ export const getMyTryOnReservations = query({
         styleName: style?.name ?? "Unknown",
         size: variant?.size ?? "",
         color: variant?.color ?? "",
-        priceCentavos: variant?.priceCentavos ?? 0,
+        // Tried on at a branch, so priced at that branch.
+        priceCentavos: variant ? await branchPrice(ctx, r.branchId, variant) : 0,
         imageUrl,
         quantity: r.quantity,
       });

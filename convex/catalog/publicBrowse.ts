@@ -1,6 +1,7 @@
 import { query } from "../_generated/server";
 import { v } from "convex/values";
 import { GARMENT_SIZE_ORDER } from "../_helpers/constants";
+import { onlinePricing } from "../_helpers/branchPricing";
 
 // ─── Public Queries (No Auth Required) ──────────────────────────────────────
 // These queries are used by the customer-facing website.
@@ -56,6 +57,7 @@ export const getBrandWithCategoriesPublic = query({
 export const getStylesByCategoryPublic = query({
   args: { categoryId: v.id("categories") },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     const category = await ctx.db.get(args.categoryId);
     if (!category || !category.isActive) return [];
 
@@ -122,7 +124,7 @@ export const getStylesByCategoryPublic = query({
         return {
           _id: style._id,
           name: style.name,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           createdAt: style.createdAt,
           primaryImageUrl,
           brandLogoUrl,
@@ -141,6 +143,7 @@ export const getStylesByCategoryPublic = query({
 export const getStylesByTagPublic = query({
   args: { tag: v.string() },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     // Get all active categories with this tag
     const allCategories = await ctx.db.query("categories").collect();
     const tagCategories = allCategories.filter(
@@ -223,7 +226,7 @@ export const getStylesByTagPublic = query({
           name: style.name,
           categoryName: style.categoryName,
           brandName: style.brandName,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           createdAt: style.createdAt,
           primaryImageUrl,
           brandLogoUrl,
@@ -260,6 +263,7 @@ export const getStylesByTagPublic = query({
 export const getAllStylesForBrandPublic = query({
   args: { brandId: v.id("brands") },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     const brand = await ctx.db.get(args.brandId);
     if (!brand || !brand.isActive) return null;
 
@@ -337,7 +341,7 @@ export const getAllStylesForBrandPublic = query({
           _id: style._id,
           name: style.name,
           categoryName: style.categoryName,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           createdAt: style.createdAt,
           primaryImageUrl,
           variantCount: activeVariants.length,
@@ -376,6 +380,7 @@ export const getAllStylesForBrandPublic = query({
 export const getStyleDetailPublic = query({
   args: { styleId: v.id("styles") },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     const style = await ctx.db.get(args.styleId);
     if (!style || !style.isActive) return null;
 
@@ -403,16 +408,18 @@ export const getStyleDetailPublic = query({
       .query("variants")
       .withIndex("by_style", (q) => q.eq("styleId", args.styleId))
       .collect();
-    const activeVariants = variants
-      .filter((vr) => vr.isActive)
-      .map((vr) => ({
-        _id: vr._id,
-        size: vr.size,
-        color: vr.color,
-        priceCentavos: vr.priceCentavos,
-        sku: vr.sku,
-        storageId: vr.storageId ?? null,
-      }));
+    const activeVariants = await Promise.all(
+      variants
+        .filter((vr) => vr.isActive)
+        .map(async (vr) => ({
+          _id: vr._id,
+          size: vr.size,
+          color: vr.color,
+          priceCentavos: await online.variant(vr),
+          sku: vr.sku,
+          storageId: vr.storageId ?? null,
+        }))
+    );
 
     // Branch stock summary per variant (with resolved image URLs)
     const variantStock = await Promise.all(
@@ -438,7 +445,7 @@ export const getStyleDetailPublic = query({
       _id: style._id,
       name: style.name,
       description: style.description,
-      basePriceCentavos: style.basePriceCentavos,
+      basePriceCentavos: await online.style(style),
       brandName: brand?.name ?? "Unknown",
       categoryName: category?.name ?? "Unknown",
       images: imageUrls,
@@ -527,6 +534,7 @@ export const listActiveBranchesPublic = query({
 export const searchStylesPublic = query({
   args: { searchTerm: v.string() },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     const term = args.searchTerm.toLowerCase().trim();
     if (!term || term.length < 2) return [];
 
@@ -608,7 +616,7 @@ export const searchStylesPublic = query({
         return {
           _id: style._id,
           name: style.name,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           createdAt: style.createdAt,
           brandName: brand?.name ?? "",
           categoryName: category?.name ?? "",
@@ -628,6 +636,7 @@ export const searchStylesPublic = query({
 export const getStylesByTagsPublic = query({
   args: { tags: v.array(v.string()) },
   handler: async (ctx, args) => {
+    const online = await onlinePricing(ctx);
     if (args.tags.length === 0) return { styles: [], filters: { brands: [], colors: [], sizes: [], genders: [] } };
 
     const tagSet = new Set(args.tags.map((t) => t.toLowerCase()));
@@ -736,7 +745,7 @@ export const getStylesByTagsPublic = query({
           name: style.name,
           categoryName: style.categoryName,
           brandName: style.brandName,
-          basePriceCentavos: style.basePriceCentavos,
+          basePriceCentavos: await online.style(style),
           createdAt: style.createdAt,
           primaryImageUrl,
           brandLogoUrl,

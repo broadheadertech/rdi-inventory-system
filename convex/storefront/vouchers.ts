@@ -2,6 +2,7 @@ import { query, type QueryCtx, type MutationCtx } from "../_generated/server";
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
+import { checkoutPricing } from "../_helpers/branchPricing";
 import {
   calculatePromoDiscount,
   type CartItemForPromo,
@@ -364,7 +365,7 @@ export async function releaseVoucherForOrder(
 // one createOrder will apply — it checks again when the order is placed.
 
 export const previewVoucher = query({
-  args: { code: v.string() },
+  args: { code: v.string(), pickupBranchId: v.optional(v.id("branches")) },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return { ok: false as const, reason: "Sign in to use a voucher." };
@@ -386,7 +387,8 @@ export const previewVoucher = query({
           .collect()
       : [];
 
-    // Priced as createOrder prices them: from the catalogue, never the client.
+    // Priced as createOrder prices them: at the branch's prices, never the client's.
+    const pricing = await checkoutPricing(ctx, args.pickupBranchId);
     const lines: OrderLine[] = [];
     for (const ci of cartItems) {
       const variant = await ctx.db.get(ci.variantId);
@@ -394,7 +396,7 @@ export const previewVoucher = query({
       lines.push({
         variantId: ci.variantId,
         quantity: ci.quantity,
-        unitPriceCentavos: variant.priceCentavos,
+        unitPriceCentavos: await pricing.variant(variant),
       });
     }
     if (lines.length === 0) return { ok: false as const, reason: "Your bag is empty." };

@@ -1,5 +1,6 @@
 import { v, ConvexError } from "convex/values";
 import { mutation, query } from "../_generated/server";
+import { branchPrice } from "../_helpers/branchPricing";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -155,7 +156,7 @@ export const createReservationPublic = mutation({
         styleName: style?.name ?? "Unknown",
         size: variant.size,
         color: variant.color,
-        priceCentavos: variant.priceCentavos,
+        priceCentavos: await branchPrice(ctx, args.branchId, variant),
       },
     };
   },
@@ -192,7 +193,7 @@ export const getReservationByConfirmation = query({
       styleName: style?.name ?? "Unknown",
       size: variant?.size ?? "",
       color: variant?.color ?? "",
-      priceCentavos: variant?.priceCentavos ?? 0,
+      priceCentavos: variant ? await branchPrice(ctx, reservation.branchId, variant) : 0,
     };
   },
 });

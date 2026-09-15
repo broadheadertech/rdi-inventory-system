@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { ConvexError } from "convex/values";
 import { Id } from "../_generated/dataModel";
 import { MutationCtx } from "../_generated/server";
+import { checkoutPricing } from "../_helpers/branchPricing";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -37,8 +38,9 @@ async function getOrCreateCart(ctx: MutationCtx, customerId: Id<"customers">) {
 // ─── Queries ─────────────────────────────────────────────────────────────────
 
 export const getMyCart = query({
-  args: {},
-  handler: async (ctx) => {
+  // At checkout, a pickup order is priced at the pickup branch's prices.
+  args: { pickupBranchId: v.optional(v.id("branches")) },
+  handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return null;
 
@@ -58,6 +60,8 @@ export const getMyCart = query({
       .query("cartItems")
       .withIndex("by_cart", (q) => q.eq("cartId", cart._id))
       .collect();
+
+    const pricing = await checkoutPricing(ctx, args.pickupBranchId);
 
     // Enrich each cart item with variant + style data
     const items = await Promise.all(
@@ -107,9 +111,9 @@ export const getMyCart = query({
           color: variant.color,
           size: variant.size,
           sku: variant.sku,
-          priceCentavos: variant.priceCentavos,
+          priceCentavos: await pricing.variant(variant),
           quantity: ci.quantity,
-          lineTotalCentavos: variant.priceCentavos * ci.quantity,
+          lineTotalCentavos: (await pricing.variant(variant)) * ci.quantity,
           imageUrl,
           brandLogoUrl,
           totalStock,

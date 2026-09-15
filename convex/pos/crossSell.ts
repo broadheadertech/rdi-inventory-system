@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { query } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import type { Id } from "../_generated/dataModel";
+import { branchPrice } from "../_helpers/branchPricing";
 
 // ─── getSuggestions ──────────────────────────────────────────────────────────
 // Finds products frequently bought alongside the given cart items.
@@ -109,7 +110,7 @@ export const getSuggestions = query({
         styleName: style.name,
         size: variant.size,
         color: variant.color,
-        priceCentavos: variant.priceCentavos,
+        priceCentavos: await branchPrice(ctx, branchId, variant),
         stock: inv.quantity,
       });
     }

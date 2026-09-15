@@ -182,7 +182,6 @@ type RetailBranch = {
 export default function CheckoutPage() {
   const { isSignedIn, isLoaded } = useUser();
   const router = useRouter();
-  const cart = useQuery(api.storefront.cart.getMyCart);
   const addresses = useQuery(api.storefront.addresses.getMyAddresses);
   const retailBranches = useQuery(api.storefront.branches.getRetailBranches);
   const createOrder = useMutation(api.storefront.orders.createOrder);
@@ -190,6 +189,11 @@ export default function CheckoutPage() {
 
   const [fulfillmentType, setFulfillmentType] = useState<FulfillmentType>("delivery");
   const [selectedPickupBranchId, setSelectedPickupBranchId] = useState<Id<"branches"> | null>(null);
+  // Priced as the order will be: a pickup at the pickup branch's prices,
+  // a delivery at the online store's.
+  const pricingBranchId =
+    fulfillmentType === "pickup" && selectedPickupBranchId ? selectedPickupBranchId : undefined;
+  const cart = useQuery(api.storefront.cart.getMyCart, { pickupBranchId: pricingBranchId });
   const [selectedAddressId, setSelectedAddressId] = useState<Id<"customerAddresses"> | null>(null);
   const [selectedPayment, setSelectedPayment] = useState<typeof PAYMENT_METHODS[number]["id"]>("cod");
   const [selectedDelivery, setSelectedDelivery] = useState<DeliveryMethodId>("standard");
@@ -213,7 +217,7 @@ export default function CheckoutPage() {
   const [appliedVoucher, setAppliedVoucher] = useState<string | null>(null);
   const voucher = useQuery(
     api.storefront.vouchers.previewVoucher,
-    appliedVoucher ? { code: appliedVoucher } : "skip"
+    appliedVoucher ? { code: appliedVoucher, pickupBranchId: pricingBranchId } : "skip"
   );
 
   const sameDayAvailable = useMemo(() => isSameDayAvailable(), []);
