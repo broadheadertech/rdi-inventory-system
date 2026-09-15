@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { StatusPill } from "@/components/inventory/StatusPill";
+import { formatCurrency } from "@/lib/formatters";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -247,6 +248,7 @@ function StockLevelsTab() {
                   <TableHead>SKU</TableHead>
                   <TableHead>Size</TableHead>
                   <TableHead>Color</TableHead>
+                  <TableHead className="text-right">Branch Price</TableHead>
                   <TableHead className="text-right">Qty</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -267,6 +269,9 @@ function StockLevelsTab() {
                       </TableCell>
                       <TableCell>{item.size}</TableCell>
                       <TableCell>{item.color}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(item.priceCentavos)}
+                      </TableCell>
                       <TableCell className="text-right font-medium">
                         {item.quantity}
                       </TableCell>
@@ -290,7 +295,7 @@ function StockLevelsTab() {
                 ) : (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={9}
                       className="text-center text-muted-foreground py-8"
                     >
                       {searchQuery || statusFilter !== "all"

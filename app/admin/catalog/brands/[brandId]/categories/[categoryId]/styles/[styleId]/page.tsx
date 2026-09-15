@@ -523,8 +523,8 @@ export default function VariantsPage() {
               <TableHead>Size</TableHead>
               <TableHead>Color</TableHead>
               <TableHead>Gender</TableHead>
-              <TableHead>SRP</TableHead>
-              <TableHead>Cost</TableHead>
+              <TableHead>Base SRP</TableHead>
+              <TableHead>Cost Price</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -780,7 +780,7 @@ export default function VariantsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="create-var-price">
-                  SRP (₱) <span className="text-destructive">*</span>
+                  Base SRP (₱) <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   id="create-var-price"
@@ -805,7 +805,7 @@ export default function VariantsPage() {
                   type="number"
                   step="0.01"
                   min="0.01"
-                  placeholder="Base price for branches"
+                  placeholder="e.g. 75.00"
                   value={createForm.costPrice}
                   onChange={(e) => updateCreateField("costPrice", e.target.value)}
                 />
@@ -948,7 +948,7 @@ export default function VariantsPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="edit-var-price">
-                  SRP (₱) <span className="text-destructive">*</span>
+                  Base SRP (₱) <span className="text-destructive">*</span>
                 </Label>
                 <Input
                   id="edit-var-price"
@@ -972,7 +972,7 @@ export default function VariantsPage() {
                   type="number"
                   step="0.01"
                   min="0.01"
-                  placeholder="Base price for branches"
+                  placeholder="e.g. 75.00"
                   value={editForm.costPrice}
                   onChange={(e) => updateEditField("costPrice", e.target.value)}
                 />

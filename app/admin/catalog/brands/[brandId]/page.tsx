@@ -273,12 +273,12 @@ function ProductFormFields({
           </Select>
         </div>
         <div className="space-y-1">
-          <Label>Cost Price</Label>
-          <Input type="number" step="0.01" placeholder="0.00" value={form.costPrice} onChange={(e) => updateField("costPrice", e.target.value)} />
+          <Label>Base SRP <span className="text-destructive">*</span></Label>
+          <Input type="number" step="0.01" placeholder="0.00" value={form.srp} onChange={(e) => updateField("srp", e.target.value)} />
         </div>
         <div className="space-y-1">
-          <Label>SRP <span className="text-destructive">*</span></Label>
-          <Input type="number" step="0.01" placeholder="0.00" value={form.srp} onChange={(e) => updateField("srp", e.target.value)} />
+          <Label>Cost Price</Label>
+          <Input type="number" step="0.01" placeholder="0.00" value={form.costPrice} onChange={(e) => updateField("costPrice", e.target.value)} />
         </div>
       </div>
     </div>
@@ -604,8 +604,8 @@ export default function BrandProductsPage() {
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("sku")}>SKU<SortIcon col="sku" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("barcode")}>Barcode<SortIcon col="barcode" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("color")}>Color<SortIcon col="color" /></TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("srp")}>Base SRP<SortIcon col="srp" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("costPrice")}>Cost Price<SortIcon col="costPrice" /></TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("srp")}>SRP<SortIcon col="srp" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("status")}>Status<SortIcon col="status" /></TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -623,8 +623,8 @@ export default function BrandProductsPage() {
                   <TableCell className="text-sm font-mono whitespace-nowrap">{style.sku || "—"}</TableCell>
                   <TableCell className="text-sm font-mono whitespace-nowrap">{style.barcode || "—"}</TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{style.color || "—"}</TableCell>
-                  <TableCell className="text-sm whitespace-nowrap">{style.costPrice != null ? `₱${Number(style.costPrice).toLocaleString()}` : "—"}</TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{style.srp != null ? `₱${Number(style.srp).toLocaleString()}` : "—"}</TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">{style.costPrice != null ? `₱${Number(style.costPrice).toLocaleString()}` : "—"}</TableCell>
                   <TableCell><Badge variant={style.isActive ? "default" : "destructive"}>{style.isActive ? "Active" : "Inactive"}</Badge></TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-1">

@@ -569,7 +569,7 @@ export default function PosBulkImportPage() {
                     <TableHead>Division</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>Subcat</TableHead>
-                    <TableHead className="text-right">SRP</TableHead>
+                    <TableHead className="text-right">Base SRP</TableHead>
                     <TableHead className="text-right">Count</TableHead>
                   </TableRow>
                 </TableHeader>

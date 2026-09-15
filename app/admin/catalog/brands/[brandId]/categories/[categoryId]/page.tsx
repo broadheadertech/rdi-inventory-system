@@ -484,7 +484,7 @@ export default function StylesPage() {
               <TableHead className="w-12">Image</TableHead>
               <TableHead>Style</TableHead>
               <TableHead>Description</TableHead>
-              <TableHead>Base Price</TableHead>
+              <TableHead>Base SRP</TableHead>
               <TableHead>Status</TableHead>
               <TableHead className="text-right">Actions</TableHead>
             </TableRow>
@@ -722,7 +722,7 @@ export default function StylesPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="create-style-price">
-                Base Price (₱) <span className="text-destructive">*</span>
+                Base SRP (₱) <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="create-style-price"
@@ -798,7 +798,7 @@ export default function StylesPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-style-price">
-                Base Price (₱) <span className="text-destructive">*</span>
+                Base SRP (₱) <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="edit-style-price"

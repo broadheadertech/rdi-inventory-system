@@ -48,7 +48,7 @@ const OP_LABELS: Record<OpType, string> = {
   decreasePct: "Decrease by %",
   increaseAmt: "Increase by ₱",
   decreaseAmt: "Decrease by ₱",
-  reset: "Reset to base price",
+  reset: "Reset to Base SRP",
 };
 
 const ROUNDING_LABELS: Record<Rounding, string> = {
@@ -261,7 +261,7 @@ export default function PricesPage() {
 
       const where =
         targetKind === "base"
-          ? "the base price"
+          ? "the Base SRP"
           : `${targetBranchIds.length} branch${targetBranchIds.length === 1 ? "" : "es"}`;
       if (
         !window.confirm(
@@ -316,7 +316,7 @@ export default function PricesPage() {
       <div>
         <h1 className="text-2xl font-bold">Prices</h1>
         <p className="text-sm text-muted-foreground">
-          Base prices and branch prices. A branch sells at the base price until it is given its own;
+          Base SRPs and branch prices. A branch sells at the Base SRP until it is given its own;
           <span className="font-medium text-foreground"> bold</span> prices are a branch&apos;s own.
           Click a price to edit it, or select products to change many at once.
         </p>
@@ -422,7 +422,7 @@ export default function PricesPage() {
                       targetKind === k ? "bg-primary text-primary-foreground" : "hover:bg-muted"
                     )}
                   >
-                    {k === "branches" ? "Branch prices" : "Base price"}
+                    {k === "branches" ? "Branch prices" : "Base SRP"}
                   </button>
                 ))}
               </div>
@@ -513,7 +513,7 @@ export default function PricesPage() {
                 For example
                 {targetKind === "branches" && targetBranchIds[0]
                   ? ` at ${branches.find((b) => b.id === targetBranchIds[0])?.name}`
-                  : " (base price)"}
+                  : " (Base SRP)"}
                 :
               </p>
               <ul className="space-y-0.5">
@@ -560,8 +560,8 @@ export default function PricesPage() {
                 <input type="checkbox" checked={pageAllSelected} onChange={togglePage} aria-label="Select page" />
               </th>
               <th className="min-w-56 p-2 text-left font-medium">Product</th>
-              <th className="p-2 text-right font-medium text-muted-foreground">Cost</th>
-              <th className="p-2 text-right font-medium">Base</th>
+              <th className="p-2 text-right font-medium">Base SRP</th>
+              <th className="p-2 text-right font-medium text-muted-foreground">Cost Price</th>
               {shownBranches.map((b) => (
                 <th key={b.id} className="min-w-28 p-2 text-right font-medium">
                   {b.name}
@@ -613,7 +613,7 @@ export default function PricesPage() {
                     <span className="group inline-flex items-center gap-1">
                       {branchId !== "base" && own && (
                         <button
-                          title="Reset to base price"
+                          title="Reset to Base SRP"
                           onClick={() => resetCell(r.variantId, branchId)}
                           className="invisible rounded p-0.5 text-muted-foreground hover:text-foreground group-hover:visible"
                         >
@@ -621,7 +621,7 @@ export default function PricesPage() {
                         </button>
                       )}
                       <button
-                        title={branchId === "base" ? "Base price" : own ? "This branch's own price" : "Follows the base price"}
+                        title={branchId === "base" ? "Base SRP" : own ? "This branch's own price" : "Follows the Base SRP"}
                         onClick={() => startEdit({ variantId: r.variantId, branchId }, centavos)}
                         className={cn(
                           "rounded px-1.5 py-0.5 tabular-nums hover:bg-muted",
@@ -665,10 +665,10 @@ export default function PricesPage() {
                         </button>
                       </div>
                     </td>
+                    <td className="p-2 text-right">{priceCell("base", r.basePriceCentavos, false)}</td>
                     <td className="p-2 text-right tabular-nums text-muted-foreground">
                       {r.costPriceCentavos !== null ? formatCurrency(r.costPriceCentavos) : "—"}
                     </td>
-                    <td className="p-2 text-right">{priceCell("base", r.basePriceCentavos, false)}</td>
                     {shownBranches.map((b) => {
                       const p = r.prices.find((x) => x.branchId === b.id);
                       return (
@@ -721,7 +721,7 @@ export default function PricesPage() {
               {history.map((h) => (
                 <li key={h._id} className="rounded-md border p-2">
                   <div className="flex justify-between gap-2">
-                    <span className="font-medium">{h.branchName ?? "Base price"}</span>
+                    <span className="font-medium">{h.branchName ?? "Base SRP"}</span>
                     <span className="text-xs text-muted-foreground">
                       {new Date(h.changedAt).toLocaleString("en-PH", { timeZone: "Asia/Manila" })}
                     </span>

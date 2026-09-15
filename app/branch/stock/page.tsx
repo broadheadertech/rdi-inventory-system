@@ -322,7 +322,7 @@ export default function BranchStockPage() {
                 SKU
               </th>
               <th className="text-left px-4 py-3 font-medium text-muted-foreground">
-                Price
+                Branch Price
               </th>
               <th
                 className="text-left px-4 py-3 font-medium text-muted-foreground cursor-pointer select-none"
