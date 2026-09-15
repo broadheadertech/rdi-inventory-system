@@ -419,20 +419,16 @@ function CartItemList({
   removeItem: (variantId: CartItem["variantId"]) => void;
 }) {
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {items.map((item) => (
-        <div
-          key={item.variantId}
-          className="flex items-center gap-2 rounded-md border p-3"
-        >
+        <div key={item.variantId} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5">
           {/* Info */}
           <div className="min-w-0 flex-1">
-            <p className="truncate font-medium">{item.styleName}</p>
-            <p className="text-sm text-muted-foreground">
-              {item.size} / {item.color}
+            <p className="truncate text-sm font-medium" title={item.styleName}>
+              {item.styleName}
             </p>
-            <p className="text-sm text-muted-foreground">
-              {formatCurrency(item.unitPriceCentavos)} each
+            <p className="truncate text-xs text-muted-foreground">
+              {item.size} · {item.color} · {formatCurrency(item.unitPriceCentavos)}
             </p>
           </div>
 
@@ -441,16 +437,18 @@ function CartItemList({
             <Button
               variant="outline"
               size="icon"
-              className="h-10 w-10 min-h-14 min-w-[56px]"
+              className="h-9 w-9"
+              aria-label="Decrease quantity"
               onClick={() => updateQuantity(item.variantId, -1)}
             >
               <Minus className="h-4 w-4" />
             </Button>
-            <span className="w-8 text-center font-semibold">{item.quantity}</span>
+            <span className="w-6 text-center text-sm font-semibold tabular-nums">{item.quantity}</span>
             <Button
               variant="outline"
               size="icon"
-              className="h-10 w-10 min-h-14 min-w-[56px]"
+              className="h-9 w-9"
+              aria-label="Increase quantity"
               onClick={() => updateQuantity(item.variantId, 1)}
             >
               <Plus className="h-4 w-4" />
@@ -458,19 +456,18 @@ function CartItemList({
           </div>
 
           {/* Line total + delete */}
-          <div className="flex flex-col items-end gap-1">
-            <p className="font-semibold">
-              {formatCurrency(item.unitPriceCentavos * item.quantity)}
-            </p>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-destructive hover:text-destructive"
-              onClick={() => removeItem(item.variantId)}
-            >
-              <Trash2 className="h-4 w-4" />
-            </Button>
-          </div>
+          <p className="w-20 text-right text-sm font-semibold tabular-nums">
+            {formatCurrency(item.unitPriceCentavos * item.quantity)}
+          </p>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
+            aria-label="Remove item"
+            onClick={() => removeItem(item.variantId)}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
         </div>
       ))}
     </div>
@@ -493,27 +490,32 @@ function DiscountToggle({
   ];
 
   return (
-    <div className="mt-4">
-      <div className="flex gap-1 rounded-md border p-1">
-        {options.map((opt) => (
-          <button
-            key={opt.value}
-            onClick={() => setDiscountType(opt.value)}
-            className={cn(
-              "min-h-14 flex-1 rounded-sm text-sm font-medium transition-colors",
-              discountType === opt.value
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "hover:bg-muted"
-            )}
-          >
-            {opt.label}
-          </button>
-        ))}
+    <div className="mt-2">
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Discount
+        </span>
+        <div className="flex flex-1 gap-1 rounded-md border p-0.5">
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setDiscountType(opt.value)}
+              className={cn(
+                "h-8 flex-1 rounded-sm text-xs font-medium transition-colors",
+                discountType === opt.value
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "hover:bg-muted"
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
       {discountType !== "none" && (
-        <div className="mt-2 rounded-md border border-green-500 bg-green-50 px-3 py-2 text-sm font-medium text-green-900">
-          {discountType === "senior" ? "Senior Citizen" : "PWD"} Discount Applied
-        </div>
+        <p className="mt-1 text-xs font-medium text-green-700">
+          {discountType === "senior" ? "Senior Citizen" : "PWD"} discount applied
+        </p>
       )}
     </div>
   );
@@ -537,6 +539,7 @@ function PromoSelector({
   promoSuggestions: PromoSuggestions;
 }) {
   const [showAllPromos, setShowAllPromos] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   // Only show when discount type is "none" (promos don't stack with Senior/PWD)
   if (discountType !== "none") return null;
@@ -553,10 +556,18 @@ function PromoSelector({
     selectedPromo && best && best.promoId !== selectedPromoId && best.discountCentavos > selectedSaving
       ? best
       : null;
-  const hasSuggestions = applicable.length > 0 || hints.length > 0;
 
-  const quickPromos = activePromos.slice(0, 3);
-  const otherPromos = activePromos.slice(3);
+  // One line stays in view; the rest opens on demand so the cart keeps its room.
+  const otherPromos = selectedPromo ? [] : applicable.slice(1);
+  const firstHint = hints[0] ?? null;
+  const moreHints = hints.slice(1);
+  const moreCount = otherPromos.length + moreHints.length;
+  const moreLabel = [
+    otherPromos.length > 0 && `${otherPromos.length} more promo${otherPromos.length === 1 ? "" : "s"}`,
+    moreHints.length > 0 && `${moreHints.length} more tip${moreHints.length === 1 ? "" : "s"}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const typeBadge = (type: ActivePromo["promoType"]) =>
     type === "percentage"
@@ -571,33 +582,47 @@ function PromoSelector({
               ? "X-Sell"
               : "PWP";
 
+  const hintLine = (h: { promoId: string; name: string; hint: string }) => (
+    <p key={h.promoId} className="flex items-start gap-1.5 px-1 text-xs text-muted-foreground">
+      <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+      <span className="min-w-0">
+        <span className="font-medium text-foreground">{h.name}:</span> {h.hint}
+      </span>
+    </p>
+  );
+
   return (
-    <div className="mt-3">
-      <p className="mb-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-        Promotions
-      </p>
+    <div className="mt-2">
+      <div className="mb-1 flex items-center justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Promotions</p>
+        <button
+          onClick={() => setShowAllPromos(true)}
+          className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
+        >
+          <MoreHorizontal className="h-3 w-3" />
+          All ({activePromos.length})
+        </button>
+      </div>
 
       {selectedPromo ? (
         <>
-          <div className="flex items-center gap-2 rounded-md border border-orange-400 bg-orange-50 px-3 py-2">
-            <Tag className="h-4 w-4 text-orange-600 shrink-0" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-orange-900 truncate">
-                {selectedPromo.name}
-              </p>
-              {promoPreview?.applicable && promoPreview.discountCentavos > 0 && (
-                <p className="text-xs text-orange-700">
-                  Save {formatCurrency(promoPreview.discountCentavos)}
-                </p>
-              )}
-              {promoPreview && !promoPreview.applicable && (
-                <p className="text-xs text-muted-foreground">
-                  {byId[selectedPromoId!]?.hint ?? promoPreview.description}
-                </p>
+          <div className="flex items-center gap-2 rounded-md border border-orange-400 bg-orange-50 px-2.5 py-1.5">
+            <Tag className="h-4 w-4 shrink-0 text-orange-600" />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-orange-900">{selectedPromo.name}</p>
+              {promoPreview?.applicable && promoPreview.discountCentavos > 0 ? (
+                <p className="text-xs text-orange-700">Save {formatCurrency(promoPreview.discountCentavos)}</p>
+              ) : (
+                promoPreview && (
+                  <p className="truncate text-xs text-muted-foreground">
+                    {byId[selectedPromoId!]?.hint ?? promoPreview.description}
+                  </p>
+                )
               )}
             </div>
             <button
               onClick={() => setPromoId(null)}
+              aria-label="Remove promotion"
               className="shrink-0 rounded-sm p-0.5 text-orange-600 hover:bg-orange-100"
             >
               <X className="h-4 w-4" />
@@ -606,7 +631,7 @@ function PromoSelector({
           {better && (
             <button
               onClick={() => setPromoId(better.promoId)}
-              className="mt-1.5 flex w-full items-center gap-2 rounded-md border border-dashed border-green-500 bg-green-50 px-3 py-1.5 text-left text-xs text-green-800 transition-colors hover:bg-green-100"
+              className="mt-1 flex w-full items-center gap-2 rounded-md border border-dashed border-green-500 bg-green-50 px-2.5 py-1 text-left text-xs text-green-800 transition-colors hover:bg-green-100"
             >
               <Sparkles className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 flex-1 truncate">
@@ -617,76 +642,63 @@ function PromoSelector({
             </button>
           )}
         </>
-      ) : hasSuggestions ? (
-        <div className="space-y-1.5">
-          {best && (
-            <button
-              onClick={() => setPromoId(best.promoId)}
-              className="flex w-full items-center gap-2 rounded-md border-2 border-green-500 bg-green-50 px-3 py-2 text-left transition-colors hover:bg-green-100"
-            >
-              <Sparkles className="h-4 w-4 shrink-0 text-green-600" />
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-green-700">Best promo</p>
-                <p className="truncate text-sm font-medium text-green-900">{best.name}</p>
-              </div>
-              <span className="shrink-0 text-sm font-bold text-green-700">
-                Save {formatCurrency(best.discountCentavos)}
-              </span>
-              <span className="shrink-0 rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white">
-                Apply
-              </span>
-            </button>
-          )}
-          {applicable.slice(1, 4).map((s) => (
-            <button
-              key={s.promoId}
-              onClick={() => setPromoId(s.promoId)}
-              className="flex w-full items-center gap-2 rounded-md border px-3 py-1.5 text-left text-sm transition-colors hover:border-orange-400 hover:bg-orange-50"
-            >
-              <Tag className="h-3.5 w-3.5 shrink-0 text-orange-500" />
-              <span className="min-w-0 flex-1 truncate">{s.name}</span>
-              <span className="shrink-0 text-xs font-medium text-muted-foreground">
-                Save {formatCurrency(s.discountCentavos)}
-              </span>
-            </button>
-          ))}
-          {hints.map((h) => (
-            <p key={h.promoId} className="flex items-start gap-1.5 px-1 text-xs text-muted-foreground">
-              <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
-              <span>
-                <span className="font-medium text-foreground">{h.name}:</span> {h.hint}
-              </span>
-            </p>
-          ))}
-          <button
-            onClick={() => setShowAllPromos(true)}
-            className="flex items-center gap-1 px-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-            All promotions ({activePromos.length})
-          </button>
-        </div>
-      ) : (
+      ) : best ? (
+        <button
+          onClick={() => setPromoId(best.promoId)}
+          className="flex w-full items-center gap-2 rounded-md border-2 border-green-500 bg-green-50 px-2.5 py-1.5 text-left transition-colors hover:bg-green-100"
+        >
+          <Sparkles className="h-4 w-4 shrink-0 text-green-600" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-bold uppercase leading-none tracking-wider text-green-700">Best promo</p>
+            <p className="truncate text-sm font-medium text-green-900">{best.name}</p>
+          </div>
+          <span className="shrink-0 text-sm font-bold text-green-700">
+            Save {formatCurrency(best.discountCentavos)}
+          </span>
+          <span className="shrink-0 rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white">Apply</span>
+        </button>
+      ) : !firstHint ? (
         <div className="flex flex-wrap gap-1.5">
-          {quickPromos.map((promo) => (
+          {activePromos.slice(0, 3).map((promo) => (
             <button
               key={String(promo._id)}
               onClick={() => setPromoId(String(promo._id))}
-              className="flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm transition-colors hover:border-orange-400 hover:bg-orange-50"
+              className="flex h-8 items-center gap-1 rounded-md border px-2.5 text-xs transition-colors hover:border-orange-400 hover:bg-orange-50"
             >
               <Tag className="h-3.5 w-3.5 text-orange-500" />
               {promo.name}
             </button>
           ))}
-          {otherPromos.length > 0 && (
+        </div>
+      ) : null}
+
+      {firstHint && <div className="mt-1">{hintLine(firstHint)}</div>}
+
+      {moreCount > 0 && (
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className="mt-1 flex w-full items-center justify-between rounded px-1 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <span>{moreLabel}</span>
+          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+        </button>
+      )}
+      {expanded && moreCount > 0 && (
+        <div className="mt-1 max-h-36 space-y-1 overflow-y-auto">
+          {otherPromos.map((s) => (
             <button
-              onClick={() => setShowAllPromos(true)}
-              className="flex items-center gap-1 rounded-md border border-dashed px-2.5 py-1.5 text-sm text-muted-foreground transition-colors hover:border-orange-400 hover:bg-orange-50 hover:text-foreground"
+              key={s.promoId}
+              onClick={() => setPromoId(s.promoId)}
+              className="flex w-full items-center gap-2 rounded-md border px-2.5 py-1 text-left text-xs transition-colors hover:border-orange-400 hover:bg-orange-50"
             >
-              <MoreHorizontal className="h-3.5 w-3.5" />
-              Others ({otherPromos.length})
+              <Tag className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+              <span className="min-w-0 flex-1 truncate">{s.name}</span>
+              <span className="shrink-0 font-medium text-muted-foreground">
+                Save {formatCurrency(s.discountCentavos)}
+              </span>
             </button>
-          )}
+          ))}
+          {moreHints.map(hintLine)}
         </div>
       )}
 
@@ -697,10 +709,9 @@ function PromoSelector({
           onClick={() => setShowAllPromos(false)}
         >
           <div
-            className="w-full max-w-md max-h-[80vh] rounded-xl border bg-card shadow-xl flex flex-col"
+            className="flex max-h-[80vh] w-full max-w-md flex-col rounded-xl border bg-card shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
             <div className="flex items-center justify-between border-b px-5 py-4">
               <div>
                 <h2 className="text-base font-bold">All Promotions</h2>
@@ -709,16 +720,13 @@ function PromoSelector({
                   {applicable.length > 0 && ` · ${applicable.length} apply to this cart`}
                 </p>
               </div>
-              <button
-                onClick={() => setShowAllPromos(false)}
-                className="rounded-full p-1.5 hover:bg-muted"
-              >
+              <button onClick={() => setShowAllPromos(false)} className="rounded-full p-1.5 hover:bg-muted">
                 <X className="h-4 w-4" />
               </button>
             </div>
 
-            {/* Promo list — the ones this cart gets first, most savings first */}
-            <div className="flex-1 overflow-y-auto divide-y divide-border">
+            {/* The ones this cart gets first, most savings first */}
+            <div className="flex-1 divide-y divide-border overflow-y-auto">
               {[...activePromos]
                 .sort(
                   (a, b) =>
@@ -751,13 +759,13 @@ function PromoSelector({
                           <Tag className="h-4 w-4 text-orange-600" />
                         )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{promo.name}</p>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{promo.name}</p>
                         {status?.hint ? (
-                          <p className="text-xs text-amber-700 truncate">{status.hint}</p>
+                          <p className="truncate text-xs text-amber-700">{status.hint}</p>
                         ) : (
                           promo.description && (
-                            <p className="text-xs text-muted-foreground truncate">{promo.description}</p>
+                            <p className="truncate text-xs text-muted-foreground">{promo.description}</p>
                           )
                         )}
                       </div>
@@ -807,113 +815,94 @@ function CartActions({
   const isDiscounted = discountType !== "none";
   const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
   const displayTotal = taxBreakdown.totalCentavos - promoDiscount;
+  const savings = isDiscounted ? taxBreakdown.savingsCentavos : promoDiscount;
 
   return (
-    <div className="mt-4 border-t pt-4">
+    <div className="mt-2 border-t pt-2">
       {/* Price breakdown */}
-      <div className="mb-3 space-y-1">
-        <div className="flex items-center justify-between text-sm">
+      <div className="mb-2 space-y-0.5 text-sm">
+        <div className="flex items-center justify-between">
           <span className="text-muted-foreground">Subtotal</span>
-          <span>{formatCurrency(taxBreakdown.subtotalCentavos)}</span>
+          <span className="tabular-nums">{formatCurrency(taxBreakdown.subtotalCentavos)}</span>
         </div>
 
         {isDiscounted ? (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-destructive">
-              Discount ({discountType === "senior" ? "SC" : "PWD"} 20%)
-            </span>
-            <span className="text-destructive">
-              -{formatCurrency(taxBreakdown.discountAmountCentavos)}
-            </span>
+          <div className="flex items-center justify-between text-destructive">
+            <span>Discount ({discountType === "senior" ? "SC" : "PWD"} 20%)</span>
+            <span className="tabular-nums">-{formatCurrency(taxBreakdown.discountAmountCentavos)}</span>
           </div>
         ) : (
-          <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center justify-between">
             <span className="text-muted-foreground">VAT (12%)</span>
-            <span>{formatCurrency(taxBreakdown.vatAmountCentavos)}</span>
+            <span className="tabular-nums">{formatCurrency(taxBreakdown.vatAmountCentavos)}</span>
           </div>
         )}
 
         {promoPreview?.applicable && promoDiscount > 0 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-orange-600">
+          <div className="flex items-center justify-between gap-2 text-orange-600">
+            <span className="truncate" title={promoPreview.description}>
               Promo ({promoPreview.description})
             </span>
-            <span className="text-orange-600">
-              -{formatCurrency(promoDiscount)}
-            </span>
+            <span className="shrink-0 tabular-nums">-{formatCurrency(promoDiscount)}</span>
           </div>
         )}
 
-        <div className="flex items-center justify-between pt-1 text-lg font-bold">
+        <div className="flex items-center justify-between pt-0.5 text-base font-bold">
           <span>Total</span>
-          <span>{formatCurrency(displayTotal)}</span>
+          <span className="tabular-nums">{formatCurrency(displayTotal)}</span>
         </div>
 
-        {isDiscounted && taxBreakdown.savingsCentavos > 0 && (
-          <div className="flex items-center justify-between text-sm font-medium text-green-600">
+        {savings > 0 && (
+          <div className="flex items-center justify-between text-xs font-medium text-green-600">
             <span>You save</span>
-            <span>{formatCurrency(taxBreakdown.savingsCentavos)}</span>
-          </div>
-        )}
-
-        {promoDiscount > 0 && !isDiscounted && (
-          <div className="flex items-center justify-between text-sm font-medium text-green-600">
-            <span>You save</span>
-            <span>{formatCurrency(promoDiscount)}</span>
+            <span className="tabular-nums">{formatCurrency(savings)}</span>
           </div>
         )}
       </div>
 
-      {/* Action buttons */}
-      <div className="mb-3 flex gap-2">
-        <Button
-          variant="outline"
-          className="min-h-14 flex-1 gap-2"
-          onClick={() => holdTransaction()}
-          disabled={items.length === 0}
-        >
-          <Pause className="h-4 w-4" />
-          Hold
-        </Button>
-
+      {/* Hold · Clear · Complete Sale on one row */}
+      <div className="flex gap-2">
         {showClearConfirm ? (
-          <div className="flex flex-1 gap-1">
+          <>
+            <Button variant="destructive" className="h-12 px-3" onClick={handleClearCart}>
+              Clear cart
+            </Button>
+            <Button variant="outline" className="h-12 px-3" onClick={() => setShowClearConfirm(false)}>
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <>
             <Button
-              variant="destructive"
-              className="min-h-14 flex-1"
-              onClick={handleClearCart}
+              variant="outline"
+              className="h-12 gap-1.5 px-3"
+              onClick={() => holdTransaction()}
+              disabled={items.length === 0}
+              title="Hold this sale"
             >
-              Confirm
+              <Pause className="h-4 w-4" />
+              Hold
             </Button>
             <Button
               variant="outline"
-              className="min-h-14"
-              onClick={() => setShowClearConfirm(false)}
+              className="h-12 px-3 text-destructive hover:text-destructive"
+              onClick={() => setShowClearConfirm(true)}
+              disabled={items.length === 0}
+              title="Clear the cart"
+              aria-label="Clear the cart"
             >
-              Cancel
+              <XCircle className="h-4 w-4" />
             </Button>
-          </div>
-        ) : (
-          <Button
-            variant="outline"
-            className="min-h-14 flex-1 gap-2 text-destructive hover:text-destructive"
-            onClick={() => setShowClearConfirm(true)}
-            disabled={items.length === 0}
-          >
-            <XCircle className="h-4 w-4" />
-            Clear
-          </Button>
+          </>
         )}
+        <Button
+          className="h-12 flex-1 text-base"
+          disabled={items.length === 0 || showClearConfirm}
+          onClick={onCompleteSale}
+        >
+          Complete Sale {items.length > 0 ? `· ${formatCurrency(displayTotal)}` : ""}
+        </Button>
       </div>
-
-      {/* Complete Sale */}
-      <Button
-        className="h-14 w-full text-lg"
-        disabled={items.length === 0}
-        onClick={onCompleteSale}
-      >
-        Complete Sale {items.length > 0 ? `\u00B7 ${formatCurrency(displayTotal)}` : ""}
-      </Button>
     </div>
   );
 }
@@ -980,7 +969,7 @@ function CartContent({
   return (
     <>
       {/* Header */}
-      <div className="flex items-center gap-2 border-b p-4">
+      <div className="flex items-center gap-2 border-b px-4 py-3">
         <ShoppingCart className="h-5 w-5" />
         <h2 className="text-lg font-bold">Cart</h2>
         {totalItems > 0 && (
@@ -1007,8 +996,9 @@ function CartContent({
         </div>
       )}
 
-      {/* Items */}
-      <div className="flex-1 overflow-y-auto p-4">
+      {/* Items — always at least a third of the panel, so a long promo list
+          or the payment form can't squeeze the cart out of view. */}
+      <div className={cn("flex-1 overflow-y-auto p-3", showPayment ? "min-h-[20%]" : "min-h-[35%]")}>
         {items.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-muted-foreground">
             <ShoppingCart className="mb-2 h-10 w-10 opacity-30" />
@@ -1030,7 +1020,12 @@ function CartContent({
 
       {/* Footer — Payment panel OR discount toggle + cart actions */}
       {items.length > 0 && (
-        <div className="px-4 pb-4">
+        <div
+          className={cn(
+            "shrink-0 overflow-y-auto border-t px-3 pb-3",
+            showPayment ? "max-h-[80%]" : "max-h-[65%]"
+          )}
+        >
           {showPayment ? (
             <PaymentPanel
               items={items}

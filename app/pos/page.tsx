@@ -416,7 +416,7 @@ function PosPageContent() {
       )}
       <main className={cn("flex", isRushMode ? "h-[calc(100vh-28px)] ring-2 ring-amber-500/60 ring-inset animate-pulse-subtle" : "h-screen")}>
         {/* Left panel — scan area or browse grid */}
-        <div className="flex-1 overflow-hidden lg:flex-[65] lg:border-r">
+        <div className="flex-1 overflow-hidden lg:flex-[60] lg:border-r">
           <div className="flex h-full flex-col">
             {/* ── Top bar: mode toggle + cash balance + EOD ──────────── */}
             <div className="border-b px-3 py-2">
@@ -645,27 +645,9 @@ function PosPageContent() {
             )}
 
             {/* ── Browse mode: product grid (existing) ─────────────── */}
+            {/* The camera scanner lives in Barcode mode; Browse is all products. */}
             {inputMode === "browse" && (
               <>
-                <div className="border-b p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex-1">
-                      <BarcodeScanner
-                        onScan={handleBarcodeScan}
-                        isActive={scannerActive}
-                      />
-                    </div>
-                  </div>
-                  {!scannerActive && (
-                    <button
-                      onClick={() => setScannerActive(true)}
-                      className="text-sm text-primary underline"
-                    >
-                      Enable scanner
-                    </button>
-                  )}
-                </div>
-
                 <div className="flex-1 overflow-hidden">
                   <POSProductGrid
                     products={displayProducts}
@@ -686,7 +668,7 @@ function PosPageContent() {
         </div>
 
         {/* Cart panel — right side (desktop) */}
-        <div className="hidden lg:flex lg:flex-[35]">
+        <div className="hidden lg:flex lg:flex-[40]">
           <POSCartPanel variant="desktop" isRushMode={isRushMode} />
         </div>
       </main>

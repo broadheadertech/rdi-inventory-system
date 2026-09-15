@@ -169,6 +169,8 @@ export const searchPOSProducts = query({
         sku: v.sku,
         size: v.size,
         color: v.color,
+        gender: v.gender ?? "",
+        sizeGroup: v.sizeGroup ?? "",
         priceCentavos: ownPriceByVariant.get(v._id) ?? v.priceCentavos,
         stock: inventoryByVariant[v._id] ?? 0,
       }));
@@ -177,7 +179,10 @@ export const searchPOSProducts = query({
       results.push({
         styleId: style._id,
         styleName: style.name,
+        // For matching promotions to a product, as the cart does.
+        brandId: bId ?? "",
         brandName: brand?.name ?? "",
+        categoryId: style.categoryId ?? "",
         categoryName: category?.name ?? "",
         // The card's price: the style's, unless this branch prices a size itself.
         basePriceCentavos: hasOwnPrice
