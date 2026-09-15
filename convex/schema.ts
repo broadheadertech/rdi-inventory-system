@@ -1149,6 +1149,12 @@ export default defineSchema({
     // tiered
     minSpendCentavos: v.optional(v.number()),
     tieredDiscountCentavos: v.optional(v.number()),
+    // tiered: the reward for reaching the spend — a fixed amount off (absent or
+    // "amount"), or one unit of the cheapest counted item free.
+    tieredRewardType: v.optional(v.union(v.literal("amount"), v.literal("cheapestFree"))),
+    // percentage / fixedAmount: applies only once the cart has at least this
+    // many in-scope items ("2 polos → 50% off"). Absent: from a single item.
+    minQuantity: v.optional(v.number()),
     // percentage / fixedAmount: what the discount is taken from — the in-scope
     // total, or one unit of the highest-priced in-scope item. Absent means
     // whole purchase, which is how every promotion before this setting works.

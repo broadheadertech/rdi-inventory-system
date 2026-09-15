@@ -110,6 +110,21 @@ const STATUS_BADGE: Record<
 
 type DiscountApplication = "wholePurchase" | "highestItem";
 
+type TieredRewardType = "amount" | "cheapestFree";
+
+const TIERED_REWARD_OPTIONS: { value: TieredRewardType; label: string; hint: string }[] = [
+  {
+    value: "amount",
+    label: "Amount off",
+    hint: "Spend ₱2,000 → ₱300 off.",
+  },
+  {
+    value: "cheapestFree",
+    label: "Cheapest item free",
+    hint: "Spend ₱2,000 → one unit of the cheapest counted item is free.",
+  },
+];
+
 const DISCOUNT_APPLICATION_OPTIONS: { value: DiscountApplication; label: string; hint: string }[] = [
   {
     value: "highestItem",
@@ -133,9 +148,13 @@ function formatPromoValue(promo: {
   getQuantity?: number;
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
+  tieredRewardType?: TieredRewardType;
+  minQuantity?: number;
   discountApplication?: DiscountApplication;
 }): string {
-  const onHighest = promo.discountApplication === "highestItem" ? " · highest item" : "";
+  const onHighest =
+    (promo.discountApplication === "highestItem" ? " · highest item" : "") +
+    (promo.minQuantity && promo.minQuantity > 1 ? ` · ${promo.minQuantity}+ items` : "");
   switch (promo.promoType) {
     case "percentage": {
       let s = `${promo.percentageValue ?? 0}%`;
@@ -149,7 +168,9 @@ function formatPromoValue(promo: {
     case "buyXGetY":
       return `Buy ${promo.buyQuantity ?? 0}, Get ${promo.getQuantity ?? 0}`;
     case "tiered":
-      return `Spend ${formatCurrency(promo.minSpendCentavos ?? 0)} -> ${formatCurrency(promo.tieredDiscountCentavos ?? 0)} off`;
+      return promo.tieredRewardType === "cheapestFree"
+        ? `Spend ${formatCurrency(promo.minSpendCentavos ?? 0)} -> cheapest item free`
+        : `Spend ${formatCurrency(promo.minSpendCentavos ?? 0)} -> ${formatCurrency(promo.tieredDiscountCentavos ?? 0)} off`;
     default:
       return "-";
   }
@@ -170,6 +191,8 @@ interface PromoForm {
   getQuantity: string;
   minSpendCentavos: string;
   tieredDiscountCentavos: string;
+  tieredRewardType: TieredRewardType;
+  minQuantity: string;
   discountApplication: DiscountApplication;
   startDate: string;
   endDate: string;
@@ -213,6 +236,8 @@ function emptyForm(): PromoForm {
     getQuantity: "",
     minSpendCentavos: "",
     tieredDiscountCentavos: "",
+    tieredRewardType: "amount",
+    minQuantity: "",
     // New promotions discount the highest-priced item unless set otherwise.
     discountApplication: "highestItem",
     startDate: "",
@@ -386,6 +411,8 @@ export default function PromotionsPage() {
       getQuantity: promo.getQuantity?.toString() ?? "",
       minSpendCentavos: promo.minSpendCentavos?.toString() ?? "",
       tieredDiscountCentavos: promo.tieredDiscountCentavos?.toString() ?? "",
+      tieredRewardType: promo.tieredRewardType ?? "amount",
+      minQuantity: promo.minQuantity?.toString() ?? "",
       // A promotion saved before the setting existed discounts the whole purchase.
       discountApplication: promo.discountApplication ?? "wholePurchase",
       startDate: tsToDateInput(promo.startDate),
@@ -467,8 +494,13 @@ export default function PromotionsPage() {
           ? parseInt(form.minSpendCentavos, 10)
           : undefined,
       tieredDiscountCentavos:
-        form.promoType === "tiered" && form.tieredDiscountCentavos
+        form.promoType === "tiered" && form.tieredRewardType === "amount" && form.tieredDiscountCentavos
           ? parseInt(form.tieredDiscountCentavos, 10)
+          : undefined,
+      tieredRewardType: form.promoType === "tiered" ? form.tieredRewardType : undefined,
+      minQuantity:
+        (form.promoType === "percentage" || form.promoType === "fixedAmount") && form.minQuantity
+          ? parseInt(form.minQuantity, 10)
           : undefined,
       discountApplication:
         form.promoType === "percentage" || form.promoType === "fixedAmount"
@@ -871,6 +903,25 @@ export default function PromotionsPage() {
               </div>
             )}
 
+            {(form.promoType === "percentage" || form.promoType === "fixedAmount") && (
+              <div className="space-y-2">
+                <Label htmlFor="promo-min-qty">Minimum items (optional)</Label>
+                <Input
+                  id="promo-min-qty"
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="e.g. 2"
+                  value={form.minQuantity}
+                  onChange={(e) => updateField("minQuantity", e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Applies only when the cart has at least this many items in the promo&apos;s scope —
+                  e.g. 2 for &ldquo;2 polos → 50% off&rdquo;. Leave blank to apply from one item.
+                </p>
+              </div>
+            )}
+
             {form.promoType === "buyXGetY" && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-2">
@@ -908,38 +959,70 @@ export default function PromotionsPage() {
             )}
 
             {form.promoType === "tiered" && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-3">
                 <div className="space-y-2">
-                  <Label htmlFor="promo-min-spend">
-                    Min Spend (centavos){" "}
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="promo-min-spend"
-                    type="number"
-                    min="1"
-                    placeholder="e.g. 200000"
-                    value={form.minSpendCentavos}
-                    onChange={(e) =>
-                      updateField("minSpendCentavos", e.target.value)
-                    }
-                  />
+                  <Label>Reward when the spend is reached</Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {TIERED_REWARD_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className={cn(
+                          "flex cursor-pointer items-start gap-2.5 rounded-md border p-2.5 text-sm transition-colors",
+                          form.tieredRewardType === option.value
+                            ? "border-primary bg-primary/5"
+                            : "hover:bg-muted/50"
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="tieredRewardType"
+                          className="mt-0.5 accent-primary"
+                          checked={form.tieredRewardType === option.value}
+                          onChange={() => updateField("tieredRewardType", option.value)}
+                        />
+                        <span>
+                          <span className="font-medium">{option.label}</span>
+                          <span className="block text-xs text-muted-foreground">{option.hint}</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="promo-tiered-disc">
-                    Discount Amount (centavos){" "}
-                    <span className="text-destructive">*</span>
-                  </Label>
-                  <Input
-                    id="promo-tiered-disc"
-                    type="number"
-                    min="1"
-                    placeholder="e.g. 50000"
-                    value={form.tieredDiscountCentavos}
-                    onChange={(e) =>
-                      updateField("tieredDiscountCentavos", e.target.value)
-                    }
-                  />
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="promo-min-spend">
+                      Min Spend (centavos){" "}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      id="promo-min-spend"
+                      type="number"
+                      min="1"
+                      placeholder="e.g. 200000"
+                      value={form.minSpendCentavos}
+                      onChange={(e) =>
+                        updateField("minSpendCentavos", e.target.value)
+                      }
+                    />
+                  </div>
+                  {form.tieredRewardType === "amount" && (
+                    <div className="space-y-2">
+                      <Label htmlFor="promo-tiered-disc">
+                        Discount Amount (centavos){" "}
+                        <span className="text-destructive">*</span>
+                      </Label>
+                      <Input
+                        id="promo-tiered-disc"
+                        type="number"
+                        min="1"
+                        placeholder="e.g. 50000"
+                        value={form.tieredDiscountCentavos}
+                        onChange={(e) =>
+                          updateField("tieredDiscountCentavos", e.target.value)
+                        }
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}

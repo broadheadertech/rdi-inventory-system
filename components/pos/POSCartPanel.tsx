@@ -24,6 +24,8 @@ import {
   Split,
   Zap,
   MoreHorizontal,
+  Sparkles,
+  Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -37,7 +39,7 @@ import type { DiscountType, PaymentMethod } from "@/lib/constants";
 import type { Id } from "@/convex/_generated/dataModel";
 import { ReceiptViewer } from "@/components/pos/ReceiptViewer";
 import { CrossSellStrip } from "@/components/pos/CrossSellStrip";
-import { usePromoPreview } from "@/lib/hooks/usePromoPreview";
+import { usePromoPreview, type PromoSuggestions } from "@/lib/hooks/usePromoPreview";
 import type { PromoResult } from "@/convex/_helpers/promoCalculations";
 
 type TransactionResult = {
@@ -55,7 +57,7 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
     selectedPromoId, setPromoId,
   } = usePOSCart();
 
-  const { activePromos, promoPreview } = usePromoPreview(items, selectedPromoId, discountType);
+  const { activePromos, promoPreview, promoSuggestions } = usePromoPreview(items, selectedPromoId, discountType);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
@@ -124,6 +126,7 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
           setPromoId={setPromoId}
           activePromos={activePromos}
           promoPreview={promoPreview}
+          promoSuggestions={promoSuggestions}
           heldTransactions={heldTransactions}
           updateQuantity={updateQuantity}
           removeItem={removeItem}
@@ -276,6 +279,7 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
                       selectedPromoId={selectedPromoId}
                       setPromoId={setPromoId}
                       promoPreview={promoPreview}
+                      promoSuggestions={promoSuggestions}
                     />
                     <CartActions
                       items={items}
@@ -523,12 +527,14 @@ function PromoSelector({
   selectedPromoId,
   setPromoId,
   promoPreview,
+  promoSuggestions,
 }: {
   discountType: DiscountType;
   activePromos: ActivePromo[];
   selectedPromoId: string | null;
   setPromoId: (promoId: string | null) => void;
   promoPreview: PromoResult | null;
+  promoSuggestions: PromoSuggestions;
 }) {
   const [showAllPromos, setShowAllPromos] = useState(false);
 
@@ -540,8 +546,30 @@ function PromoSelector({
     ? activePromos.find((p) => String(p._id) === selectedPromoId)
     : null;
 
+  const { best, applicable, hints, byId } = promoSuggestions;
+  const selectedSaving = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
+  // A promotion that would save the customer more than the one applied.
+  const better =
+    selectedPromo && best && best.promoId !== selectedPromoId && best.discountCentavos > selectedSaving
+      ? best
+      : null;
+  const hasSuggestions = applicable.length > 0 || hints.length > 0;
+
   const quickPromos = activePromos.slice(0, 3);
   const otherPromos = activePromos.slice(3);
+
+  const typeBadge = (type: ActivePromo["promoType"]) =>
+    type === "percentage"
+      ? "%"
+      : type === "fixedAmount"
+        ? "₱"
+        : type === "buyXGetY"
+          ? "B+G"
+          : type === "tiered"
+            ? "Spend"
+            : type === "crossSell"
+              ? "X-Sell"
+              : "PWP";
 
   return (
     <div className="mt-3">
@@ -550,28 +578,92 @@ function PromoSelector({
       </p>
 
       {selectedPromo ? (
-        <div className="flex items-center gap-2 rounded-md border border-orange-400 bg-orange-50 px-3 py-2">
-          <Tag className="h-4 w-4 text-orange-600 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-orange-900 truncate">
-              {selectedPromo.name}
-            </p>
-            {promoPreview?.applicable && promoPreview.discountCentavos > 0 && (
-              <p className="text-xs text-orange-700">
-                Save {formatCurrency(promoPreview.discountCentavos)}
+        <>
+          <div className="flex items-center gap-2 rounded-md border border-orange-400 bg-orange-50 px-3 py-2">
+            <Tag className="h-4 w-4 text-orange-600 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-orange-900 truncate">
+                {selectedPromo.name}
               </p>
-            )}
-            {promoPreview && !promoPreview.applicable && (
-              <p className="text-xs text-muted-foreground">
-                {promoPreview.description}
-              </p>
-            )}
+              {promoPreview?.applicable && promoPreview.discountCentavos > 0 && (
+                <p className="text-xs text-orange-700">
+                  Save {formatCurrency(promoPreview.discountCentavos)}
+                </p>
+              )}
+              {promoPreview && !promoPreview.applicable && (
+                <p className="text-xs text-muted-foreground">
+                  {byId[selectedPromoId!]?.hint ?? promoPreview.description}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={() => setPromoId(null)}
+              className="shrink-0 rounded-sm p-0.5 text-orange-600 hover:bg-orange-100"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
+          {better && (
+            <button
+              onClick={() => setPromoId(better.promoId)}
+              className="mt-1.5 flex w-full items-center gap-2 rounded-md border border-dashed border-green-500 bg-green-50 px-3 py-1.5 text-left text-xs text-green-800 transition-colors hover:bg-green-100"
+            >
+              <Sparkles className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 flex-1 truncate">
+                Better: <span className="font-semibold">{better.name}</span> saves{" "}
+                {formatCurrency(better.discountCentavos)}
+              </span>
+              <span className="shrink-0 font-semibold">Switch</span>
+            </button>
+          )}
+        </>
+      ) : hasSuggestions ? (
+        <div className="space-y-1.5">
+          {best && (
+            <button
+              onClick={() => setPromoId(best.promoId)}
+              className="flex w-full items-center gap-2 rounded-md border-2 border-green-500 bg-green-50 px-3 py-2 text-left transition-colors hover:bg-green-100"
+            >
+              <Sparkles className="h-4 w-4 shrink-0 text-green-600" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-green-700">Best promo</p>
+                <p className="truncate text-sm font-medium text-green-900">{best.name}</p>
+              </div>
+              <span className="shrink-0 text-sm font-bold text-green-700">
+                Save {formatCurrency(best.discountCentavos)}
+              </span>
+              <span className="shrink-0 rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white">
+                Apply
+              </span>
+            </button>
+          )}
+          {applicable.slice(1, 4).map((s) => (
+            <button
+              key={s.promoId}
+              onClick={() => setPromoId(s.promoId)}
+              className="flex w-full items-center gap-2 rounded-md border px-3 py-1.5 text-left text-sm transition-colors hover:border-orange-400 hover:bg-orange-50"
+            >
+              <Tag className="h-3.5 w-3.5 shrink-0 text-orange-500" />
+              <span className="min-w-0 flex-1 truncate">{s.name}</span>
+              <span className="shrink-0 text-xs font-medium text-muted-foreground">
+                Save {formatCurrency(s.discountCentavos)}
+              </span>
+            </button>
+          ))}
+          {hints.map((h) => (
+            <p key={h.promoId} className="flex items-start gap-1.5 px-1 text-xs text-muted-foreground">
+              <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+              <span>
+                <span className="font-medium text-foreground">{h.name}:</span> {h.hint}
+              </span>
+            </p>
+          ))}
           <button
-            onClick={() => setPromoId(null)}
-            className="shrink-0 rounded-sm p-0.5 text-orange-600 hover:bg-orange-100"
+            onClick={() => setShowAllPromos(true)}
+            className="flex items-center gap-1 px-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
           >
-            <X className="h-4 w-4" />
+            <MoreHorizontal className="h-3.5 w-3.5" />
+            All promotions ({activePromos.length})
           </button>
         </div>
       ) : (
@@ -614,6 +706,7 @@ function PromoSelector({
                 <h2 className="text-base font-bold">All Promotions</h2>
                 <p className="text-xs text-muted-foreground">
                   {activePromos.length} available promotion{activePromos.length !== 1 ? "s" : ""}
+                  {applicable.length > 0 && ` · ${applicable.length} apply to this cart`}
                 </p>
               </div>
               <button
@@ -624,33 +717,62 @@ function PromoSelector({
               </button>
             </div>
 
-            {/* Promo list */}
+            {/* Promo list — the ones this cart gets first, most savings first */}
             <div className="flex-1 overflow-y-auto divide-y divide-border">
-              {activePromos.map((promo) => (
-                <button
-                  key={String(promo._id)}
-                  onClick={() => {
-                    setPromoId(String(promo._id));
-                    setShowAllPromos(false);
-                  }}
-                  className="flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-orange-50"
-                >
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-100">
-                    <Tag className="h-4 w-4 text-orange-600" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{promo.name}</p>
-                    {promo.description && (
-                      <p className="text-xs text-muted-foreground truncate">
-                        {promo.description}
-                      </p>
-                    )}
-                  </div>
-                  <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-orange-700">
-                    {promo.promoType === "percentage" ? "%" : promo.promoType === "fixedAmount" ? "₱" : promo.promoType === "buyXGetY" ? "B+G" : "Tier"}
-                  </span>
-                </button>
-              ))}
+              {[...activePromos]
+                .sort(
+                  (a, b) =>
+                    (byId[String(b._id)]?.discountCentavos ?? 0) - (byId[String(a._id)]?.discountCentavos ?? 0)
+                )
+                .map((promo) => {
+                  const status = byId[String(promo._id)];
+                  const isBest = best?.promoId === String(promo._id);
+                  return (
+                    <button
+                      key={String(promo._id)}
+                      onClick={() => {
+                        setPromoId(String(promo._id));
+                        setShowAllPromos(false);
+                      }}
+                      className={cn(
+                        "flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-orange-50",
+                        isBest && "bg-green-50"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+                          isBest ? "bg-green-100" : "bg-orange-100"
+                        )}
+                      >
+                        {isBest ? (
+                          <Sparkles className="h-4 w-4 text-green-600" />
+                        ) : (
+                          <Tag className="h-4 w-4 text-orange-600" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{promo.name}</p>
+                        {status?.hint ? (
+                          <p className="text-xs text-amber-700 truncate">{status.hint}</p>
+                        ) : (
+                          promo.description && (
+                            <p className="text-xs text-muted-foreground truncate">{promo.description}</p>
+                          )
+                        )}
+                      </div>
+                      {status?.applies ? (
+                        <span className="shrink-0 text-xs font-semibold text-green-700">
+                          {isBest ? "Best · " : ""}Save {formatCurrency(status.discountCentavos)}
+                        </span>
+                      ) : (
+                        <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-orange-700">
+                          {typeBadge(promo.promoType)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
             </div>
           </div>
         </div>
@@ -816,6 +938,7 @@ function CartContent({
   setPromoId,
   activePromos,
   promoPreview,
+  promoSuggestions,
   heldTransactions,
   updateQuantity,
   removeItem,
@@ -839,6 +962,7 @@ function CartContent({
   setPromoId: (promoId: string | null) => void;
   activePromos: ActivePromo[];
   promoPreview: PromoResult | null;
+  promoSuggestions: PromoSuggestions;
   heldTransactions: HeldTransaction[];
   updateQuantity: (variantId: CartItem["variantId"], delta: number) => void;
   removeItem: (variantId: CartItem["variantId"]) => void;
@@ -929,6 +1053,7 @@ function CartContent({
                 selectedPromoId={selectedPromoId}
                 setPromoId={setPromoId}
                 promoPreview={promoPreview}
+                promoSuggestions={promoSuggestions}
               />
               <CartActions
                 items={items}

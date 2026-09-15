@@ -13,6 +13,7 @@ import { requireShiftForSale } from "./shifts";
 import { branchPrice } from "../_helpers/branchPricing";
 import {
   calculatePromoDiscount,
+  toPromoInput,
   type CartItemForPromo,
 } from "../_helpers/promoCalculations";
 
@@ -337,26 +338,9 @@ export const createTransaction = mutation({
         });
       }
 
-      const promoResult = calculatePromoDiscount(enrichedItems, {
-        name: promo.name,
-        promoType: promo.promoType,
-        percentageValue: promo.percentageValue,
-        maxDiscountCentavos: promo.maxDiscountCentavos,
-        fixedAmountCentavos: promo.fixedAmountCentavos,
-        buyQuantity: promo.buyQuantity,
-        getQuantity: promo.getQuantity,
-        minSpendCentavos: promo.minSpendCentavos,
-        tieredDiscountCentavos: promo.tieredDiscountCentavos,
-        discountApplication: promo.discountApplication,
-        brandIds: promo.brandIds.map(String),
-        categoryIds: promo.categoryIds.map(String),
-        variantIds: promo.variantIds.map(String),
-        styleIds: (promo.styleIds ?? []).map(String),
-        genders: promo.genders ?? [],
-        colors: promo.colors ?? [],
-        sizes: promo.sizes ?? [],
-        agingTiers: promo.agingTiers ?? [],
-      });
+      // The whole promotion, reward fields included — the cart preview reads the
+      // same, so what the till shows is what the sale gives.
+      const promoResult = calculatePromoDiscount(enrichedItems, toPromoInput(promo));
 
       if (promoResult.applicable) {
         promoDiscountCentavos = promoResult.discountCentavos;

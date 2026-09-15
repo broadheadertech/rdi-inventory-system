@@ -58,6 +58,8 @@ export const getActivePromotions = query({
       getQuantity: p.getQuantity,
       minSpendCentavos: p.minSpendCentavos,
       tieredDiscountCentavos: p.tieredDiscountCentavos,
+      tieredRewardType: p.tieredRewardType,
+      minQuantity: p.minQuantity,
       discountApplication: p.discountApplication,
       brandIds: p.brandIds.map(String),
       categoryIds: p.categoryIds.map(String),

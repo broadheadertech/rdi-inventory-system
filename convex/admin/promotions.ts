@@ -43,6 +43,8 @@ const commonArgs = {
   getQuantity: v.optional(v.number()),
   minSpendCentavos: v.optional(v.number()),
   tieredDiscountCentavos: v.optional(v.number()),
+  tieredRewardType: v.optional(v.union(v.literal("amount"), v.literal("cheapestFree"))),
+  minQuantity: v.optional(v.number()),
   discountApplication: v.optional(v.union(v.literal("wholePurchase"), v.literal("highestItem"))),
   branchIds: v.array(v.id("branches")),
   branchClassifications: v.optional(
@@ -81,6 +83,8 @@ function validatePromoFields(args: {
   getQuantity?: number;
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
+  tieredRewardType?: "amount" | "cheapestFree";
+  minQuantity?: number;
   crossSellRewardType?: "percentage" | "fixedAmount";
   pwpTriggerMinQuantity?: number;
   pwpRewardVariantIds?: string[];
@@ -90,6 +94,10 @@ function validatePromoFields(args: {
 }) {
   if (args.endDate !== undefined && args.startDate >= args.endDate) {
     throw new ConvexError("Start date must be before end date");
+  }
+
+  if (args.minQuantity !== undefined && (!Number.isInteger(args.minQuantity) || args.minQuantity < 1)) {
+    throw new ConvexError("Minimum items must be a whole number, 1 or more");
   }
 
   switch (args.promoType) {
@@ -122,7 +130,10 @@ function validatePromoFields(args: {
       if (!args.minSpendCentavos || args.minSpendCentavos <= 0) {
         throw new ConvexError("Minimum spend must be positive");
       }
-      if (!args.tieredDiscountCentavos || args.tieredDiscountCentavos <= 0) {
+      if (
+        args.tieredRewardType !== "cheapestFree" &&
+        (!args.tieredDiscountCentavos || args.tieredDiscountCentavos <= 0)
+      ) {
         throw new ConvexError("Tiered discount amount must be positive");
       }
       break;

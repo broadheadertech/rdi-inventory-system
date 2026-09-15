@@ -5,20 +5,25 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { checkoutPricing } from "../_helpers/branchPricing";
 import {
   calculatePromoDiscount,
+  toPromoInput,
   type CartItemForPromo,
-  type PromoInput,
 } from "../_helpers/promoCalculations";
 
 /** The offer as a customer reads it, e.g. "20% OFF your highest-priced item". */
 function describeDiscount(promo: Doc<"promotions">): string {
   const onHighest =
-    promo.discountApplication === "highestItem" ? " your highest-priced item" : "";
+    (promo.discountApplication === "highestItem" ? " your highest-priced item" : "") +
+    (promo.minQuantity && promo.minQuantity > 1 ? ` when you buy ${promo.minQuantity}+` : "");
   if (promo.promoType === "percentage" && promo.percentageValue) {
     return `${promo.percentageValue}% OFF${onHighest}`;
   }
   if (promo.promoType === "fixedAmount" && promo.fixedAmountCentavos) {
     const amount = (promo.fixedAmountCentavos / 100).toLocaleString("en-PH");
     return `₱${amount} OFF${onHighest}`;
+  }
+  if (promo.promoType === "tiered" && promo.tieredRewardType === "cheapestFree") {
+    const spend = ((promo.minSpendCentavos ?? 0) / 100).toLocaleString("en-PH");
+    return `Spend ₱${spend}, cheapest item FREE`;
   }
   if (promo.promoType === "buyXGetY") {
     return `Buy ${promo.buyQuantity ?? 0} Get ${promo.getQuantity ?? 0}`;
@@ -176,38 +181,6 @@ async function findVoucher(ctx: QueryCtx | MutationCtx, code: string) {
     if (voucher) return voucher;
   }
   return null;
-}
-
-/** A promotion as the shared calculator reads it — the same calculation the POS uses. */
-function toPromoInput(p: Doc<"promotions">): PromoInput {
-  return {
-    name: p.name,
-    promoType: p.promoType,
-    percentageValue: p.percentageValue,
-    maxDiscountCentavos: p.maxDiscountCentavos,
-    fixedAmountCentavos: p.fixedAmountCentavos,
-    buyQuantity: p.buyQuantity,
-    getQuantity: p.getQuantity,
-    minSpendCentavos: p.minSpendCentavos,
-    tieredDiscountCentavos: p.tieredDiscountCentavos,
-    discountApplication: p.discountApplication,
-    brandIds: p.brandIds.map(String),
-    categoryIds: p.categoryIds.map(String),
-    variantIds: p.variantIds.map(String),
-    styleIds: (p.styleIds ?? []).map(String),
-    genders: p.genders ?? [],
-    colors: p.colors ?? [],
-    sizes: p.sizes ?? [],
-    agingTiers: p.agingTiers ?? [],
-    crossSellRewardType: p.crossSellRewardType,
-    rewardBrandIds: (p.rewardBrandIds ?? []).map(String),
-    rewardCategoryIds: (p.rewardCategoryIds ?? []).map(String),
-    rewardStyleIds: (p.rewardStyleIds ?? []).map(String),
-    rewardVariantIds: (p.rewardVariantIds ?? []).map(String),
-    pwpTriggerMinQuantity: p.pwpTriggerMinQuantity,
-    pwpRewardVariantIds: (p.pwpRewardVariantIds ?? []).map(String),
-    pwpRewardPriceCentavos: p.pwpRewardPriceCentavos,
-  };
 }
 
 /** Order lines with the brand, category and attributes a promotion's scope is written in. */

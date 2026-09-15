@@ -1,5 +1,7 @@
-// Pure promo calculation functions — NO Convex dependencies.
+// Pure promo calculation functions — NO Convex dependencies (type imports only).
 // Importable by both Convex mutations and React components.
+
+import type { Doc } from "../_generated/dataModel";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -13,6 +15,10 @@ export type PromoInput = {
   getQuantity?: number;
   minSpendCentavos?: number;
   tieredDiscountCentavos?: number;
+  // tiered: a fixed amount off (default), or the cheapest counted item free
+  tieredRewardType?: "amount" | "cheapestFree";
+  // percentage / fixedAmount: needs at least this many in-scope items
+  minQuantity?: number;
   // percentage / fixedAmount: take the discount from the in-scope total
   // (default), or from one unit of the highest-priced in-scope item.
   discountApplication?: "wholePurchase" | "highestItem";
@@ -52,6 +58,40 @@ export type CartItemForPromo = {
   quantity: number;
   agingTier?: "green" | "yellow" | "red";
 };
+
+/** A promotion document as the calculator reads it — shared by the POS sale and online vouchers. */
+export function toPromoInput(p: Doc<"promotions">): PromoInput {
+  return {
+    name: p.name,
+    promoType: p.promoType,
+    percentageValue: p.percentageValue,
+    maxDiscountCentavos: p.maxDiscountCentavos,
+    fixedAmountCentavos: p.fixedAmountCentavos,
+    buyQuantity: p.buyQuantity,
+    getQuantity: p.getQuantity,
+    minSpendCentavos: p.minSpendCentavos,
+    tieredDiscountCentavos: p.tieredDiscountCentavos,
+    tieredRewardType: p.tieredRewardType,
+    minQuantity: p.minQuantity,
+    discountApplication: p.discountApplication,
+    brandIds: p.brandIds.map(String),
+    categoryIds: p.categoryIds.map(String),
+    variantIds: p.variantIds.map(String),
+    styleIds: (p.styleIds ?? []).map(String),
+    genders: p.genders ?? [],
+    colors: p.colors ?? [],
+    sizes: p.sizes ?? [],
+    agingTiers: p.agingTiers ?? [],
+    crossSellRewardType: p.crossSellRewardType,
+    rewardBrandIds: (p.rewardBrandIds ?? []).map(String),
+    rewardCategoryIds: (p.rewardCategoryIds ?? []).map(String),
+    rewardStyleIds: (p.rewardStyleIds ?? []).map(String),
+    rewardVariantIds: (p.rewardVariantIds ?? []).map(String),
+    pwpTriggerMinQuantity: p.pwpTriggerMinQuantity,
+    pwpRewardVariantIds: (p.pwpRewardVariantIds ?? []).map(String),
+    pwpRewardPriceCentavos: p.pwpRewardPriceCentavos,
+  };
+}
 
 export type PromoResult = {
   applicable: boolean;
@@ -133,6 +173,20 @@ export function calculatePromoDiscount(
     (sum, item) => sum + item.unitPriceCentavos * item.quantity,
     0
   );
+  const eligibleQuantity = eligible.reduce((sum, item) => sum + item.quantity, 0);
+
+  // A minimum quantity: "2 polos → 50% off" gives nothing on one polo.
+  if (
+    (promo.promoType === "percentage" || promo.promoType === "fixedAmount") &&
+    promo.minQuantity &&
+    eligibleQuantity < promo.minQuantity
+  ) {
+    return {
+      applicable: false,
+      discountCentavos: 0,
+      description: `${promo.name} (needs ${promo.minQuantity} items)`,
+    };
+  }
 
   // What a percentage or fixed-amount discount is taken from. "highestItem" is
   // a single unit of the priciest in-scope item: Pants ₱100 + Shirt ₱50 at 10%
@@ -150,7 +204,7 @@ export function calculatePromoDiscount(
     case "buyXGetY":
       return calcBuyXGetY(eligible, promo);
     case "tiered":
-      return calcTiered(eligibleTotal, promo);
+      return calcTiered(eligible, eligibleTotal, promo);
     case "crossSell":
       return calcCrossSell(items, promo);
     case "pwp":
@@ -163,7 +217,9 @@ export function calculatePromoDiscount(
 // ─── Per-Type Calculators ───────────────────────────────────────────────────
 
 function highestItemSuffix(promo: PromoInput): string {
-  return promo.discountApplication === "highestItem" ? " on the highest-priced item" : "";
+  const onHighest = promo.discountApplication === "highestItem" ? " on the highest-priced item" : "";
+  const minQuantity = promo.minQuantity && promo.minQuantity > 1 ? ` when buying ${promo.minQuantity}+` : "";
+  return onHighest + minQuantity;
 }
 
 function calcPercentage(
@@ -252,17 +308,28 @@ function calcBuyXGetY(
 }
 
 function calcTiered(
+  eligible: CartItemForPromo[],
   eligibleTotal: number,
   promo: PromoInput
 ): PromoResult {
   const minSpend = promo.minSpendCentavos ?? 0;
-  const discountOff = promo.tieredDiscountCentavos ?? 0;
-
-  if (minSpend <= 0 || discountOff <= 0) {
+  if (minSpend <= 0 || eligibleTotal < minSpend) {
     return { applicable: false, discountCentavos: 0, description: "" };
   }
 
-  if (eligibleTotal < minSpend) {
+  // Reach the spend and one unit of the cheapest counted item is free — the
+  // standard rule, so the customer can't pick an expensive item as the freebie.
+  if (promo.tieredRewardType === "cheapestFree") {
+    const cheapest = Math.min(...eligible.map((item) => item.unitPriceCentavos));
+    return {
+      applicable: true,
+      discountCentavos: cheapest,
+      description: `${promo.name} (Spend ₱${(minSpend / 100).toFixed(0)}, cheapest item free)`,
+    };
+  }
+
+  const discountOff = promo.tieredDiscountCentavos ?? 0;
+  if (discountOff <= 0) {
     return { applicable: false, discountCentavos: 0, description: "" };
   }
 
@@ -387,4 +454,114 @@ function calcCrossSell(
       description: `${promo.name} (₱${(fixedOff / 100).toFixed(0)} off reward items)`,
     };
   }
+}
+
+// ─── Progress toward a promotion ────────────────────────────────────────────
+// For the POS: whether a cart gets a promotion now, what it saves, and what
+// adding would reach it (or reach more of it). The saving is the calculator's
+// own result, so a suggestion never promises more than the sale gives.
+
+export type PromoProgress = {
+  applies: boolean;
+  discountCentavos: number;
+  description: string;
+  /** What to add to reach the promotion, or to get more from it. */
+  hint: string | null;
+  /** How far the cart is from that, 0–1 — smaller is closer. */
+  gap: number;
+};
+
+function peso(centavos: number): string {
+  return `₱${(centavos / 100).toLocaleString("en-PH", { maximumFractionDigits: 2 })}`;
+}
+
+function items(n: number): string {
+  return `${n} more item${n === 1 ? "" : "s"}`;
+}
+
+function offerLabel(promo: PromoInput): string {
+  if (promo.promoType === "percentage") return `${promo.percentageValue ?? 0}% off`;
+  if (promo.promoType === "fixedAmount") return `${peso(promo.fixedAmountCentavos ?? 0)} off`;
+  return "the discount";
+}
+
+export function promoProgress(items_: CartItemForPromo[], promo: PromoInput): PromoProgress {
+  const result = calculatePromoDiscount(items_, promo);
+  const applies = result.applicable && result.discountCentavos > 0;
+  const progress: PromoProgress = {
+    applies,
+    discountCentavos: applies ? result.discountCentavos : 0,
+    description: result.description,
+    hint: null,
+    gap: 1,
+  };
+
+  // Only promotions the cart already has something toward get a hint.
+  const eligible = filterEligibleItems(items_, promo);
+  if (eligible.length === 0) return progress;
+  const quantity = eligible.reduce((sum, item) => sum + item.quantity, 0);
+  const total = eligible.reduce((sum, item) => sum + item.unitPriceCentavos * item.quantity, 0);
+
+  switch (promo.promoType) {
+    case "percentage":
+    case "fixedAmount": {
+      const needed = promo.minQuantity ?? 0;
+      if (!applies && needed > quantity) {
+        progress.hint = `Add ${items(needed - quantity)} for ${offerLabel(promo)}`;
+        progress.gap = (needed - quantity) / needed;
+      }
+      break;
+    }
+    case "buyXGetY": {
+      const buy = promo.buyQuantity ?? 0;
+      const get = promo.getQuantity ?? 0;
+      const group = buy + get;
+      if (buy <= 0 || get <= 0) break;
+      if (quantity < group) {
+        progress.hint = `Add ${items(group - quantity)} to get ${get === 1 ? "one" : get} free`;
+        progress.gap = (group - quantity) / group;
+      } else if (quantity % group >= buy) {
+        const more = group - (quantity % group);
+        progress.hint = `Add ${items(more)} to get ${get === 1 ? "another one" : `${get} more`} free`;
+        progress.gap = more / group;
+      }
+      break;
+    }
+    case "tiered": {
+      const minSpend = promo.minSpendCentavos ?? 0;
+      if (minSpend > 0 && total < minSpend) {
+        const reward =
+          promo.tieredRewardType === "cheapestFree"
+            ? "the cheapest item free"
+            : `${peso(promo.tieredDiscountCentavos ?? 0)} off`;
+        progress.hint = `Spend ${peso(minSpend - total)} more for ${reward}`;
+        progress.gap = (minSpend - total) / minSpend;
+      }
+      break;
+    }
+    case "pwp": {
+      const needed = promo.pwpTriggerMinQuantity ?? 1;
+      const price = peso(promo.pwpRewardPriceCentavos ?? 0);
+      if (quantity < needed) {
+        progress.hint = `Add ${items(needed - quantity)} to unlock the reward at ${price}`;
+        progress.gap = (needed - quantity) / needed;
+      } else if (!applies) {
+        progress.hint = `Add the reward item for ${price}`;
+        progress.gap = 0.5;
+      }
+      break;
+    }
+    case "crossSell": {
+      if (!applies) {
+        const off =
+          promo.crossSellRewardType === "fixedAmount"
+            ? `${peso(promo.fixedAmountCentavos ?? 0)} off`
+            : `${promo.percentageValue ?? 0}% off`;
+        progress.hint = `Add a matching item for ${off} it`;
+        progress.gap = 0.5;
+      }
+      break;
+    }
+  }
+  return progress;
 }
