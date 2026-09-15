@@ -3,6 +3,7 @@ import { action, internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import type { Id } from "../_generated/dataModel";
+import { duplicateVariantMessage, variantWithColorSize } from "../_helpers/variantIdentity";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -339,6 +340,13 @@ export const _createImportedVariant = internalMutation({
         }
         return { status: "skipped" as const, reason: `Barcode "${args.barcode}" already exists` };
       }
+    }
+
+    // One SKU per color and size within a style: a row for a combination the
+    // style already has under another SKU is skipped, not added beside it.
+    const sameColorSize = await variantWithColorSize(ctx, args.styleId, args.color, args.size);
+    if (sameColorSize) {
+      return { status: "skipped" as const, reason: duplicateVariantMessage(sameColorSize) };
     }
 
     // Auto-assign color code letter per unique color within this style

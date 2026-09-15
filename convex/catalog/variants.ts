@@ -2,6 +2,7 @@ import { v, ConvexError } from "convex/values";
 import { query, mutation } from "../_generated/server";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
+import { duplicateVariantMessage, variantWithColorSize } from "../_helpers/variantIdentity";
 
 // ─── Queries ────────────────────────────────────────────────────────────────
 
@@ -96,6 +97,15 @@ export const createVariant = mutation({
       throw new ConvexError({
         code: "STYLE_INACTIVE",
         message: "Cannot add variants to an inactive style",
+      });
+    }
+
+    // One SKU per color and size within a style.
+    const sameColorSize = await variantWithColorSize(ctx, args.styleId, args.color, args.size);
+    if (sameColorSize) {
+      throw new ConvexError({
+        code: "DUPLICATE_VARIANT",
+        message: duplicateVariantMessage(sameColorSize),
       });
     }
 
@@ -268,6 +278,25 @@ export const updateVariant = mutation({
         before.barcode = existing.barcode;
         after.barcode = newBarcode;
         patch.barcode = newBarcode;
+      }
+    }
+
+    // A new color or size must not repeat another of this style's variants.
+    const colorChanged = args.color !== undefined && args.color !== existing.color;
+    const sizeChanged = args.size !== undefined && args.size !== existing.size;
+    if (colorChanged || sizeChanged) {
+      const clash = await variantWithColorSize(
+        ctx,
+        existing.styleId,
+        args.color ?? existing.color,
+        args.size ?? existing.size,
+        existing._id
+      );
+      if (clash) {
+        throw new ConvexError({
+          code: "DUPLICATE_VARIANT",
+          message: duplicateVariantMessage(clash),
+        });
       }
     }
 
