@@ -261,6 +261,8 @@ export default function HqReportsPage() {
           salesCentavos: number;
           sharePercent: number;
           itemsSold: number;
+          itemsGiven: number;
+          givenValueCentavos: number;
           redemptions: number;
         }[];
       }
@@ -1148,6 +1150,12 @@ export default function HqReportsPage() {
                       })()}
                     </th>
                     <th className="pb-2 text-right font-medium">Items Sold</th>
+                    <th className="pb-2 text-right font-medium" title="Pieces handed over free — gifts, buy-X-get-Y, cheapest-item-free">
+                      Items Given
+                    </th>
+                    <th className="pb-2 text-right font-medium" title="What those free pieces were worth">
+                      Value Given
+                    </th>
                     <th className="pb-2 text-right font-medium">Redemption</th>
                   </tr>
                 </thead>
@@ -1163,6 +1171,12 @@ export default function HqReportsPage() {
                       </td>
                       <td className="py-2 text-right tabular-nums">
                         {p.itemsSold.toLocaleString("en-PH")}
+                      </td>
+                      <td className="py-2 text-right tabular-nums">
+                        {p.itemsGiven > 0 ? p.itemsGiven.toLocaleString("en-PH") : "—"}
+                      </td>
+                      <td className="py-2 text-right tabular-nums text-emerald-700">
+                        {p.givenValueCentavos > 0 ? formatCentavos(p.givenValueCentavos) : "—"}
                       </td>
                       <td className="py-2 text-right tabular-nums">
                         {p.redemptions.toLocaleString("en-PH")}
@@ -1191,6 +1205,16 @@ export default function HqReportsPage() {
                       {promoContribs.promotions
                         .reduce((s, p) => s + p.itemsSold, 0)
                         .toLocaleString("en-PH")}
+                    </td>
+                    <td className="pt-2 text-right tabular-nums">
+                      {promoContribs.promotions
+                        .reduce((s, p) => s + p.itemsGiven, 0)
+                        .toLocaleString("en-PH")}
+                    </td>
+                    <td className="pt-2 text-right tabular-nums text-emerald-700">
+                      {formatCentavos(
+                        promoContribs.promotions.reduce((s, p) => s + p.givenValueCentavos, 0),
+                      )}
                     </td>
                     <td className="pt-2 text-right tabular-nums">
                       {promoContribs.promotions

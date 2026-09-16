@@ -16,6 +16,7 @@ import type * as _helpers_passwordHash from "../_helpers/passwordHash.js";
 import type * as _helpers_permissions from "../_helpers/permissions.js";
 import type * as _helpers_priceMath from "../_helpers/priceMath.js";
 import type * as _helpers_promoCalculations from "../_helpers/promoCalculations.js";
+import type * as _helpers_promoGiveaway from "../_helpers/promoGiveaway.js";
 import type * as _helpers_promoSettings from "../_helpers/promoSettings.js";
 import type * as _helpers_promoStacking from "../_helpers/promoStacking.js";
 import type * as _helpers_requireTerminal from "../_helpers/requireTerminal.js";
@@ -187,6 +188,7 @@ declare const fullApi: ApiFromModules<{
   "_helpers/permissions": typeof _helpers_permissions;
   "_helpers/priceMath": typeof _helpers_priceMath;
   "_helpers/promoCalculations": typeof _helpers_promoCalculations;
+  "_helpers/promoGiveaway": typeof _helpers_promoGiveaway;
   "_helpers/promoSettings": typeof _helpers_promoSettings;
   "_helpers/promoStacking": typeof _helpers_promoStacking;
   "_helpers/requireTerminal": typeof _helpers_requireTerminal;

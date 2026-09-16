@@ -5,6 +5,8 @@ import { v, ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { resolveBranchMonthlyTarget, ymdToPeriodYm } from "./branchTargets";
+import { giveawayForSale } from "../_helpers/promoGiveaway";
+import { filterEligibleItems, toPromoInput } from "../_helpers/promoCalculations";
 
 const CHANNEL_VALUES = [
   "inline",
@@ -1333,6 +1335,8 @@ export const getPromotionContributions = query({
           salesCentavos: number;
           sharePercent: number;
           itemsSold: number;
+          itemsGiven: number;
+          givenValueCentavos: number;
           redemptions: number;
         }>,
       };
@@ -1357,6 +1361,8 @@ export const getPromotionContributions = query({
       offer: string;
       salesCentavos: number;
       itemsSold: number;
+      itemsGiven: number;
+      givenValueCentavos: number;
       txnIds: Set<string>;
     };
     const perPromo = new Map<string, PromoAgg>();
@@ -1369,6 +1375,8 @@ export const getPromotionContributions = query({
           offer: p.name,
           salesCentavos: 0,
           itemsSold: 0,
+          itemsGiven: 0,
+          givenValueCentavos: 0,
           txnIds: new Set<string>(),
         };
         perPromo.set(key, cur);
@@ -1400,6 +1408,7 @@ export const getPromotionContributions = query({
         type LineCtx = {
           item: Doc<"transactionItems">;
           variant: Doc<"variants">;
+          style: Doc<"styles"> | null;
           isDiscounted: boolean;
           brandId: Id<"brands"> | null;
         };
@@ -1445,7 +1454,7 @@ export const getPromotionContributions = query({
             (variant.priceCentavos ?? 0) > 0 &&
             it.unitPriceCentavos < variant.priceCentavos;
 
-          lineCtxs.push({ item: it, variant, isDiscounted, brandId });
+          lineCtxs.push({ item: it, variant, style: style ?? null, isDiscounted, brandId });
         }
 
         // Path A — Direct attribution: the promotions the sale was tagged with.
@@ -1461,6 +1470,21 @@ export const getPromotionContributions = query({
           const tagged = taggedIds
             .map((id) => overlappingPromos.find((p) => (p._id as string) === (id as string)))
             .filter((p): p is Doc<"promotions"> => !!p);
+          // The sale's lines as the promo calculator reads them, so a
+          // promotion's own product scope decides what counts towards it.
+          const enrichedLines = lineCtxs.map((l) => ({
+            variantId: String(l.item.variantId),
+            brandId: String(l.brandId ?? ""),
+            categoryId: String(l.style?.categoryId ?? ""),
+            styleId: String(l.variant.styleId),
+            gender: l.variant.gender ?? "",
+            color: l.variant.color,
+            sizeGroup: l.variant.sizeGroup ?? "",
+            size: l.variant.size,
+            unitPriceCentavos: l.item.unitPriceCentavos,
+            quantity: l.item.quantity,
+          }));
+
           for (const promo of tagged) {
             const txnSales = lineCtxs.reduce(
               (s, l) => s + l.item.lineTotalCentavos,
@@ -1471,6 +1495,29 @@ export const getPromotionContributions = query({
               agg.salesCentavos += txnSales;
               agg.itemsSold += lineCtxs.reduce((s, l) => s + l.item.quantity, 0);
               agg.txnIds.add(t._id as string);
+
+              // What this promotion handed over on this sale. The sale records
+              // each promotion's own discount; an older sale carrying a single
+              // promotion recorded only the total, which is that promotion's.
+              const recorded = t.appliedPromotions?.find(
+                (a) => (a.promotionId as string) === (promo._id as string),
+              );
+              const discountCentavos =
+                recorded?.discountCentavos ??
+                (tagged.length === 1 ? (t.promoDiscountAmountCentavos ?? 0) : 0);
+
+              const unitsInScope = filterEligibleItems(
+                enrichedLines,
+                toPromoInput(promo),
+              ).reduce((sum, line) => sum + line.quantity, 0);
+
+              const given = giveawayForSale(promo, {
+                discountCentavos,
+                unitsInScope,
+                hasGift: !!t.giftVariantId,
+              });
+              agg.itemsGiven += given.units;
+              agg.givenValueCentavos += given.valueCentavos;
             }
           }
           if (tagged.length > 0) {
@@ -1534,6 +1581,8 @@ export const getPromotionContributions = query({
         sharePercent:
           totalSalesCentavos > 0 ? (a.salesCentavos / totalSalesCentavos) * 100 : 0,
         itemsSold: Math.round(a.itemsSold),
+        itemsGiven: Math.round(a.itemsGiven),
+        givenValueCentavos: Math.round(a.givenValueCentavos),
         redemptions: a.txnIds.size,
       }))
       .sort((x, y) => y.salesCentavos - x.salesCentavos);
