@@ -8,6 +8,7 @@ import { useState, useMemo, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
+import { SalesCheckpoints } from "@/components/shared/SalesCheckpoints";
 import {
   ResponsiveContainer,
   LineChart,
@@ -446,6 +447,9 @@ export default function HqDashboardPage() {
           </div>
         )}
       </section>
+
+      {/* ── Time Report ── */}
+      <SalesCheckpoints />
 
       {/* ── Graph ── */}
       <section className="space-y-3">

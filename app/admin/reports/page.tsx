@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { downloadCsv, csvAmount, csvPercent, reportFilename } from "@/lib/csv";
+import { SalesCheckpoints } from "@/components/shared/SalesCheckpoints";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1060,6 +1061,13 @@ export default function HqReportsPage() {
           )}
         </div>
       </div>
+
+      {/* ── Time Report ── */}
+      <SalesCheckpoints
+        date={dateEnd}
+        branchId={branchId as Id<"branches"> | undefined}
+        channel={channel}
+      />
 
       {/* ── Promotion Contributions ── */}
       <div>

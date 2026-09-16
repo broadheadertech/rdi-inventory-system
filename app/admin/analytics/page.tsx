@@ -5,6 +5,7 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { cn } from "@/lib/utils";
+import { SalesCheckpoints } from "@/components/shared/SalesCheckpoints";
 import {
   BarChart,
   Bar,
@@ -397,6 +398,9 @@ export default function HQAnalyticsPage() {
           ))}
         </div>
       </div>
+
+      {/* Time Report — the trading day read at fixed points */}
+      <SalesCheckpoints />
 
       {/* DDP Tabs */}
       <div className="flex gap-2">

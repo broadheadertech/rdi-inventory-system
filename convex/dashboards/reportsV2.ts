@@ -1594,3 +1594,133 @@ export const getPromotionContributions = query({
     };
   },
 });
+
+// ─── getSalesCheckpoints ──────────────────────────────────────────────────────
+// The trading day read at fixed points: where sales stood as of 12 noon, 3pm,
+// 6pm and at close.
+//
+// Each figure is a RUNNING TOTAL from the store opening, not the slot on its
+// own — "as of 3pm" includes the morning. That is how the number is read on a
+// shop floor, and it is what tells a manager at 3pm whether the day is on pace.
+//
+// Every checkpoint sits beside the same weekday a week ago, taken at the same
+// hour. A Saturday noon is nothing like a Tuesday noon, so last week's same
+// weekday is the only honest like-for-like; yesterday would flatter or damn a
+// store purely for where it sits in the week.
+//
+// Checkpoints still ahead of the clock today are returned with reached: false
+// so the page can show them as pending rather than as a day that collapsed.
+
+/** Where the trading day is read. 24 is the close — the whole day. */
+const CHECKPOINT_HOURS = [12, 15, 18, 24] as const;
+
+function checkpointLabel(hour: number): string {
+  if (hour === 24) return "Close";
+  if (hour === 12) return "12 NN";
+  return hour > 12 ? `${hour - 12}PM` : `${hour}AM`;
+}
+
+/** Today in PHT as YYYYMMDD. */
+function todayYmdPht(nowMs: number): string {
+  const pht = new Date(nowMs + PHT_OFFSET_MS);
+  const y = pht.getUTCFullYear();
+  const m = String(pht.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(pht.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+
+/** The same calendar date a week earlier, as YYYYMMDD. */
+function ymdMinusWeek(ymd: string): string {
+  const shifted = new Date(ymdToMs(ymd) + PHT_OFFSET_MS - 7 * 24 * 60 * 60 * 1000);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+}
+
+export const getSalesCheckpoints = query({
+  args: {
+    /** The trading day to read, YYYYMMDD. Defaults to today in PHT. */
+    date: v.optional(v.string()),
+    branchId: v.optional(v.id("branches")),
+    channel: channelArg,
+  },
+  handler: async (ctx, args) => {
+    const scope = await resolveReportScope(ctx);
+    const { ids: allowedIds } = await resolveAllowedBranches(ctx, {
+      branchId: args.branchId,
+      channel: args.channel,
+      scope,
+    });
+
+    const nowMs = Date.now();
+    const date = args.date ?? todayYmdPht(nowMs);
+    const priorDate = ymdMinusWeek(date);
+
+    const empty = {
+      date,
+      comparedTo: priorDate,
+      isToday: date === todayYmdPht(nowMs),
+      checkpoints: CHECKPOINT_HOURS.map((hour) => ({
+        hour,
+        label: checkpointLabel(hour),
+        reached: false,
+        salesCentavos: 0,
+        transactionCount: 0,
+        priorSalesCentavos: 0,
+        changePercent: null as number | null,
+      })),
+    };
+    if (allowedIds.length === 0) return empty;
+
+    const dayStart = ymdToMs(date);
+    const priorStart = ymdToMs(priorDate);
+
+    const [todayTxns, priorTxns] = await Promise.all([
+      fetchTxnsInRange(ctx, dayStart, ymdToMs(date, true), allowedIds),
+      fetchTxnsInRange(ctx, priorStart, ymdToMs(priorDate, true), allowedIds),
+    ]);
+
+    // Everything rung before the cut-off, so each reading includes the ones
+    // before it. Returns are their own transactions with a negative total, so
+    // summing totals nets them out exactly as the rest of the reports do.
+    const upTo = (txns: Doc<"transactions">[], startMs: number, hour: number) => {
+      const cutoff = startMs + hour * 60 * 60 * 1000;
+      let salesCentavos = 0;
+      let transactionCount = 0;
+      for (const t of txns) {
+        if (t.createdAt >= cutoff) continue;
+        salesCentavos += t.totalCentavos;
+        if (!t.receiptNumber.startsWith("RET-")) transactionCount += 1;
+      }
+      return { salesCentavos, transactionCount };
+    };
+
+    const isToday = date === todayYmdPht(nowMs);
+
+    return {
+      date,
+      comparedTo: priorDate,
+      isToday,
+      checkpoints: CHECKPOINT_HOURS.map((hour) => {
+        const cutoff = dayStart + hour * 60 * 60 * 1000;
+        // A day already past is read in full; today only as far as the clock.
+        const reached = !isToday || nowMs >= cutoff;
+        const now = upTo(todayTxns, dayStart, hour);
+        const prior = upTo(priorTxns, priorStart, hour);
+        return {
+          hour,
+          label: checkpointLabel(hour),
+          reached,
+          salesCentavos: now.salesCentavos,
+          transactionCount: now.transactionCount,
+          priorSalesCentavos: prior.salesCentavos,
+          changePercent:
+            prior.salesCentavos > 0
+              ? ((now.salesCentavos - prior.salesCentavos) / prior.salesCentavos) * 100
+              : null,
+        };
+      }),
+    };
+  },
+});
