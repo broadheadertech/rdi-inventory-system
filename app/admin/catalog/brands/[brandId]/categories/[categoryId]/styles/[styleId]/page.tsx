@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { TablePagination } from "@/components/shared/TablePagination";
+import { GenerateVariantsDialog } from "@/components/shared/GenerateVariantsDialog";
 import {
   Pencil,
   Box,
@@ -48,6 +49,7 @@ import {
   ArrowLeft,
   ImagePlus,
   Trash2,
+  Wand2,
   Image as ImageIcon,
 } from "lucide-react";
 
@@ -111,6 +113,7 @@ export default function VariantsPage() {
 
   // Create dialog state
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showGenerateDialog, setShowGenerateDialog] = useState(false);
   const [createForm, setCreateForm] = useState({
     sku: "",
     barcode: "",
@@ -472,21 +475,36 @@ export default function VariantsPage() {
             {(filteredVariants?.length ?? 0) !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button
-          onClick={() => {
-            resetCreateForm();
-            setShowCreateDialog(true);
-          }}
-          disabled={!style.isActive}
-          title={
-            style.isActive
-              ? "Create new variant"
-              : "Cannot add variants to inactive style"
-          }
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          New Variant
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setShowGenerateDialog(true)}
+            disabled={!style.isActive}
+            title={
+              style.isActive
+                ? "Create every colour and size in one go"
+                : "Cannot add variants to inactive style"
+            }
+          >
+            <Wand2 className="mr-2 h-4 w-4" />
+            Generate Variants
+          </Button>
+          <Button
+            onClick={() => {
+              resetCreateForm();
+              setShowCreateDialog(true);
+            }}
+            disabled={!style.isActive}
+            title={
+              style.isActive
+                ? "Create new variant"
+                : "Cannot add variants to inactive style"
+            }
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            New Variant
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -650,6 +668,16 @@ export default function VariantsPage() {
       />
 
       {/* Create Variant Dialog */}
+      <GenerateVariantsDialog
+        open={showGenerateDialog}
+        onOpenChange={setShowGenerateDialog}
+        styleId={styleId}
+        styleName={style.name}
+        styleCode={style.styleCode}
+        basePriceCentavos={style.basePriceCentavos}
+        variants={variants ?? []}
+      />
+
       <Dialog
         open={showCreateDialog}
         onOpenChange={(open) => {

@@ -23,6 +23,7 @@ import type * as _helpers_taxCalculations from "../_helpers/taxCalculations.js";
 import type * as _helpers_tenders from "../_helpers/tenders.js";
 import type * as _helpers_transferStock from "../_helpers/transferStock.js";
 import type * as _helpers_variantIdentity from "../_helpers/variantIdentity.js";
+import type * as _helpers_variantSku from "../_helpers/variantSku.js";
 import type * as _helpers_withBranchScope from "../_helpers/withBranchScope.js";
 import type * as admin_announcements from "../admin/announcements.js";
 import type * as admin_banners from "../admin/banners.js";
@@ -193,6 +194,7 @@ declare const fullApi: ApiFromModules<{
   "_helpers/tenders": typeof _helpers_tenders;
   "_helpers/transferStock": typeof _helpers_transferStock;
   "_helpers/variantIdentity": typeof _helpers_variantIdentity;
+  "_helpers/variantSku": typeof _helpers_variantSku;
   "_helpers/withBranchScope": typeof _helpers_withBranchScope;
   "admin/announcements": typeof admin_announcements;
   "admin/banners": typeof admin_banners;

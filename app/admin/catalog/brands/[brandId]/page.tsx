@@ -25,6 +25,7 @@ import {
 import { TablePagination } from "@/components/shared/TablePagination";
 import {
   Plus, Search, UserCheck, XCircle, ArrowLeft, Package, ImageIcon, Pencil, Upload, X, Loader2,
+  ChevronRight,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -40,6 +41,7 @@ type ProductCode = {
 
 type StyleDoc = {
   _id: Id<"styles">;
+  categoryId?: Id<"categories">;
   name: string;
   description?: string;
   styleCode?: string;
@@ -61,6 +63,31 @@ type StyleDoc = {
   isActive: boolean;
   isExclusive?: boolean;
 };
+
+type VariantSummary = { variantCount: number; colorCount: number; inactiveCount: number };
+
+/** How many SKUs and colours a product carries — the catalog's answer at style level. */
+function VariantsCell({
+  summary,
+  loading,
+}: {
+  summary?: VariantSummary;
+  loading: boolean;
+}) {
+  if (loading) return <span className="text-xs text-muted-foreground">…</span>;
+  if (!summary || summary.variantCount === 0) {
+    return <span className="text-xs text-muted-foreground">No variants yet</span>;
+  }
+  return (
+    <span className="whitespace-nowrap">
+      {summary.variantCount} SKU{summary.variantCount === 1 ? "" : "s"}
+      <span className="text-muted-foreground">
+        {" · "}
+        {summary.colorCount} colour{summary.colorCount === 1 ? "" : "s"}
+      </span>
+    </span>
+  );
+}
 
 const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -296,6 +323,12 @@ export default function BrandProductsPage() {
   const allCodes = useQuery(api.catalog.productCodes.listAllActive) as ProductCode[] | undefined;
 
   const activeColors = useQuery(api.admin.colors.listActiveColors) as ColorOption[] | undefined;
+  // A style's SKUs live on its variants, so the list counts them instead of
+  // printing a style-level SKU that is blank for every real product.
+  const variantSummary = useQuery(api.catalog.variants.listStyleVariantSummary, { brandId });
+  const variantsByStyle = new Map(
+    (variantSummary ?? []).map((row) => [row.styleId as string, row])
+  );
   const createStyle = useMutation(api.catalog.styles.createStyle);
   const updateStyle = useMutation(api.catalog.styles.updateStyle);
   const deactivateStyle = useMutation(api.catalog.styles.deactivateStyle);
@@ -354,9 +387,7 @@ export default function BrandProductsPage() {
       switch (sortKey) {
         case "name": return a.name;
         case "styleCode": return a.styleCode ?? "";
-        case "sku": return a.sku ?? "";
-        case "barcode": return a.barcode ?? "";
-        case "color": return a.color ?? "";
+        case "variants": return variantsByStyle.get(a._id as string)?.variantCount ?? 0;
         case "costPrice": return a.costPrice ?? 0;
         case "srp": return a.srp ?? 0;
         case "status": return a.isActive ? "active" : "inactive";
@@ -367,9 +398,7 @@ export default function BrandProductsPage() {
       switch (sortKey) {
         case "name": return b.name;
         case "styleCode": return b.styleCode ?? "";
-        case "sku": return b.sku ?? "";
-        case "barcode": return b.barcode ?? "";
-        case "color": return b.color ?? "";
+        case "variants": return variantsByStyle.get(b._id as string)?.variantCount ?? 0;
         case "costPrice": return b.costPrice ?? 0;
         case "srp": return b.srp ?? 0;
         case "status": return b.isActive ? "active" : "inactive";
@@ -601,9 +630,7 @@ export default function BrandProductsPage() {
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("name")}>Product Name<SortIcon col="name" /></TableHead>
               <TableHead>Description</TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("styleCode")}>Style Code<SortIcon col="styleCode" /></TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("sku")}>SKU<SortIcon col="sku" /></TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("barcode")}>Barcode<SortIcon col="barcode" /></TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("color")}>Color<SortIcon col="color" /></TableHead>
+              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("variants")}>Variants<SortIcon col="variants" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("srp")}>Base SRP<SortIcon col="srp" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("costPrice")}>Cost Price<SortIcon col="costPrice" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("status")}>Status<SortIcon col="status" /></TableHead>
@@ -616,13 +643,28 @@ export default function BrandProductsPage() {
                 <TableRow key={style._id}>
                   <TableCell><StylePrimaryThumbnail styleId={style._id} /></TableCell>
                   <TableCell className="font-medium whitespace-nowrap">
-                    <div className="flex items-center gap-2"><Package className="h-4 w-4 text-muted-foreground shrink-0" />{style.name}</div>
+                    {style.categoryId ? (
+                      <Link
+                        href={`/admin/catalog/brands/${brandId}/categories/${style.categoryId}/styles/${style._id}`}
+                        className="flex items-center gap-2 transition-colors hover:text-primary"
+                        title="Open this product's variants"
+                      >
+                        <Package className="h-4 w-4 text-muted-foreground shrink-0" />
+                        {style.name}
+                        <ChevronRight className="h-3 w-3 text-muted-foreground" />
+                      </Link>
+                    ) : (
+                      <div className="flex items-center gap-2"><Package className="h-4 w-4 text-muted-foreground shrink-0" />{style.name}</div>
+                    )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{style.description || "—"}</TableCell>
                   <TableCell>{style.styleCode ? <span className="font-mono font-semibold text-sm">{style.styleCode}</span> : <span className="text-muted-foreground text-xs">Legacy</span>}</TableCell>
-                  <TableCell className="text-sm font-mono whitespace-nowrap">{style.sku || "—"}</TableCell>
-                  <TableCell className="text-sm font-mono whitespace-nowrap">{style.barcode || "—"}</TableCell>
-                  <TableCell className="text-sm whitespace-nowrap">{style.color || "—"}</TableCell>
+                  <TableCell className="text-sm whitespace-nowrap">
+                    <VariantsCell
+                      summary={variantsByStyle.get(style._id as string)}
+                      loading={variantSummary === undefined}
+                    />
+                  </TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{style.srp != null ? `₱${Number(style.srp).toLocaleString()}` : "—"}</TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{style.costPrice != null ? `₱${Number(style.costPrice).toLocaleString()}` : "—"}</TableCell>
                   <TableCell><Badge variant={style.isActive ? "default" : "destructive"}>{style.isActive ? "Active" : "Inactive"}</Badge></TableCell>
