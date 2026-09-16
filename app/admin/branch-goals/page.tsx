@@ -7,6 +7,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { Target, Loader2, Check, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import { YearTrajectory } from "@/components/shared/YearTrajectory";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -288,6 +289,9 @@ export default function BranchGoalsPage() {
           managers can see their goal but cannot change it.
         </span>
       </p>
+
+      {/* Where the year stands, before the month-by-month editing below. */}
+      <YearTrajectory year={Number(periodYm.slice(0, 4))} />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="rounded-lg border p-3">

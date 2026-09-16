@@ -218,3 +218,192 @@ export const setBranchPeriodTarget = mutation({
     });
   },
 });
+
+// ─── getBranchYearTrajectory ──────────────────────────────────────────────────
+// The year's goal against the year so far, per store and for the whole company.
+//
+// A goal for the month says nothing about whether a store is going to make its
+// year. Three figures do:
+//
+//   expected by today   the year's goal prorated to this point — whole months
+//                       that have passed in full, plus the part of this month
+//                       that has elapsed. Seasonality is respected, because it
+//                       sums each month's own goal rather than dividing the
+//                       year by twelve.
+//   pace                what the store has actually taken, against that. 100%
+//                       is exactly on track.
+//   projected           where the year lands if the rest of it goes at the same
+//                       pace, measured against the goal rather than the
+//                       calendar, so a store carrying a heavy December is not
+//                       flattered in March.
+//
+// The monthly rows carry each month's goal and takings so the page can draw the
+// two cumulative lines — which is the trajectory a manager actually reads.
+
+const MONTH_MS = 24 * 60 * 60 * 1000;
+
+/** Milliseconds at the PHT start of a month, "YYYYMM". */
+function periodStartMs(periodYm: string): number {
+  const y = Number(periodYm.slice(0, 4));
+  const m = Number(periodYm.slice(4, 6)) - 1;
+  return Date.UTC(y, m, 1) - PHT_OFFSET_MS;
+}
+
+function daysInMonth(year: number, monthIndex: number): number {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+
+/** The PHT "YYYYMM" a timestamp falls in. */
+function periodYmOf(ms: number): string {
+  const d = new Date(ms + PHT_OFFSET_MS);
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+export const getBranchYearTrajectory = query({
+  args: { year: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+
+    const nowMs = Date.now();
+    const nowPht = new Date(nowMs + PHT_OFFSET_MS);
+    const year = args.year ?? nowPht.getUTCFullYear();
+    if (!Number.isInteger(year) || year < 2000 || year > 2999) {
+      throw new ConvexError("Year must be a four-digit year");
+    }
+
+    const months: string[] = [];
+    for (let m = 1; m <= 12; m++) {
+      months.push(`${year}${String(m).padStart(2, "0")}`);
+    }
+
+    const yearStartMs = periodStartMs(months[0]);
+    const yearEndMs = Date.UTC(year + 1, 0, 1) - PHT_OFFSET_MS;
+    const cutoffMs = Math.min(nowMs, yearEndMs);
+
+    // How much of the year has been lived, month by month. A month gone in full
+    // counts once; the month in progress counts by the days elapsed.
+    const elapsedFraction = months.map((periodYm, index) => {
+      const startMs = periodStartMs(periodYm);
+      if (cutoffMs <= startMs) return 0;
+      const days = daysInMonth(year, index);
+      const endMs = startMs + days * MONTH_MS;
+      if (cutoffMs >= endMs) return 1;
+      return (cutoffMs - startMs) / (endMs - startMs);
+    });
+
+    const branches = (await ctx.db.query("branches").collect())
+      .filter((b) => b.isActive)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const rows = [];
+    // Company-wide monthly totals, for the trajectory lines.
+    const orgGoalByMonth = months.map(() => 0);
+    const orgActualByMonth = months.map(() => 0);
+
+    for (const branch of branches) {
+      const goals: number[] = [];
+      for (const periodYm of months) {
+        goals.push(await resolveBranchMonthlyTarget(ctx, branch._id, periodYm));
+      }
+
+      // One index range per store, totals only — no line items needed.
+      const txns = await ctx.db
+        .query("transactions")
+        .withIndex("by_branch_date", (q) =>
+          q.eq("branchId", branch._id).gte("createdAt", yearStartMs).lt("createdAt", cutoffMs)
+        )
+        .collect();
+
+      const actuals = months.map(() => 0);
+      for (const t of txns) {
+        if (t.status === "voided") continue;
+        const index = months.indexOf(periodYmOf(t.createdAt));
+        // Returns are their own transactions with a negative total, so summing
+        // totals nets them out as every other report does.
+        if (index >= 0) actuals[index] += t.totalCentavos;
+      }
+
+      const yearGoalCentavos = goals.reduce((sum, g) => sum + g, 0);
+      const actualCentavos = actuals.reduce((sum, a) => sum + a, 0);
+      const expectedCentavos = goals.reduce(
+        (sum, g, i) => sum + g * elapsedFraction[i],
+        0
+      );
+
+      for (let i = 0; i < months.length; i++) {
+        orgGoalByMonth[i] += goals[i];
+        orgActualByMonth[i] += actuals[i];
+      }
+
+      rows.push({
+        branchId: branch._id,
+        branchName: branch.name,
+        channel: branch.channel ?? null,
+        region: branch.region ?? null,
+        yearGoalCentavos,
+        actualCentavos,
+        expectedCentavos: Math.round(expectedCentavos),
+        varianceCentavos: Math.round(actualCentavos - expectedCentavos),
+        pacePercent:
+          expectedCentavos > 0 ? (actualCentavos / expectedCentavos) * 100 : null,
+        attainmentPercent:
+          yearGoalCentavos > 0 ? (actualCentavos / yearGoalCentavos) * 100 : null,
+        // Where the year lands at this pace, weighted by the goal rather than
+        // the calendar, so a store with a heavy December is judged fairly.
+        projectedCentavos:
+          expectedCentavos > 0
+            ? Math.round((actualCentavos * yearGoalCentavos) / expectedCentavos)
+            : null,
+        months: months.map((periodYm, i) => ({
+          periodYm,
+          goalCentavos: goals[i],
+          actualCentavos: actuals[i],
+          elapsedFraction: elapsedFraction[i],
+        })),
+      });
+    }
+
+    const totalGoal = orgGoalByMonth.reduce((s, g) => s + g, 0);
+    const totalActual = orgActualByMonth.reduce((s, a) => s + a, 0);
+    const totalExpected = orgGoalByMonth.reduce(
+      (sum, g, i) => sum + g * elapsedFraction[i],
+      0
+    );
+
+    // Cumulative, which is what the two trajectory lines are drawn from. A
+    // month still to come carries no actual line — it is not zero sales, it is
+    // sales that have not happened, and a line dropping to the floor would say
+    // the wrong thing.
+    let runningGoal = 0;
+    let runningActual = 0;
+    const trajectory = months.map((periodYm, i) => {
+      runningGoal += orgGoalByMonth[i];
+      runningActual += orgActualByMonth[i];
+      return {
+        periodYm,
+        cumulativeGoalCentavos: runningGoal,
+        cumulativeActualCentavos: elapsedFraction[i] > 0 ? runningActual : null,
+        elapsedFraction: elapsedFraction[i],
+      };
+    });
+
+    return {
+      year,
+      asOfMs: cutoffMs,
+      totals: {
+        yearGoalCentavos: totalGoal,
+        actualCentavos: totalActual,
+        expectedCentavos: Math.round(totalExpected),
+        varianceCentavos: Math.round(totalActual - totalExpected),
+        pacePercent: totalExpected > 0 ? (totalActual / totalExpected) * 100 : null,
+        attainmentPercent: totalGoal > 0 ? (totalActual / totalGoal) * 100 : null,
+        projectedCentavos:
+          totalExpected > 0
+            ? Math.round((totalActual * totalGoal) / totalExpected)
+            : null,
+      },
+      trajectory,
+      branches: rows,
+    };
+  },
+});
