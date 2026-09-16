@@ -294,6 +294,11 @@ export default function HqDashboardPage() {
         <p className="mt-1 text-sm text-muted-foreground">{todayLabel}</p>
       </div>
 
+      {/* ── Time Report ── */}
+      {/* First on the page: where the day stands is the thing a manager opens
+          this screen to find out. */}
+      <SalesCheckpoints />
+
       {/* ── MetricCards ── */}
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -447,9 +452,6 @@ export default function HqDashboardPage() {
           </div>
         )}
       </section>
-
-      {/* ── Time Report ── */}
-      <SalesCheckpoints />
 
       {/* ── Graph ── */}
       <section className="space-y-3">

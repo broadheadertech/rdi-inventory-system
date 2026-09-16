@@ -496,6 +496,14 @@ export default function HqReportsPage() {
         </div>
       </div>
 
+      {/* ── Time Report ── */}
+      {/* Above the KPI cards: the day as it stands is read first, and the
+          branch and channel filters above drive it. */}
+      <SalesCheckpoints
+        branchId={branchId as Id<"branches"> | undefined}
+        channel={channel}
+      />
+
       {/* ── KPI cards ── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiCard
@@ -1061,12 +1069,6 @@ export default function HqReportsPage() {
           )}
         </div>
       </div>
-
-      {/* ── Time Report ── */}
-      <SalesCheckpoints
-        branchId={branchId as Id<"branches"> | undefined}
-        channel={channel}
-      />
 
       {/* ── Promotion Contributions ── */}
       <div>
