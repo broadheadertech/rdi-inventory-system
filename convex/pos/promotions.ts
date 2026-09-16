@@ -1,6 +1,7 @@
 import { v, ConvexError } from "convex/values";
 import { query } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { readPromoRules } from "../_helpers/promoSettings";
 import { POS_ROLES } from "../_helpers/permissions";
 // ─── getActivePromotions ────────────────────────────────────────────────────
 // Returns promotions currently active for the cashier's branch.
@@ -60,6 +61,7 @@ export const getActivePromotions = query({
       tieredDiscountCentavos: p.tieredDiscountCentavos,
       tieredRewardType: p.tieredRewardType,
       minQuantity: p.minQuantity,
+      exclusive: p.exclusive ?? false,
       discountApplication: p.discountApplication,
       brandIds: p.brandIds.map(String),
       categoryIds: p.categoryIds.map(String),
@@ -154,5 +156,21 @@ export const getVariantHierarchy = query({
     }
 
     return result;
+  },
+});
+
+// ─── getPromoRules ────────────────────────────────────────────────────────────
+// How many promotions a sale may carry and how much they may take off, so the
+// POS can show the limits as the cashier picks them. createTransaction applies
+// the same rules when the sale is rung.
+
+export const getPromoRules = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await withBranchScope(ctx);
+    if (!(POS_ROLES as readonly string[]).includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+    return await readPromoRules(ctx);
   },
 });

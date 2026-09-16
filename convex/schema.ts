@@ -498,8 +498,20 @@ export default defineSchema({
     changeCentavos: v.optional(v.number()),
     isOffline: v.boolean(),
     syncedAt: v.optional(v.number()),
+    // The promotion that took the most off, and the promotions' total — kept so
+    // older reports and receipts still read a sale the same way.
     promotionId: v.optional(v.id("promotions")),
     promoDiscountAmountCentavos: v.optional(v.number()),
+    // Every promotion on the sale, with what each took off after any cap.
+    appliedPromotions: v.optional(
+      v.array(
+        v.object({
+          promotionId: v.id("promotions"),
+          name: v.string(),
+          discountCentavos: v.number(),
+        })
+      )
+    ),
     splitPayment: v.optional(v.object({
       method: tenderValidator,
       amountCentavos: v.number(),
@@ -1188,6 +1200,9 @@ export default defineSchema({
     pwpTriggerMinQuantity: v.optional(v.number()),
     pwpRewardVariantIds: v.optional(v.array(v.id("variants"))),
     pwpRewardPriceCentavos: v.optional(v.number()),
+    // Can't be combined: when this promotion is on a sale it is the only one
+    // (buy 1 take 1, staff discounts). Absent means it may stack.
+    exclusive: v.optional(v.boolean()),
     // date range (endDate optional = no expiration)
     startDate: v.number(),
     endDate: v.optional(v.number()),

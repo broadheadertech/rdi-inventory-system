@@ -6,6 +6,7 @@ import {
   StyleSheet,
 } from "@react-pdf/renderer";
 import { PAYMENT_METHOD_LABELS, type PaymentMethod } from "@/lib/constants";
+import { receiptPromoLines } from "@/lib/receiptPromoLines";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,11 @@ export type ReceiptData = {
     subtotalCentavos: number;
     vatAmountCentavos: number;
     discountAmountCentavos: number;
+    /** Every promotion on the sale, each printed on its own line. */
+    appliedPromotions?: { name: string; discountCentavos: number }[];
+    /** Sales rung before promotions could stack carry one name and amount. */
+    promoName?: string | null;
+    promoDiscountAmountCentavos?: number;
     totalCentavos: number;
     paymentMethod: PaymentMethod;
     discountType: string;
@@ -161,6 +167,9 @@ export function ReceiptPDF({ data }: { data: ReceiptData }) {
   const vatExemptSales = isDiscounted ? txn.subtotalCentavos - txn.vatAmountCentavos : 0;
   const vatAmount = isDiscounted ? 0 : txn.vatAmountCentavos;
 
+  // One line per promotion, so the amount due adds up on the invoice.
+  const promoLines = receiptPromoLines(txn);
+
   const vatRegTin = bir.vatRegTin || business.tin;
   const softwareName = bir.softwareName || "RedBox POS";
 
@@ -256,6 +265,12 @@ export function ReceiptPDF({ data }: { data: ReceiptData }) {
           <Text style={styles.summaryLabel}>Total Sales (VAT Inclusive):</Text>
           <Text style={styles.summaryValue}>{formatPrice(txn.subtotalCentavos)}</Text>
         </View>
+        {promoLines.map((promo, i) => (
+          <View style={styles.summaryRow} key={`${promo.name}-${i}`}>
+            <Text style={styles.summaryLabel}>Less: {promo.name}</Text>
+            <Text style={styles.summaryValue}>-{formatPrice(promo.discountCentavos)}</Text>
+          </View>
+        ))}
         {isDiscounted && (
           <>
             <View style={styles.summaryRow}>

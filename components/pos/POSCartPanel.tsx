@@ -39,7 +39,7 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { ReceiptViewer } from "@/components/pos/ReceiptViewer";
 import { CrossSellStrip } from "@/components/pos/CrossSellStrip";
 import { usePromoPreview, type PromoSuggestions } from "@/lib/hooks/usePromoPreview";
-import type { PromoResult } from "@/convex/_helpers/promoCalculations";
+import type { PromoStack, PromoRules } from "@/convex/_helpers/promoStacking";
 
 type TransactionResult = {
   transactionId: Id<"transactions">;
@@ -53,10 +53,15 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
   const {
     items, heldTransactions, updateQuantity, removeItem, clearCart,
     holdTransaction, resumeTransaction, discardHeldTransaction, discountType, setDiscountType, taxBreakdown,
-    selectedPromoId, setPromoId,
+    selectedPromoIds, setPromoIds,
   } = usePOSCart();
 
-  const { activePromos, promoPreview, promoSuggestions } = usePromoPreview(items, selectedPromoId, discountType);
+  const { activePromos, promoStack, promoSuggestions, rules: promoRules } = usePromoPreview(
+    items,
+    selectedPromoIds,
+    discountType,
+    taxBreakdown.totalCentavos
+  );
   const [isExpanded, setIsExpanded] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
@@ -114,10 +119,11 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
           taxBreakdown={taxBreakdown}
           discountType={discountType}
           setDiscountType={setDiscountType}
-          selectedPromoId={selectedPromoId}
-          setPromoId={setPromoId}
+          selectedPromoIds={selectedPromoIds}
+          setPromoIds={setPromoIds}
+          promoRules={promoRules}
           activePromos={activePromos}
-          promoPreview={promoPreview}
+          promoStack={promoStack}
           promoSuggestions={promoSuggestions}
           heldTransactions={heldTransactions}
           updateQuantity={updateQuantity}
@@ -252,16 +258,17 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
                     <PromoSelector
                       discountType={discountType}
                       activePromos={activePromos}
-                      selectedPromoId={selectedPromoId}
-                      setPromoId={setPromoId}
-                      promoPreview={promoPreview}
+                      selectedPromoIds={selectedPromoIds}
+                      setPromoIds={setPromoIds}
+                      promoRules={promoRules}
+                      promoStack={promoStack}
                       promoSuggestions={promoSuggestions}
                     />
                     <CartActions
                       items={items}
                       taxBreakdown={taxBreakdown}
                       discountType={discountType}
-                      promoPreview={promoPreview}
+                      promoStack={promoStack}
                       holdTransaction={holdTransaction}
                       showClearConfirm={showClearConfirm}
                       setShowClearConfirm={setShowClearConfirm}
@@ -301,7 +308,7 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className="font-bold">{formatCurrency(taxBreakdown.totalCentavos - (promoPreview?.applicable ? promoPreview.discountCentavos : 0))}</span>
+          <span className="font-bold">{formatCurrency(taxBreakdown.totalCentavos - (promoStack?.discountCentavos ?? 0))}</span>
           {isExpanded ? (
             <ChevronDown className="h-5 w-5" />
           ) : (
@@ -323,8 +330,8 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
           items={items}
           taxBreakdown={taxBreakdown}
           discountType={isRushMode ? "none" : discountType}
-          selectedPromoId={isRushMode ? null : selectedPromoId}
-          promoPreview={isRushMode ? null : promoPreview}
+          selectedPromoIds={isRushMode ? [] : selectedPromoIds}
+          promoStack={isRushMode ? null : promoStack}
           onComplete={handlePaymentComplete}
           onCancel={handlePaymentCancel}
         />
@@ -522,17 +529,19 @@ function DiscountToggle({
 function PromoSelector({
   discountType,
   activePromos,
-  selectedPromoId,
-  setPromoId,
-  promoPreview,
+  selectedPromoIds,
+  setPromoIds,
+  promoStack,
   promoSuggestions,
+  promoRules,
 }: {
   discountType: DiscountType;
   activePromos: ActivePromo[];
-  selectedPromoId: string | null;
-  setPromoId: (promoId: string | null) => void;
-  promoPreview: PromoResult | null;
+  selectedPromoIds: string[];
+  setPromoIds: (promoIds: string[]) => void;
+  promoStack: PromoStack | null;
   promoSuggestions: PromoSuggestions;
+  promoRules: PromoRules;
 }) {
   const [showAllPromos, setShowAllPromos] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -541,29 +550,39 @@ function PromoSelector({
   if (discountType !== "none") return null;
   if (activePromos.length === 0) return null;
 
-  const selectedPromo = selectedPromoId
-    ? activePromos.find((p) => String(p._id) === selectedPromoId)
-    : null;
+  const { applicable, hints, byId } = promoSuggestions;
+  const chosen = new Set(selectedPromoIds);
+  const promoById = (id: string) => activePromos.find((p) => String(p._id) === id);
 
-  const { best, applicable, hints, byId } = promoSuggestions;
-  const selectedSaving = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
-  // A promotion that would save the customer more than the one applied.
-  const better =
-    selectedPromo && best && best.promoId !== selectedPromoId && best.discountCentavos > selectedSaving
-      ? best
-      : null;
+  const applied = promoStack?.applied ?? [];
+  // Promotions the cashier picked that the rules or the cart left out.
+  const dropped = (promoStack?.dropped ?? []).filter((d) => chosen.has(d.id));
+  const atLimit = selectedPromoIds.length >= promoRules.maxPerSale;
+  const hasExclusive = selectedPromoIds.some((id) => promoById(id)?.exclusive);
 
-  // One line stays in view; the rest opens on demand so the cart keeps its room.
-  const otherPromos = selectedPromo ? [] : applicable.slice(1);
-  const firstHint = hints[0] ?? null;
-  const moreHints = hints.slice(1);
-  const moreCount = otherPromos.length + moreHints.length;
-  const moreLabel = [
-    otherPromos.length > 0 && `${otherPromos.length} more promo${otherPromos.length === 1 ? "" : "s"}`,
-    moreHints.length > 0 && `${moreHints.length} more tip${moreHints.length === 1 ? "" : "s"}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  // What could still be added: applies to this cart, not already picked.
+  const suggestions = applicable.filter((a) => !chosen.has(a.promoId));
+  const best = suggestions[0] ?? null;
+  const otherSuggestions = suggestions.slice(1);
+  const firstHint = hints.find((h) => !chosen.has(h.promoId)) ?? null;
+  const moreHints = hints.filter((h) => !chosen.has(h.promoId) && h !== firstHint);
+  const moreCount = otherSuggestions.length + moreHints.length;
+
+  function addPromo(id: string) {
+    const promo = promoById(id);
+    // An exclusive promotion stands alone — picking one replaces the rest, and
+    // picking anything else replaces it.
+    if (promo?.exclusive || hasExclusive) {
+      setPromoIds([id]);
+      return;
+    }
+    if (atLimit) return;
+    setPromoIds([...selectedPromoIds, id]);
+  }
+
+  function removePromo(id: string) {
+    setPromoIds(selectedPromoIds.filter((x) => x !== id));
+  }
 
   const typeBadge = (type: ActivePromo["promoType"]) =>
     type === "percentage"
@@ -590,7 +609,14 @@ function PromoSelector({
   return (
     <div className="mt-2">
       <div className="mb-1 flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Promotions</p>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Promotions
+          {promoRules.maxPerSale > 1 && (
+            <span className="ml-1 font-normal normal-case">
+              ({selectedPromoIds.length}/{promoRules.maxPerSale})
+            </span>
+          )}
+        </p>
         <button
           onClick={() => setShowAllPromos(true)}
           className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground hover:underline"
@@ -600,73 +626,91 @@ function PromoSelector({
         </button>
       </div>
 
-      {selectedPromo ? (
-        <>
-          <div className="flex items-center gap-2 rounded-md border border-orange-400 bg-orange-50 px-2.5 py-1.5">
-            <Tag className="h-4 w-4 shrink-0 text-orange-600" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-orange-900">{selectedPromo.name}</p>
-              {promoPreview?.applicable && promoPreview.discountCentavos > 0 ? (
-                <p className="text-xs text-orange-700">Save {formatCurrency(promoPreview.discountCentavos)}</p>
-              ) : (
-                promoPreview && (
-                  <p className="truncate text-xs text-muted-foreground">
-                    {byId[selectedPromoId!]?.hint ?? promoPreview.description}
-                  </p>
-                )
-              )}
+      {/* What the sale is getting */}
+      {applied.length > 0 && (
+        <div className="space-y-1">
+          {applied.map((a) => (
+            <div
+              key={a.id}
+              className="flex items-center gap-2 rounded-md border border-orange-400 bg-orange-50 px-2.5 py-1.5"
+            >
+              <Tag className="h-4 w-4 shrink-0 text-orange-600" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-orange-900">
+                  {a.name}
+                  {promoById(a.id)?.exclusive && (
+                    <span className="ml-1.5 rounded bg-orange-200 px-1 py-0.5 text-[10px] font-semibold uppercase text-orange-800">
+                      Stand-alone
+                    </span>
+                  )}
+                </p>
+                <p className="text-xs text-orange-700">Save {formatCurrency(a.discountCentavos)}</p>
+              </div>
+              <button
+                onClick={() => removePromo(a.id)}
+                aria-label={`Remove ${a.name}`}
+                className="shrink-0 rounded-sm p-0.5 text-orange-600 hover:bg-orange-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
-            <button
-              onClick={() => setPromoId(null)}
-              aria-label="Remove promotion"
-              className="shrink-0 rounded-sm p-0.5 text-orange-600 hover:bg-orange-100"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          {better && (
-            <button
-              onClick={() => setPromoId(better.promoId)}
-              className="mt-1 flex w-full items-center gap-2 rounded-md border border-dashed border-green-500 bg-green-50 px-2.5 py-1 text-left text-xs text-green-800 transition-colors hover:bg-green-100"
-            >
-              <Sparkles className="h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">
-                Better: <span className="font-semibold">{better.name}</span> saves{" "}
-                {formatCurrency(better.discountCentavos)}
-              </span>
-              <span className="shrink-0 font-semibold">Switch</span>
-            </button>
+          ))}
+          {promoStack && applied.length > 1 && (
+            <p className="px-1 text-xs font-medium text-green-700">
+              Total saved {formatCurrency(promoStack.discountCentavos)}
+              {promoStack.capped && (
+                <span className="font-normal text-amber-700">
+                  {" "}
+                  · capped at {promoRules.maxDiscountPercent}% of the sale
+                </span>
+              )}
+            </p>
           )}
-        </>
-      ) : best ? (
+        </div>
+      )}
+
+      {/* Picked, but left out */}
+      {dropped.map((d) => (
+        <p key={d.id} className="mt-1 flex items-start gap-1.5 px-1 text-xs text-amber-700">
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{d.name}:</span> {d.reason}
+          </span>
+          <button onClick={() => removePromo(d.id)} aria-label={`Remove ${d.name}`} className="shrink-0 underline">
+            Remove
+          </button>
+        </p>
+      ))}
+
+      {/* What else could be added */}
+      {best && (
         <button
-          onClick={() => setPromoId(best.promoId)}
-          className="flex w-full items-center gap-2 rounded-md border-2 border-green-500 bg-green-50 px-2.5 py-1.5 text-left transition-colors hover:bg-green-100"
+          onClick={() => addPromo(best.promoId)}
+          disabled={atLimit && !hasExclusive && !promoById(best.promoId)?.exclusive}
+          className="mt-1 flex w-full items-center gap-2 rounded-md border-2 border-green-500 bg-green-50 px-2.5 py-1.5 text-left transition-colors hover:bg-green-100 disabled:opacity-50"
         >
           <Sparkles className="h-4 w-4 shrink-0 text-green-600" />
           <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-bold uppercase leading-none tracking-wider text-green-700">Best promo</p>
+            <p className="text-[10px] font-bold uppercase leading-none tracking-wider text-green-700">
+              {applied.length > 0 ? "Add another" : "Best promo"}
+            </p>
             <p className="truncate text-sm font-medium text-green-900">{best.name}</p>
           </div>
           <span className="shrink-0 text-sm font-bold text-green-700">
-            Save {formatCurrency(best.discountCentavos)}
+            +{formatCurrency(best.discountCentavos)}
           </span>
-          <span className="shrink-0 rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white">Apply</span>
+          <span className="shrink-0 rounded bg-green-600 px-2 py-1 text-xs font-semibold text-white">
+            {applied.length > 0 ? "Add" : "Apply"}
+          </span>
         </button>
-      ) : !firstHint ? (
-        <div className="flex flex-wrap gap-1.5">
-          {activePromos.slice(0, 3).map((promo) => (
-            <button
-              key={String(promo._id)}
-              onClick={() => setPromoId(String(promo._id))}
-              className="flex h-8 items-center gap-1 rounded-md border px-2.5 text-xs transition-colors hover:border-orange-400 hover:bg-orange-50"
-            >
-              <Tag className="h-3.5 w-3.5 text-orange-500" />
-              {promo.name}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      )}
+
+      {atLimit && suggestions.length > 0 && (
+        <p className="mt-1 px-1 text-xs text-muted-foreground">
+          {promoRules.maxPerSale === 1
+            ? "One promo per sale — remove it to use another."
+            : `Limit of ${promoRules.maxPerSale} promos reached — remove one to add another.`}
+        </p>
+      )}
 
       {firstHint && <div className="mt-1">{hintLine(firstHint)}</div>}
 
@@ -675,22 +719,31 @@ function PromoSelector({
           onClick={() => setExpanded((e) => !e)}
           className="mt-1 flex w-full items-center justify-between rounded px-1 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
         >
-          <span>{moreLabel}</span>
+          <span>
+            {[
+              otherSuggestions.length > 0 &&
+                `${otherSuggestions.length} more promo${otherSuggestions.length === 1 ? "" : "s"}`,
+              moreHints.length > 0 && `${moreHints.length} more tip${moreHints.length === 1 ? "" : "s"}`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
         </button>
       )}
       {expanded && moreCount > 0 && (
         <div className="mt-1 max-h-36 space-y-1 overflow-y-auto">
-          {otherPromos.map((s) => (
+          {otherSuggestions.map((s) => (
             <button
               key={s.promoId}
-              onClick={() => setPromoId(s.promoId)}
-              className="flex w-full items-center gap-2 rounded-md border px-2.5 py-1 text-left text-xs transition-colors hover:border-orange-400 hover:bg-orange-50"
+              onClick={() => addPromo(s.promoId)}
+              disabled={atLimit && !hasExclusive && !promoById(s.promoId)?.exclusive}
+              className="flex w-full items-center gap-2 rounded-md border px-2.5 py-1 text-left text-xs transition-colors hover:border-orange-400 hover:bg-orange-50 disabled:opacity-50"
             >
               <Tag className="h-3.5 w-3.5 shrink-0 text-orange-500" />
               <span className="min-w-0 flex-1 truncate">{s.name}</span>
               <span className="shrink-0 font-medium text-muted-foreground">
-                Save {formatCurrency(s.discountCentavos)}
+                +{formatCurrency(s.discountCentavos)}
               </span>
             </button>
           ))}
@@ -712,8 +765,9 @@ function PromoSelector({
               <div>
                 <h2 className="text-base font-bold">All Promotions</h2>
                 <p className="text-xs text-muted-foreground">
-                  {activePromos.length} available promotion{activePromos.length !== 1 ? "s" : ""}
+                  {activePromos.length} available
                   {applicable.length > 0 && ` · ${applicable.length} apply to this cart`}
+                  {promoRules.maxPerSale > 1 && ` · up to ${promoRules.maxPerSale} per sale`}
                 </p>
               </div>
               <button onClick={() => setShowAllPromos(false)} className="rounded-full p-1.5 hover:bg-muted">
@@ -729,34 +783,45 @@ function PromoSelector({
                     (byId[String(b._id)]?.discountCentavos ?? 0) - (byId[String(a._id)]?.discountCentavos ?? 0)
                 )
                 .map((promo) => {
-                  const status = byId[String(promo._id)];
-                  const isBest = best?.promoId === String(promo._id);
+                  const id = String(promo._id);
+                  const status = byId[id];
+                  const isChosen = chosen.has(id);
+                  const blocked = !isChosen && atLimit && !hasExclusive && !promo.exclusive;
                   return (
                     <button
-                      key={String(promo._id)}
+                      key={id}
                       onClick={() => {
-                        setPromoId(String(promo._id));
+                        if (isChosen) {
+                          removePromo(id);
+                          return;
+                        }
+                        if (blocked) return;
+                        addPromo(id);
                         setShowAllPromos(false);
                       }}
+                      disabled={blocked}
                       className={cn(
-                        "flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-orange-50",
-                        isBest && "bg-green-50"
+                        "flex w-full items-center gap-3 px-5 py-3.5 text-left transition-colors hover:bg-orange-50 disabled:opacity-50",
+                        isChosen && "bg-orange-50"
                       )}
                     >
                       <div
                         className={cn(
                           "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-                          isBest ? "bg-green-100" : "bg-orange-100"
+                          isChosen ? "bg-orange-200" : "bg-orange-100"
                         )}
                       >
-                        {isBest ? (
-                          <Sparkles className="h-4 w-4 text-green-600" />
-                        ) : (
-                          <Tag className="h-4 w-4 text-orange-600" />
-                        )}
+                        <Tag className="h-4 w-4 text-orange-600" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{promo.name}</p>
+                        <p className="truncate text-sm font-medium">
+                          {promo.name}
+                          {promo.exclusive && (
+                            <span className="ml-1.5 rounded bg-muted px-1 py-0.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                              Stand-alone
+                            </span>
+                          )}
+                        </p>
                         {status?.hint ? (
                           <p className="truncate text-xs text-amber-700">{status.hint}</p>
                         ) : (
@@ -765,9 +830,11 @@ function PromoSelector({
                           )
                         )}
                       </div>
-                      {status?.applies ? (
+                      {isChosen ? (
+                        <span className="shrink-0 text-xs font-semibold text-orange-700">Remove</span>
+                      ) : status?.applies ? (
                         <span className="shrink-0 text-xs font-semibold text-green-700">
-                          {isBest ? "Best · " : ""}Save {formatCurrency(status.discountCentavos)}
+                          +{formatCurrency(status.discountCentavos)}
                         </span>
                       ) : (
                         <span className="shrink-0 rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-orange-700">
@@ -791,7 +858,7 @@ function CartActions({
   items,
   taxBreakdown,
   discountType,
-  promoPreview,
+  promoStack,
   holdTransaction,
   showClearConfirm,
   setShowClearConfirm,
@@ -801,7 +868,7 @@ function CartActions({
   items: CartItem[];
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
-  promoPreview: PromoResult | null;
+  promoStack: PromoStack | null;
   holdTransaction: () => string | null;
   showClearConfirm: boolean;
   setShowClearConfirm: (v: boolean) => void;
@@ -809,7 +876,7 @@ function CartActions({
   onCompleteSale: () => void;
 }) {
   const isDiscounted = discountType !== "none";
-  const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
+  const promoDiscount = promoStack?.discountCentavos ?? 0;
   const displayTotal = taxBreakdown.totalCentavos - promoDiscount;
   const savings = isDiscounted ? taxBreakdown.savingsCentavos : promoDiscount;
 
@@ -834,13 +901,18 @@ function CartActions({
           </div>
         )}
 
-        {promoPreview?.applicable && promoDiscount > 0 && (
-          <div className="flex items-center justify-between gap-2 text-orange-600">
-            <span className="truncate" title={promoPreview.description}>
-              Promo ({promoPreview.description})
+        {promoStack?.applied.map((a) => (
+          <div key={a.id} className="flex items-center justify-between gap-2 text-orange-600">
+            <span className="truncate" title={a.description}>
+              Promo ({a.name})
             </span>
-            <span className="shrink-0 tabular-nums">-{formatCurrency(promoDiscount)}</span>
+            <span className="shrink-0 tabular-nums">-{formatCurrency(a.discountCentavos)}</span>
           </div>
+        ))}
+        {promoStack?.capped && (
+          <p className="text-[11px] text-amber-700">
+            Discount capped at the shop&apos;s maximum.
+          </p>
         )}
 
         <div className="flex items-center justify-between pt-0.5 text-base font-bold">
@@ -911,6 +983,8 @@ type ActivePromo = {
   description?: string;
   promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
   priority: number;
+  /** A stand-alone promotion — it cannot share a sale with another. */
+  exclusive?: boolean;
 };
 
 function CartContent({
@@ -919,10 +993,11 @@ function CartContent({
   taxBreakdown,
   discountType,
   setDiscountType,
-  selectedPromoId,
-  setPromoId,
+  selectedPromoIds,
+  setPromoIds,
+  promoRules,
   activePromos,
-  promoPreview,
+  promoStack,
   promoSuggestions,
   heldTransactions,
   updateQuantity,
@@ -943,10 +1018,11 @@ function CartContent({
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
   setDiscountType: (type: DiscountType) => void;
-  selectedPromoId: string | null;
-  setPromoId: (promoId: string | null) => void;
+  selectedPromoIds: string[];
+  setPromoIds: (promoIds: string[]) => void;
+  promoRules: PromoRules;
   activePromos: ActivePromo[];
-  promoPreview: PromoResult | null;
+  promoStack: PromoStack | null;
   promoSuggestions: PromoSuggestions;
   heldTransactions: HeldTransaction[];
   updateQuantity: (variantId: CartItem["variantId"], delta: number) => void;
@@ -1025,9 +1101,10 @@ function CartContent({
                 <PromoSelector
                   discountType={discountType}
                   activePromos={activePromos}
-                  selectedPromoId={selectedPromoId}
-                  setPromoId={setPromoId}
-                  promoPreview={promoPreview}
+                  selectedPromoIds={selectedPromoIds}
+                  setPromoIds={setPromoIds}
+                  promoRules={promoRules}
+                  promoStack={promoStack}
                   promoSuggestions={promoSuggestions}
                 />
               </div>
@@ -1035,7 +1112,7 @@ function CartContent({
                 items={items}
                 taxBreakdown={taxBreakdown}
                 discountType={discountType}
-                promoPreview={promoPreview}
+                promoStack={promoStack}
                 holdTransaction={holdTransaction}
                 showClearConfirm={showClearConfirm}
                 setShowClearConfirm={setShowClearConfirm}
@@ -1050,8 +1127,8 @@ function CartContent({
           items={items}
           taxBreakdown={taxBreakdown}
           discountType={discountType}
-          selectedPromoId={selectedPromoId}
-          promoPreview={promoPreview}
+          selectedPromoIds={selectedPromoIds}
+          promoStack={promoStack}
           onComplete={onPaymentComplete}
           onCancel={onPaymentCancel}
         />
@@ -1082,8 +1159,8 @@ function PaymentPanel({
   items,
   taxBreakdown,
   discountType,
-  selectedPromoId,
-  promoPreview,
+  selectedPromoIds,
+  promoStack,
   onComplete,
   onCancel,
   variant = "inline",
@@ -1092,8 +1169,8 @@ function PaymentPanel({
   items: CartItem[];
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
-  selectedPromoId: string | null;
-  promoPreview: PromoResult | null;
+  selectedPromoIds: string[];
+  promoStack: PromoStack | null;
   onComplete: (result: TransactionResult) => void;
   onCancel: () => void;
   // "modal": inside PaymentModal, which has its own back and close, and
@@ -1129,7 +1206,7 @@ function PaymentPanel({
   const [splitAmountInput, setSplitAmountInput] = useState("");
   const [paymentReference, setPaymentReference] = useState("");
 
-  const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
+  const promoDiscount = promoStack?.discountCentavos ?? 0;
   const totalCentavos = taxBreakdown.totalCentavos - promoDiscount;
 
   // Split amount in centavos (secondary payment)
@@ -1212,6 +1289,8 @@ function PaymentPanel({
           })),
           paymentMethod,
           discountType,
+          promotionIds:
+            discountType === "none" && selectedPromoIds.length > 0 ? selectedPromoIds : undefined,
           amountTenderedCentavos: paymentMethod === "cash" ? amountTendered! : undefined,
           splitPayment: splitPaymentArg,
           paymentReference: needsReference ? paymentReference.trim() : undefined,
@@ -1260,9 +1339,10 @@ function PaymentPanel({
         discountType,
         amountTenderedCentavos:
           paymentMethod === "cash" ? amountTendered! : undefined,
-        promotionId: selectedPromoId && discountType === "none"
-          ? (selectedPromoId as Id<"promotions">)
-          : undefined,
+        promotionIds:
+          discountType === "none" && selectedPromoIds.length > 0
+            ? (selectedPromoIds as Id<"promotions">[])
+            : undefined,
         splitPayment: splitPaymentArg,
         paymentReference: needsReference ? paymentReference.trim() : undefined,
         fashionAssistantId: selectedFaId !== "none"
@@ -1661,16 +1741,16 @@ function PaymentModal({
   items,
   taxBreakdown,
   discountType,
-  selectedPromoId,
-  promoPreview,
+  selectedPromoIds,
+  promoStack,
   onComplete,
   onCancel,
 }: {
   items: CartItem[];
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
-  selectedPromoId: string | null;
-  promoPreview: PromoResult | null;
+  selectedPromoIds: string[];
+  promoStack: PromoStack | null;
   onComplete: (result: TransactionResult) => void;
   onCancel: () => void;
 }) {
@@ -1685,7 +1765,7 @@ function PaymentModal({
   }, [busy, onCancel]);
 
   const isDiscounted = discountType !== "none";
-  const promoDiscount = promoPreview?.applicable ? promoPreview.discountCentavos : 0;
+  const promoDiscount = promoStack?.discountCentavos ?? 0;
   const total = taxBreakdown.totalCentavos - promoDiscount;
   const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
 
@@ -1750,14 +1830,14 @@ function PaymentModal({
                   <span className="tabular-nums">{formatCurrency(taxBreakdown.vatAmountCentavos)}</span>
                 </div>
               )}
-              {promoDiscount > 0 && (
-                <div className="flex justify-between gap-2 text-orange-600">
-                  <span className="truncate" title={promoPreview?.description}>
-                    Promo ({promoPreview?.description})
+              {promoStack?.applied.map((a) => (
+                <div key={a.id} className="flex justify-between gap-2 text-orange-600">
+                  <span className="truncate" title={a.description}>
+                    Promo ({a.name})
                   </span>
-                  <span className="shrink-0 tabular-nums">-{formatCurrency(promoDiscount)}</span>
+                  <span className="shrink-0 tabular-nums">-{formatCurrency(a.discountCentavos)}</span>
                 </div>
-              )}
+              ))}
               <div className="flex justify-between pt-1 text-lg font-bold">
                 <span>Total</span>
                 <span className="tabular-nums">{formatCurrency(total)}</span>
@@ -1779,8 +1859,8 @@ function PaymentModal({
               items={items}
               taxBreakdown={taxBreakdown}
               discountType={discountType}
-              selectedPromoId={selectedPromoId}
-              promoPreview={promoPreview}
+              selectedPromoIds={selectedPromoIds}
+              promoStack={promoStack}
               onComplete={onComplete}
               onCancel={onCancel}
               variant="modal"
@@ -1888,8 +1968,8 @@ function RushModeCart({
           items={items}
           taxBreakdown={taxBreakdown}
           discountType="none"
-          selectedPromoId={null}
-          promoPreview={null}
+          selectedPromoIds={[]}
+          promoStack={null}
           onComplete={onPaymentComplete}
           onCancel={onPaymentCancel}
         />

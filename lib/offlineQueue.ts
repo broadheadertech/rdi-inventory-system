@@ -24,6 +24,8 @@ export interface CreateTransactionArgs {
   discountType: "senior" | "pwd" | "none";
   amountTenderedCentavos?: number;
   splitPayment?: { method: PaymentMethod; amountCentavos: number };
+  /** The promotions the cashier applied, re-checked when the sale is replayed. */
+  promotionIds?: string[];
   // The bank transfer's reference number, when either portion is a transfer
   paymentReference?: string;
   // BIR Sold-To + SC/PWD details captured at checkout (optional)

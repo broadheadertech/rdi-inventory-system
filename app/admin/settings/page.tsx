@@ -24,6 +24,8 @@ import {
   Upload, Trash2, Palette, Pencil, Plus, ToggleLeft, ToggleRight,
 } from "lucide-react";
 import Link from "next/link";
+import { PROMO_SETTING_KEYS } from "@/convex/_helpers/promoSettings";
+import { clampRules } from "@/convex/_helpers/promoStacking";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -143,6 +145,129 @@ function AssetUpload({
 }
 
 // ─── Colors Section ───────────────────────────────────────────────────────────
+
+// ─── Promotion Stacking ───────────────────────────────────────────────────────
+
+/**
+ * How many promotions a single sale may carry, and how much they may take off
+ * together. The POS shows these limits as the cashier picks promotions, and
+ * createTransaction enforces them again when the sale is rung.
+ */
+function PromoRulesSection() {
+  const settings = useQuery(api.admin.settings.getSettings);
+  const updateSetting = useMutation(api.admin.settings.updateSetting);
+
+  const saved = clampRules({
+    maxPerSale: Number(settings?.[PROMO_SETTING_KEYS.maxPerSale] ?? NaN),
+    maxDiscountPercent: Number(settings?.[PROMO_SETTING_KEYS.maxDiscountPercent] ?? NaN),
+  });
+
+  const [maxPerSale, setMaxPerSale] = useState<string | null>(null);
+  const [maxPercent, setMaxPercent] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const displayPerSale = maxPerSale ?? String(saved.maxPerSale);
+  const displayPercent = maxPercent ?? String(saved.maxDiscountPercent);
+
+  const hasChanges =
+    (maxPerSale !== null && maxPerSale !== String(saved.maxPerSale)) ||
+    (maxPercent !== null && maxPercent !== String(saved.maxDiscountPercent));
+
+  // What the cashier will actually get — the same clamping the server applies.
+  const effective = clampRules({
+    maxPerSale: Number(displayPerSale),
+    maxDiscountPercent: Number(displayPercent),
+  });
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await Promise.all([
+        updateSetting({
+          key: PROMO_SETTING_KEYS.maxPerSale,
+          value: String(effective.maxPerSale),
+        }),
+        updateSetting({
+          key: PROMO_SETTING_KEYS.maxDiscountPercent,
+          value: String(effective.maxDiscountPercent),
+        }),
+      ]);
+      setMaxPerSale(null);
+      setMaxPercent(null);
+      toast.success("Promotion limits saved");
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <SectionCard
+      title="Promotion Limits"
+      description="How many promotions one sale may carry, and how much they may take off together"
+    >
+      <div className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="promo-max-per-sale">Promotions per sale</Label>
+            <Input
+              id="promo-max-per-sale"
+              type="number"
+              min="1"
+              max="10"
+              value={displayPerSale}
+              onChange={(e) => setMaxPerSale(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Set to 1 to keep one promotion per sale.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="promo-max-percent">Most they can take off</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="promo-max-percent"
+                type="number"
+                min="1"
+                max="100"
+                value={displayPercent}
+                onChange={(e) => setMaxPercent(e.target.value)}
+              />
+              <span className="text-sm text-muted-foreground">%</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Of the sale before promotions. Anything past this is trimmed back.
+            </p>
+          </div>
+        </div>
+
+        <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">
+          A sale may carry{" "}
+          <span className="font-medium text-foreground">
+            {effective.maxPerSale === 1
+              ? "one promotion"
+              : `up to ${effective.maxPerSale} promotions`}
+          </span>
+          , together taking off at most{" "}
+          <span className="font-medium text-foreground">
+            {effective.maxDiscountPercent}%
+          </span>
+          . A promotion marked &ldquo;can&apos;t be combined&rdquo; still runs on its own.
+        </p>
+
+        <div className="flex items-center gap-3">
+          <Button onClick={handleSave} disabled={!hasChanges || saving}>
+            {saving ? "Saving..." : "Save Promotion Limits"}
+          </Button>
+          {hasChanges && (
+            <span className="text-xs text-muted-foreground">You have unsaved changes</span>
+          )}
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
 
 function ColorsSection() {
   const colors = useQuery(api.admin.colors.listColors);
@@ -850,6 +975,9 @@ export default function AdminSettingsPage() {
           </div>
         </div>
       </SectionCard>
+
+      {/* ── Promotion Limits ───────────────────────────────────────────────── */}
+      <PromoRulesSection />
 
       {/* ── Colors ─────────────────────────────────────────────────────────── */}
       <ColorsSection />

@@ -34,7 +34,7 @@ export type HeldTransaction = {
   items: CartItem[];
   heldAt: number;
   discountType: DiscountType;
-  selectedPromoId: string | null;
+  selectedPromoIds: string[];
 };
 
 type CartState = {
@@ -42,7 +42,7 @@ type CartState = {
   heldTransactions: HeldTransaction[];
   activeTransactionId: string;
   discountType: DiscountType;
-  selectedPromoId: string | null;
+  selectedPromoIds: string[];
   holdCounter: number;
 };
 
@@ -56,7 +56,7 @@ type CartAction =
   | { type: "DISCARD_HELD"; transactionId: string }
   | { type: "RESTORE_HELD"; heldTransactions: HeldTransaction[]; holdCounter: number }
   | { type: "SET_DISCOUNT_TYPE"; discountType: DiscountType }
-  | { type: "SET_PROMO"; promoId: string | null }
+  | { type: "SET_PROMOS"; promoIds: string[] }
   | { type: "RESTORE_CART"; items: CartItem[]; discountType: DiscountType };
 
 type POSCartContextValue = {
@@ -79,8 +79,8 @@ type POSCartContextValue = {
   restoreCart: (items: CartItem[], discountType: DiscountType) => void;
   discountType: DiscountType;
   setDiscountType: (type: DiscountType) => void;
-  selectedPromoId: string | null;
-  setPromoId: (promoId: string | null) => void;
+  selectedPromoIds: string[];
+  setPromoIds: (promoIds: string[]) => void;
   taxBreakdown: TaxBreakdown;
 };
 
@@ -134,7 +134,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       };
 
     case "CLEAR_CART":
-      return { ...state, items: [], discountType: "none", selectedPromoId: null };
+      return { ...state, items: [], discountType: "none", selectedPromoIds: [] };
 
     case "HOLD_TRANSACTION": {
       if (state.items.length === 0) return state;
@@ -146,7 +146,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         items: [...state.items],
         heldAt: Date.now(),
         discountType: state.discountType,
-        selectedPromoId: state.selectedPromoId,
+        selectedPromoIds: state.selectedPromoIds,
       };
       return {
         ...state,
@@ -154,7 +154,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         heldTransactions: [...state.heldTransactions, held],
         activeTransactionId: generateTransactionId(),
         discountType: "none",
-        selectedPromoId: null,
+        selectedPromoIds: [],
         holdCounter: nextCounter,
       };
     }
@@ -178,14 +178,14 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           items: [...state.items],
           heldAt: Date.now(),
           discountType: state.discountType,
-          selectedPromoId: state.selectedPromoId,
+          selectedPromoIds: state.selectedPromoIds,
         };
         return {
           items: toResume.items,
           heldTransactions: [...remainingHeld, currentHeld].slice(-5),
           activeTransactionId: toResume.id,
           discountType: toResume.discountType,
-          selectedPromoId: toResume.selectedPromoId,
+          selectedPromoIds: toResume.selectedPromoIds ?? [],
           holdCounter: swapCounter,
         };
       }
@@ -196,20 +196,20 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         heldTransactions: remainingHeld,
         activeTransactionId: toResume.id,
         discountType: toResume.discountType,
-        selectedPromoId: toResume.selectedPromoId,
+        selectedPromoIds: toResume.selectedPromoIds ?? [],
       };
     }
 
     case "SET_DISCOUNT_TYPE":
-      // Mutual exclusion: Senior/PWD clears promo
+      // Mutual exclusion: Senior/PWD clears promos
       return {
         ...state,
         discountType: action.discountType,
-        selectedPromoId: action.discountType !== "none" ? null : state.selectedPromoId,
+        selectedPromoIds: action.discountType !== "none" ? [] : state.selectedPromoIds,
       };
 
-    case "SET_PROMO":
-      return { ...state, selectedPromoId: action.promoId };
+    case "SET_PROMOS":
+      return { ...state, selectedPromoIds: action.promoIds };
 
     case "DISCARD_HELD":
       return {
@@ -263,8 +263,15 @@ function loadHeldFromStorage(): { held: HeldTransaction[]; holdCounter: number }
     const raw = localStorage.getItem(HELD_STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed.held)) return parsed;
-    return null;
+    if (!Array.isArray(parsed.held)) return null;
+    // Holds saved before a sale could carry several promotions kept one id.
+    const held: HeldTransaction[] = parsed.held.map(
+      (h: HeldTransaction & { selectedPromoId?: string | null }) => ({
+        ...h,
+        selectedPromoIds: h.selectedPromoIds ?? (h.selectedPromoId ? [h.selectedPromoId] : []),
+      })
+    );
+    return { held, holdCounter: parsed.holdCounter ?? 0 };
   } catch {
     return null;
   }
@@ -286,7 +293,7 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
       heldTransactions: saved?.held ?? [],
       activeTransactionId: generateTransactionId(),
       discountType: "none" as DiscountType,
-      selectedPromoId: null,
+      selectedPromoIds: [],
       holdCounter: saved?.holdCounter ?? 0,
     };
   });
@@ -356,12 +363,9 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const setPromoId = useCallback(
-    (promoId: string | null) => {
-      dispatch({ type: "SET_PROMO", promoId });
-    },
-    []
-  );
+  const setPromoIds = useCallback((promoIds: string[]) => {
+    dispatch({ type: "SET_PROMOS", promoIds });
+  }, []);
 
   const restoreCart = useCallback(
     (items: CartItem[], discountType: DiscountType) => {
@@ -400,8 +404,8 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
         restoreCart,
         discountType: state.discountType,
         setDiscountType,
-        selectedPromoId: state.selectedPromoId,
-        setPromoId,
+        selectedPromoIds: state.selectedPromoIds,
+        setPromoIds,
         taxBreakdown,
       }}
     >

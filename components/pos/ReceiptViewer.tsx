@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatCurrency, formatDateTime } from "@/lib/formatters";
 import { PAYMENT_METHOD_LABELS } from "@/lib/constants";
+import { receiptPromoLines } from "@/lib/receiptPromoLines";
 import { SendReceiptForm } from "@/components/pos/SendReceiptForm";
 import dynamic from "next/dynamic";
 
@@ -107,6 +108,8 @@ function ReceiptDocument({ receiptData, tab }: { receiptData: ReceiptData; tab: 
   const vatAmount = isDiscounted ? 0 : txn.vatAmountCentavos;
   const vatRegTin = bir.tin || business.tin;
   const fieldOrBlank = (v?: string) => (v && v.trim() ? v : "__________");
+  // One line per promotion, so the amount due adds up on the printed receipt.
+  const promoLines = receiptPromoLines(txn);
 
   return (
     <>
@@ -207,6 +210,12 @@ function ReceiptDocument({ receiptData, tab }: { receiptData: ReceiptData; tab: 
                 <span>Total Sales (VAT Inclusive):</span>
                 <span>{formatCurrency(txn.subtotalCentavos)}</span>
               </div>
+              {promoLines.map((promo, i) => (
+                <div key={`${promo.name}-${i}`} className="flex justify-between">
+                  <span className="truncate pr-2">Less: {promo.name}</span>
+                  <span className="shrink-0">-{formatCurrency(promo.discountCentavos)}</span>
+                </div>
+              ))}
               {isDiscounted && (
                 <>
                   <div className="flex justify-between">

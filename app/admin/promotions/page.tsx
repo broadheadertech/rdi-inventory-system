@@ -199,6 +199,7 @@ interface PromoForm {
   noExpiration: boolean;
   isActive: boolean;
   priority: string;
+  exclusive: boolean;
   branchScopeMode: "all" | "byClassification" | "specific";
   branchIds: Id<"branches">[];
   branchClassifications: ("premium" | "aclass" | "bnc" | "outlet")[];
@@ -245,6 +246,7 @@ function emptyForm(): PromoForm {
     noExpiration: false,
     isActive: true,
     priority: "0",
+    exclusive: false,
     branchScopeMode: "all",
     branchIds: [],
     branchClassifications: [],
@@ -457,6 +459,7 @@ export default function PromotionsPage() {
       noExpiration: promo.endDate === undefined,
       isActive: promo.isActive,
       priority: promo.priority.toString(),
+      exclusive: promo.exclusive ?? false,
       branchScopeMode:
         (promo.branchClassifications && promo.branchClassifications.length > 0)
           ? "byClassification"
@@ -556,6 +559,7 @@ export default function PromotionsPage() {
       endDate: endTs,
       isActive: form.isActive,
       priority: parseInt(form.priority, 10) || 0,
+      exclusive: form.exclusive,
       agingTiers: form.allStock ? undefined : form.agingTiers,
       crossSellRewardType: form.promoType === "crossSell" ? form.crossSellRewardType : undefined,
       rewardBrandIds: form.promoType === "crossSell" ? form.rewardBrandIds : undefined,
@@ -713,7 +717,17 @@ export default function PromotionsPage() {
                 const badge = STATUS_BADGE[status];
                 return (
                   <TableRow key={promo._id}>
-                    <TableCell className="font-medium">{promo.name}</TableCell>
+                    <TableCell className="font-medium">
+                      {promo.name}
+                      {promo.exclusive && (
+                        <Badge
+                          variant="outline"
+                          className="ml-2 border-amber-300 text-[10px] font-normal text-amber-700"
+                        >
+                          Stand-alone
+                        </Badge>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge
                         variant="secondary"
@@ -1450,6 +1464,18 @@ export default function PromotionsPage() {
                 <p className="text-xs text-muted-foreground">
                   Higher number = higher priority
                 </p>
+                <label className="flex items-start gap-1.5 pt-1 text-xs text-muted-foreground cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.exclusive}
+                    onChange={(e) => updateField("exclusive", e.target.checked)}
+                    className="mt-0.5 rounded border-gray-300"
+                  />
+                  <span>
+                    Can&apos;t be combined — this promotion runs on its own, never
+                    alongside another.
+                  </span>
+                </label>
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>

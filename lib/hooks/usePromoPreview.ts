@@ -6,10 +6,15 @@ import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import type { CartItem } from "@/components/providers/POSCartProvider";
 import {
-  calculatePromoDiscount,
+  stackPromos,
+  clampRules,
+  DEFAULT_PROMO_RULES,
+  type PromoRules,
+  type PromoStack,
+} from "@/convex/_helpers/promoStacking";
+import {
   promoProgress,
   type PromoProgress,
-  type PromoResult,
   type PromoInput,
 } from "@/convex/_helpers/promoCalculations";
 
@@ -46,6 +51,7 @@ type ActivePromo = {
   tieredDiscountCentavos?: number;
   tieredRewardType?: "amount" | "cheapestFree";
   minQuantity?: number;
+  exclusive?: boolean;
   discountApplication?: "wholePurchase" | "highestItem";
   brandIds: string[];
   categoryIds: string[];
@@ -70,13 +76,22 @@ type ActivePromo = {
 
 export function usePromoPreview(
   items: CartItem[],
-  selectedPromoId: string | null,
-  discountType: string
+  selectedPromoIds: string[],
+  discountType: string,
+  /** The sale before promotions — what the discount cap is measured against. */
+  saleTotalCentavos: number
 ) {
   // Only fetch promos when discount type is "none" (promos don't stack with Senior/PWD)
   const activePromos = useQuery(
     api.pos.promotions.getActivePromotions,
     discountType === "none" ? {} : "skip"
+  );
+
+  // How many promotions a sale may carry, and how much they may take off.
+  const savedRules = useQuery(api.pos.promotions.getPromoRules, discountType === "none" ? {} : "skip");
+  const rules: PromoRules = useMemo(
+    () => clampRules(savedRules ?? DEFAULT_PROMO_RULES),
+    [savedRules]
   );
 
   // Get variant IDs for hierarchy lookup
@@ -113,28 +128,28 @@ export function usePromoPreview(
     });
   }, [items, variantHierarchy]);
 
-  // Calculate promo preview
-  const promoPreview = useMemo((): PromoResult | null => {
+  // What the chosen promotions come to together, under the shop's rules —
+  // the same stacking the server applies when the sale is rung.
+  const promoStack = useMemo((): PromoStack | null => {
     if (
       discountType !== "none" ||
-      !selectedPromoId ||
+      selectedPromoIds.length === 0 ||
       !activePromos ||
       !enrichedItems ||
       items.length === 0
     ) {
       return null;
     }
-
-    const promo = activePromos.find(
-      (p: ActivePromo) => String(p._id) === selectedPromoId
-    );
-    if (!promo) return null;
-
-    return calculatePromoDiscount(enrichedItems, {
-      ...promo,
-      agingTiers: promo.agingTiers ?? [],
-    } as PromoInput);
-  }, [items, selectedPromoId, discountType, activePromos, enrichedItems]);
+    const chosen = (activePromos as ActivePromo[])
+      .filter((p) => selectedPromoIds.includes(String(p._id)))
+      .map((promo) => ({
+        ...promo,
+        id: String(promo._id),
+        agingTiers: promo.agingTiers ?? [],
+      })) as unknown as Parameters<typeof stackPromos>[1];
+    if (chosen.length === 0) return null;
+    return stackPromos(enrichedItems, chosen, saleTotalCentavos, rules);
+  }, [items, selectedPromoIds, discountType, activePromos, enrichedItems, saleTotalCentavos, rules]);
 
   // Every active promotion against this cart: which apply and save the most,
   // and what the cashier could suggest adding to reach the rest.
@@ -168,8 +183,9 @@ export function usePromoPreview(
 
   return {
     activePromos: (activePromos ?? []) as ActivePromo[],
-    promoPreview,
+    promoStack,
     promoSuggestions,
+    rules,
     isLoading: activePromos === undefined,
   };
 }

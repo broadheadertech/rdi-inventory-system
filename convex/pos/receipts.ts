@@ -100,6 +100,8 @@ export const getReceiptData = query({
         discountAmountCentavos: transaction.discountAmountCentavos,
         promoDiscountAmountCentavos: transaction.promoDiscountAmountCentavos ?? 0,
         promoName,
+        // Every promotion on the sale, so the receipt can list them.
+        appliedPromotions: transaction.appliedPromotions ?? [],
         totalCentavos: transaction.totalCentavos,
         paymentMethod: transaction.paymentMethod,
         discountType: transaction.discountType ?? "none",

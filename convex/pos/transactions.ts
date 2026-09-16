@@ -2,20 +2,18 @@ import { v, ConvexError } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import type { MutationCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
-import type { Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES, requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { calculateTaxBreakdown } from "../_helpers/taxCalculations";
 import { tenderValidator } from "../_helpers/tenders";
+import { stackPromos } from "../_helpers/promoStacking";
+import { readPromoRules } from "../_helpers/promoSettings";
 import { requireShiftForSale } from "./shifts";
 import { branchPrice } from "../_helpers/branchPricing";
-import {
-  calculatePromoDiscount,
-  toPromoInput,
-  type CartItemForPromo,
-} from "../_helpers/promoCalculations";
+import { toPromoInput, type CartItemForPromo } from "../_helpers/promoCalculations";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -83,7 +81,9 @@ export const createTransaction = mutation({
       v.literal("none")
     ),
     amountTenderedCentavos: v.optional(v.number()),
+    // One promotion (older tills and replayed offline sales) or several.
     promotionId: v.optional(v.id("promotions")),
+    promotionIds: v.optional(v.array(v.id("promotions"))),
     splitPayment: v.optional(v.object({
       method: tenderValidator,
       amountCentavos: v.number(),
@@ -251,42 +251,58 @@ export const createTransaction = mutation({
     // 6. Server-side tax calculation using AUTHORITATIVE prices (not client values)
     const taxBreakdown = calculateTaxBreakdown(validatedItems, args.discountType);
 
-    // 6b. Promo discount (only when discountType is "none" — promos don't stack with Senior/PWD)
+    // 6b. Promotions (only when discountType is "none" — promos don't stack
+    //     with Senior/PWD). A sale may carry several, held in check by the
+    //     shop's rules: exclusive promos stand alone, at most so many per
+    //     sale, and at most so much off (convex/_helpers/promoStacking.ts).
     let promoDiscountCentavos = 0;
     let appliedPromotionId: Id<"promotions"> | undefined;
+    let appliedPromotions:
+      | { promotionId: Id<"promotions">; name: string; discountCentavos: number }[]
+      | undefined;
 
-    if (args.discountType === "none" && args.promotionId) {
-      const promo = await ctx.db.get(args.promotionId);
-      if (!promo || !promo.isActive) {
-        throw new ConvexError({
-          code: "INVALID_PAYMENT",
-          message: "Promotion not found or inactive",
-        });
-      }
+    const requestedPromotionIds = [
+      ...new Set([
+        ...(args.promotionIds ?? []),
+        ...(args.promotionId ? [args.promotionId] : []),
+      ]),
+    ];
 
+    if (args.discountType === "none" && requestedPromotionIds.length > 0) {
       const now = Date.now();
-      if (now < promo.startDate || (promo.endDate !== undefined && now > promo.endDate)) {
-        throw new ConvexError({
-          code: "INVALID_PAYMENT",
-          message: "Promotion has expired or not yet started",
-        });
-      }
-
-      // Branch scope: classification OR specific branch IDs
       const currentBranch = await ctx.db.get(branchId);
-      const hasClassFilter = promo.branchClassifications && promo.branchClassifications.length > 0;
-      const hasBranchIdFilter = promo.branchIds.length > 0;
-      if (hasClassFilter || hasBranchIdFilter) {
-        const matchesClass = hasClassFilter && currentBranch?.classification
-          ? promo.branchClassifications!.includes(currentBranch.classification)
-          : false;
-        const matchesBranchId = hasBranchIdFilter && promo.branchIds.includes(branchId);
-        if (!matchesClass && !matchesBranchId) {
+      const promos: Doc<"promotions">[] = [];
+
+      for (const promotionId of requestedPromotionIds) {
+        const promo = await ctx.db.get(promotionId);
+        if (!promo || !promo.isActive) {
           throw new ConvexError({
             code: "INVALID_PAYMENT",
-            message: "Promotion not valid for this branch",
+            message: "Promotion not found or inactive",
           });
         }
+        if (now < promo.startDate || (promo.endDate !== undefined && now > promo.endDate)) {
+          throw new ConvexError({
+            code: "INVALID_PAYMENT",
+            message: `${promo.name} has expired or has not started`,
+          });
+        }
+        // Branch scope: classification OR specific branch IDs
+        const hasClassFilter = promo.branchClassifications && promo.branchClassifications.length > 0;
+        const hasBranchIdFilter = promo.branchIds.length > 0;
+        if (hasClassFilter || hasBranchIdFilter) {
+          const matchesClass = hasClassFilter && currentBranch?.classification
+            ? promo.branchClassifications!.includes(currentBranch.classification)
+            : false;
+          const matchesBranchId = hasBranchIdFilter && promo.branchIds.includes(branchId);
+          if (!matchesClass && !matchesBranchId) {
+            throw new ConvexError({
+              code: "INVALID_PAYMENT",
+              message: `${promo.name} is not valid for this branch`,
+            });
+          }
+        }
+        promos.push(promo);
       }
 
       // Enrich cart items with brand/category for product scope filtering
@@ -338,13 +354,28 @@ export const createTransaction = mutation({
         });
       }
 
-      // The whole promotion, reward fields included — the cart preview reads the
-      // same, so what the till shows is what the sale gives.
-      const promoResult = calculatePromoDiscount(enrichedItems, toPromoInput(promo));
+      // The whole promotion, reward fields included — the cart preview stacks
+      // the same way, so what the till shows is what the sale gives.
+      const stack = stackPromos(
+        enrichedItems,
+        promos.map((promo) => ({
+          ...toPromoInput(promo),
+          id: String(promo._id),
+          exclusive: promo.exclusive ?? false,
+        })),
+        taxBreakdown.totalCentavos,
+        await readPromoRules(ctx)
+      );
 
-      if (promoResult.applicable) {
-        promoDiscountCentavos = promoResult.discountCentavos;
-        appliedPromotionId = promo._id;
+      promoDiscountCentavos = stack.discountCentavos;
+      if (stack.applied.length > 0) {
+        appliedPromotions = stack.applied.map((a) => ({
+          promotionId: a.id as Id<"promotions">,
+          name: a.name,
+          discountCentavos: a.discountCentavos,
+        }));
+        // The biggest one is what a report reading a single promotion sees.
+        appliedPromotionId = appliedPromotions[0].promotionId;
       }
     }
 
@@ -401,6 +432,7 @@ export const createTransaction = mutation({
       paymentMethod: args.paymentMethod,
       discountType: args.discountType,
       promotionId: appliedPromotionId,
+      appliedPromotions,
       promoDiscountAmountCentavos:
         promoDiscountCentavos > 0 ? promoDiscountCentavos : undefined,
       splitPayment: args.splitPayment,
@@ -478,6 +510,7 @@ export const createTransaction = mutation({
         paymentReference: paymentReference ?? null,
         itemCount: args.items.length,
         promotionId: appliedPromotionId ?? null,
+        promotions: appliedPromotions?.map((a) => a.name) ?? [],
         promoDiscountCentavos,
       },
     });

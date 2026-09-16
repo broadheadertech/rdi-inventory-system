@@ -1448,13 +1448,20 @@ export const getPromotionContributions = query({
           lineCtxs.push({ item: it, variant, isDiscounted, brandId });
         }
 
-        // Path A — Direct attribution: txn explicitly tagged with a promotionId.
-        const txnPromotionId = (t as { promotionId?: Id<"promotions"> }).promotionId;
-        if (txnPromotionId) {
-          const promo = overlappingPromos.find(
-            (p) => (p._id as string) === (txnPromotionId as string),
-          );
-          if (promo) {
+        // Path A — Direct attribution: the promotions the sale was tagged with.
+        // A sale may carry several; each is credited with the sale.
+        const taggedIds = (
+          t.appliedPromotions && t.appliedPromotions.length > 0
+            ? t.appliedPromotions.map((a) => a.promotionId)
+            : t.promotionId
+              ? [t.promotionId]
+              : []
+        ) as Id<"promotions">[];
+        if (taggedIds.length > 0) {
+          const tagged = taggedIds
+            .map((id) => overlappingPromos.find((p) => (p._id as string) === (id as string)))
+            .filter((p): p is Doc<"promotions"> => !!p);
+          for (const promo of tagged) {
             const txnSales = lineCtxs.reduce(
               (s, l) => s + l.item.lineTotalCentavos,
               0,
@@ -1465,6 +1472,8 @@ export const getPromotionContributions = query({
               agg.itemsSold += lineCtxs.reduce((s, l) => s + l.item.quantity, 0);
               agg.txnIds.add(t._id as string);
             }
+          }
+          if (tagged.length > 0) {
             continue; // direct attribution wins — skip the heuristic for this txn
           }
         }

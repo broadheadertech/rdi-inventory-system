@@ -200,6 +200,7 @@ function PosLayoutInner({ children }: { children: React.ReactNode }) {
               ...item,
               variantId: item.variantId as Id<"variants">,
             })),
+            promotionIds: payload.promotionIds as Id<"promotions">[] | undefined,
           });
           await deleteTransaction(entry.id);
         } catch (error) {
