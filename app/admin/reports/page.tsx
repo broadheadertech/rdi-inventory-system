@@ -1064,7 +1064,6 @@ export default function HqReportsPage() {
 
       {/* ── Time Report ── */}
       <SalesCheckpoints
-        date={dateEnd}
         branchId={branchId as Id<"branches"> | undefined}
         channel={channel}
       />

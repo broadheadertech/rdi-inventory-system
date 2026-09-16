@@ -1595,53 +1595,72 @@ export const getPromotionContributions = query({
   },
 });
 
-// ─── getSalesCheckpoints ──────────────────────────────────────────────────────
-// The trading day read at fixed points: where sales stood as of 12 noon, 3pm,
-// 6pm and at close.
+// ─── Time report ──────────────────────────────────────────────────────────────
+// Where the trading day stands right now, and how the days before it read at
+// the same fixed points.
 //
-// Each figure is a RUNNING TOTAL from the store opening, not the slot on its
-// own — "as of 3pm" includes the morning. That is how the number is read on a
-// shop floor, and it is what tells a manager at 3pm whether the day is on pace.
+// Nothing here is stored or reset. The figures are the transactions themselves,
+// asked about a date — so at midnight the question simply points at a new day
+// and starts from zero, while yesterday and every earlier day stay exactly as
+// they were. That is also why a register closing does not zero the card: the
+// trading day is the PHT calendar date everywhere in this system (zReadings
+// carry a YYYYMMDD, shifts close "endOfDay", every report cuts on midnight), so
+// moving this one boundary would make the card disagree with the Z-reading.
+// The register's own state is reported beside the figure instead, which is what
+// says whether the number is still moving.
 //
-// Every checkpoint sits beside the same weekday a week ago, taken at the same
-// hour. A Saturday noon is nothing like a Tuesday noon, so last week's same
-// weekday is the only honest like-for-like; yesterday would flatter or damn a
-// store purely for where it sits in the week.
-//
-// Checkpoints still ahead of the clock today are returned with reached: false
-// so the page can show them as pending rather than as a day that collapsed.
+// The readings are RUNNING TOTALS from opening: "as of 3PM" includes the
+// morning. That is how the number is read on a shop floor.
 
 /** Where the trading day is read. 24 is the close — the whole day. */
 const CHECKPOINT_HOURS = [12, 15, 18, 24] as const;
 
 function checkpointLabel(hour: number): string {
   if (hour === 24) return "Close";
-  if (hour === 12) return "12 NN";
+  if (hour === 12) return "12NN";
   return hour > 12 ? `${hour - 12}PM` : `${hour}AM`;
 }
 
-/** Today in PHT as YYYYMMDD. */
-function todayYmdPht(nowMs: number): string {
-  const pht = new Date(nowMs + PHT_OFFSET_MS);
+/** A PHT timestamp as YYYYMMDD. */
+function ymdPht(ms: number): string {
+  const pht = new Date(ms + PHT_OFFSET_MS);
   const y = pht.getUTCFullYear();
   const m = String(pht.getUTCMonth() + 1).padStart(2, "0");
   const d = String(pht.getUTCDate()).padStart(2, "0");
   return `${y}${m}${d}`;
 }
 
-/** The same calendar date a week earlier, as YYYYMMDD. */
-function ymdMinusWeek(ymd: string): string {
-  const shifted = new Date(ymdToMs(ymd) + PHT_OFFSET_MS - 7 * 24 * 60 * 60 * 1000);
-  const y = shifted.getUTCFullYear();
-  const m = String(shifted.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(shifted.getUTCDate()).padStart(2, "0");
-  return `${y}${m}${d}`;
+/** The same calendar date `days` earlier, as YYYYMMDD. */
+function ymdMinusDays(ymd: string, days: number): string {
+  return ymdPht(ymdToMs(ymd) + PHT_OFFSET_MS - days * 24 * 60 * 60 * 1000 - PHT_OFFSET_MS);
 }
 
-export const getSalesCheckpoints = query({
+/**
+ * Sales up to a cut-off. Returns are their own transactions with a negative
+ * total, so summing totals nets them out exactly as the rest of the reports do,
+ * while the count stays a count of sales.
+ */
+function sumUpTo(
+  txns: Doc<"transactions">[],
+  cutoffMs: number
+): { salesCentavos: number; transactionCount: number } {
+  let salesCentavos = 0;
+  let transactionCount = 0;
+  for (const t of txns) {
+    if (t.createdAt >= cutoffMs) continue;
+    salesCentavos += t.totalCentavos;
+    if (!t.receiptNumber.startsWith("RET-")) transactionCount += 1;
+  }
+  return { salesCentavos, transactionCount };
+}
+
+// ─── getSalesAsOfNow ──────────────────────────────────────────────────────────
+// The day so far, against the same weekday last week AT THE SAME TIME OF DAY —
+// today at 2:40pm is measured against last week at 2:40pm, not against last
+// week's whole day, which would read as a collapse every morning.
+
+export const getSalesAsOfNow = query({
   args: {
-    /** The trading day to read, YYYYMMDD. Defaults to today in PHT. */
-    date: v.optional(v.string()),
     branchId: v.optional(v.id("branches")),
     channel: channelArg,
   },
@@ -1654,71 +1673,148 @@ export const getSalesCheckpoints = query({
     });
 
     const nowMs = Date.now();
-    const date = args.date ?? todayYmdPht(nowMs);
-    const priorDate = ymdMinusWeek(date);
+    const date = ymdPht(nowMs);
+    const dayStart = ymdToMs(date);
+    const elapsedMs = nowMs - dayStart;
 
-    const empty = {
-      date,
-      comparedTo: priorDate,
-      isToday: date === todayYmdPht(nowMs),
-      checkpoints: CHECKPOINT_HOURS.map((hour) => ({
-        hour,
-        label: checkpointLabel(hour),
-        reached: false,
+    const priorDate = ymdMinusDays(date, 7);
+    const priorStart = ymdToMs(priorDate);
+
+    if (allowedIds.length === 0) {
+      return {
+        date,
+        comparedTo: priorDate,
+        asOfMs: nowMs,
         salesCentavos: 0,
         transactionCount: 0,
         priorSalesCentavos: 0,
         changePercent: null as number | null,
-      })),
-    };
-    if (allowedIds.length === 0) return empty;
-
-    const dayStart = ymdToMs(date);
-    const priorStart = ymdToMs(priorDate);
+        registersOpen: 0,
+        registersTotal: 0,
+        lastClosedAt: null as number | null,
+      };
+    }
 
     const [todayTxns, priorTxns] = await Promise.all([
-      fetchTxnsInRange(ctx, dayStart, ymdToMs(date, true), allowedIds),
-      fetchTxnsInRange(ctx, priorStart, ymdToMs(priorDate, true), allowedIds),
+      fetchTxnsInRange(ctx, dayStart, nowMs, allowedIds),
+      // Only as far into that day as the clock has come today.
+      fetchTxnsInRange(ctx, priorStart, priorStart + elapsedMs, allowedIds),
     ]);
 
-    // Everything rung before the cut-off, so each reading includes the ones
-    // before it. Returns are their own transactions with a negative total, so
-    // summing totals nets them out exactly as the rest of the reports do.
-    const upTo = (txns: Doc<"transactions">[], startMs: number, hour: number) => {
-      const cutoff = startMs + hour * 60 * 60 * 1000;
-      let salesCentavos = 0;
-      let transactionCount = 0;
-      for (const t of txns) {
-        if (t.createdAt >= cutoff) continue;
-        salesCentavos += t.totalCentavos;
-        if (!t.receiptNumber.startsWith("RET-")) transactionCount += 1;
-      }
-      return { salesCentavos, transactionCount };
-    };
+    const today = sumUpTo(todayTxns, nowMs);
+    const prior = sumUpTo(priorTxns, priorStart + elapsedMs);
 
-    const isToday = date === todayYmdPht(nowMs);
+    // Whether the tills are still ringing. The trading day does not hang on
+    // this — it only says whether the figure above is final.
+    let registersOpen = 0;
+    let lastClosedAt: number | null = null;
+    for (const bId of allowedIds) {
+      const open = await ctx.db
+        .query("cashierShifts")
+        .withIndex("by_branch_status", (q) =>
+          q.eq("branchId", bId).eq("status", "open")
+        )
+        .collect();
+      registersOpen += open.length;
+
+      const recent = await ctx.db
+        .query("cashierShifts")
+        .withIndex("by_branch_opened", (q) =>
+          q.eq("branchId", bId).gte("openedAt", dayStart)
+        )
+        .collect();
+      for (const shift of recent) {
+        if (shift.status === "closed" && shift.closedAt) {
+          if (lastClosedAt === null || shift.closedAt > lastClosedAt) {
+            lastClosedAt = shift.closedAt;
+          }
+        }
+      }
+    }
 
     return {
       date,
       comparedTo: priorDate,
-      isToday,
-      checkpoints: CHECKPOINT_HOURS.map((hour) => {
-        const cutoff = dayStart + hour * 60 * 60 * 1000;
-        // A day already past is read in full; today only as far as the clock.
-        const reached = !isToday || nowMs >= cutoff;
-        const now = upTo(todayTxns, dayStart, hour);
-        const prior = upTo(priorTxns, priorStart, hour);
+      asOfMs: nowMs,
+      salesCentavos: today.salesCentavos,
+      transactionCount: today.transactionCount,
+      priorSalesCentavos: prior.salesCentavos,
+      changePercent:
+        prior.salesCentavos > 0
+          ? ((today.salesCentavos - prior.salesCentavos) / prior.salesCentavos) * 100
+          : null,
+      registersOpen,
+      registersTotal: allowedIds.length,
+      lastClosedAt,
+    };
+  },
+});
+
+// ─── getCheckpointHistory ─────────────────────────────────────────────────────
+// The last N trading days, each read at 12NN, 3PM, 6PM and close. Today's row
+// fills in as the day goes; checkpoints the clock has not reached are returned
+// as not reached, so a day in progress does not read as a day that collapsed.
+
+export const getCheckpointHistory = query({
+  args: {
+    days: v.optional(v.number()),
+    branchId: v.optional(v.id("branches")),
+    channel: channelArg,
+  },
+  handler: async (ctx, args) => {
+    const scope = await resolveReportScope(ctx);
+    const { ids: allowedIds } = await resolveAllowedBranches(ctx, {
+      branchId: args.branchId,
+      channel: args.channel,
+      scope,
+    });
+
+    const days = Math.min(90, Math.max(1, Math.floor(args.days ?? 30)));
+    const nowMs = Date.now();
+    const today = ymdPht(nowMs);
+
+    const dates: string[] = [];
+    for (let i = 0; i < days; i++) dates.push(ymdMinusDays(today, i));
+
+    const hours = CHECKPOINT_HOURS.map((hour) => ({
+      hour,
+      label: checkpointLabel(hour),
+    }));
+
+    if (allowedIds.length === 0) return { hours, days: [] };
+
+    // One pass over the whole window, then bucketed by trading day — far
+    // cheaper than a query per date.
+    const windowStart = ymdToMs(dates[dates.length - 1]);
+    const txns = await fetchTxnsInRange(ctx, windowStart, nowMs, allowedIds);
+    const byDate = new Map<string, Doc<"transactions">[]>();
+    for (const t of txns) {
+      const key = ymdPht(t.createdAt);
+      const bucket = byDate.get(key);
+      if (bucket) bucket.push(t);
+      else byDate.set(key, [t]);
+    }
+
+    return {
+      hours,
+      days: dates.map((date) => {
+        const dayStart = ymdToMs(date);
+        const dayTxns = byDate.get(date) ?? [];
+        const isToday = date === today;
         return {
-          hour,
-          label: checkpointLabel(hour),
-          reached,
-          salesCentavos: now.salesCentavos,
-          transactionCount: now.transactionCount,
-          priorSalesCentavos: prior.salesCentavos,
-          changePercent:
-            prior.salesCentavos > 0
-              ? ((now.salesCentavos - prior.salesCentavos) / prior.salesCentavos) * 100
-              : null,
+          date,
+          isToday,
+          checkpoints: CHECKPOINT_HOURS.map((hour) => {
+            const cutoff = dayStart + hour * 60 * 60 * 1000;
+            const reached = !isToday || nowMs >= cutoff;
+            const totals = sumUpTo(dayTxns, cutoff);
+            return {
+              hour,
+              reached,
+              salesCentavos: totals.salesCentavos,
+              transactionCount: totals.transactionCount,
+            };
+          }),
         };
       }),
     };
