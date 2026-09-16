@@ -35,6 +35,10 @@ export type HeldTransaction = {
   heldAt: number;
   discountType: DiscountType;
   selectedPromoIds: string[];
+  /** The cart line given away under a gift-with-purchase, if one was picked. */
+  giftVariantId: string | null;
+  /** Set when that line stands in for a gift the branch had run out of. */
+  giftSubstituted: boolean;
 };
 
 type CartState = {
@@ -43,6 +47,10 @@ type CartState = {
   activeTransactionId: string;
   discountType: DiscountType;
   selectedPromoIds: string[];
+  /** The cart line given away under a gift-with-purchase, if one was picked. */
+  giftVariantId: string | null;
+  /** Set when that line stands in for a gift the branch had run out of. */
+  giftSubstituted: boolean;
   holdCounter: number;
 };
 
@@ -57,6 +65,7 @@ type CartAction =
   | { type: "RESTORE_HELD"; heldTransactions: HeldTransaction[]; holdCounter: number }
   | { type: "SET_DISCOUNT_TYPE"; discountType: DiscountType }
   | { type: "SET_PROMOS"; promoIds: string[] }
+  | { type: "SET_GIFT"; variantId: string | null; substituted: boolean }
   | { type: "RESTORE_CART"; items: CartItem[]; discountType: DiscountType };
 
 type POSCartContextValue = {
@@ -81,6 +90,9 @@ type POSCartContextValue = {
   setDiscountType: (type: DiscountType) => void;
   selectedPromoIds: string[];
   setPromoIds: (promoIds: string[]) => void;
+  giftVariantId: string | null;
+  giftSubstituted: boolean;
+  setGift: (variantId: string | null, substituted?: boolean) => void;
   taxBreakdown: TaxBreakdown;
 };
 
@@ -134,7 +146,14 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       };
 
     case "CLEAR_CART":
-      return { ...state, items: [], discountType: "none", selectedPromoIds: [] };
+      return {
+        ...state,
+        items: [],
+        discountType: "none",
+        selectedPromoIds: [],
+        giftVariantId: null,
+        giftSubstituted: false,
+      };
 
     case "HOLD_TRANSACTION": {
       if (state.items.length === 0) return state;
@@ -147,6 +166,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         heldAt: Date.now(),
         discountType: state.discountType,
         selectedPromoIds: state.selectedPromoIds,
+        giftVariantId: state.giftVariantId,
+        giftSubstituted: state.giftSubstituted,
       };
       return {
         ...state,
@@ -155,6 +176,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         activeTransactionId: generateTransactionId(),
         discountType: "none",
         selectedPromoIds: [],
+        giftVariantId: null,
+        giftSubstituted: false,
         holdCounter: nextCounter,
       };
     }
@@ -179,6 +202,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           heldAt: Date.now(),
           discountType: state.discountType,
           selectedPromoIds: state.selectedPromoIds,
+          giftVariantId: state.giftVariantId,
+          giftSubstituted: state.giftSubstituted,
         };
         return {
           items: toResume.items,
@@ -186,6 +211,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           activeTransactionId: toResume.id,
           discountType: toResume.discountType,
           selectedPromoIds: toResume.selectedPromoIds ?? [],
+          giftVariantId: toResume.giftVariantId ?? null,
+          giftSubstituted: toResume.giftSubstituted ?? false,
           holdCounter: swapCounter,
         };
       }
@@ -197,6 +224,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         activeTransactionId: toResume.id,
         discountType: toResume.discountType,
         selectedPromoIds: toResume.selectedPromoIds ?? [],
+        giftVariantId: toResume.giftVariantId ?? null,
+        giftSubstituted: toResume.giftSubstituted ?? false,
       };
     }
 
@@ -206,10 +235,25 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         ...state,
         discountType: action.discountType,
         selectedPromoIds: action.discountType !== "none" ? [] : state.selectedPromoIds,
+        giftVariantId: action.discountType !== "none" ? null : state.giftVariantId,
+        giftSubstituted: action.discountType !== "none" ? false : state.giftSubstituted,
       };
 
     case "SET_PROMOS":
-      return { ...state, selectedPromoIds: action.promoIds };
+      return {
+        ...state,
+        selectedPromoIds: action.promoIds,
+        ...(action.promoIds.length === 0
+          ? { giftVariantId: null, giftSubstituted: false }
+          : {}),
+      };
+
+    case "SET_GIFT":
+      return {
+        ...state,
+        giftVariantId: action.variantId,
+        giftSubstituted: action.variantId === null ? false : action.substituted,
+      };
 
     case "DISCARD_HELD":
       return {
@@ -294,6 +338,8 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
       activeTransactionId: generateTransactionId(),
       discountType: "none" as DiscountType,
       selectedPromoIds: [],
+      giftVariantId: null,
+      giftSubstituted: false,
       holdCounter: saved?.holdCounter ?? 0,
     };
   });
@@ -367,6 +413,10 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_PROMOS", promoIds });
   }, []);
 
+  const setGift = useCallback((variantId: string | null, substituted = false) => {
+    dispatch({ type: "SET_GIFT", variantId, substituted });
+  }, []);
+
   const restoreCart = useCallback(
     (items: CartItem[], discountType: DiscountType) => {
       dispatch({ type: "RESTORE_CART", items, discountType });
@@ -406,6 +456,9 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
         setDiscountType,
         selectedPromoIds: state.selectedPromoIds,
         setPromoIds,
+        giftVariantId: state.giftVariantId,
+        giftSubstituted: state.giftSubstituted,
+        setGift,
         taxBreakdown,
       }}
     >

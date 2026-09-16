@@ -14,7 +14,12 @@
 // The POS preview and the server both stack through here, so what the till
 // shows is what the sale gives.
 
-import { calculatePromoDiscount, type CartItemForPromo, type PromoInput } from "./promoCalculations";
+import {
+  calculatePromoDiscount,
+  type CartItemForPromo,
+  type PromoContext,
+  type PromoInput,
+} from "./promoCalculations";
 
 export type PromoRules = {
   /** How many promotions one sale may carry. */
@@ -70,13 +75,18 @@ export function stackPromos(
   items: CartItemForPromo[],
   promos: StackablePromo[],
   baseCentavos: number,
-  rules: PromoRules
+  rules: PromoRules,
+  /** What the cashier picked — the gift line, and whether it is a substitute. */
+  context: PromoContext = {}
 ): PromoStack {
   const limits = clampRules(rules);
   const dropped: DroppedPromo[] = [];
 
   // Each promotion against the original prices.
-  const evaluated = promos.map((promo) => ({ promo, result: calculatePromoDiscount(items, promo) }));
+  const evaluated = promos.map((promo) => ({
+    promo,
+    result: calculatePromoDiscount(items, promo, context),
+  }));
   let kept = evaluated.filter((e) => e.result.applicable && e.result.discountCentavos > 0);
   for (const e of evaluated) {
     if (!kept.includes(e)) {

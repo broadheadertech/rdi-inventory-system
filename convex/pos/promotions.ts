@@ -83,6 +83,9 @@ export const getActivePromotions = query({
       pwpTriggerMinQuantity: p.pwpTriggerMinQuantity,
       pwpRewardVariantIds: (p.pwpRewardVariantIds ?? []).map(String),
       pwpRewardPriceCentavos: p.pwpRewardPriceCentavos,
+      // gwp fields
+      giftMaxValueCentavos: p.giftMaxValueCentavos,
+      giftAllowSubstitute: p.giftAllowSubstitute ?? false,
     }));
   },
 });

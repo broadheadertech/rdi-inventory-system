@@ -29,7 +29,8 @@ const promoTypeValidator = v.union(
   v.literal("buyXGetY"),
   v.literal("tiered"),
   v.literal("crossSell"),
-  v.literal("pwp")
+  v.literal("pwp"),
+  v.literal("gwp")
 );
 
 const commonArgs = {
@@ -73,6 +74,8 @@ const commonArgs = {
   pwpTriggerMinQuantity: v.optional(v.number()),
   pwpRewardVariantIds: v.optional(v.array(v.id("variants"))),
   pwpRewardPriceCentavos: v.optional(v.number()),
+  giftMaxValueCentavos: v.optional(v.number()),
+  giftAllowSubstitute: v.optional(v.boolean()),
 };
 
 function validatePromoFields(args: {
@@ -90,6 +93,7 @@ function validatePromoFields(args: {
   pwpTriggerMinQuantity?: number;
   pwpRewardVariantIds?: string[];
   pwpRewardPriceCentavos?: number;
+  giftMaxValueCentavos?: number;
   startDate: number;
   endDate?: number;
 }) {
@@ -164,6 +168,15 @@ function validatePromoFields(args: {
       }
       if (args.pwpRewardPriceCentavos === undefined || args.pwpRewardPriceCentavos < 0) {
         throw new ConvexError("Reward special price must be 0 or more");
+      }
+      break;
+    }
+    case "gwp": {
+      if (!args.minSpendCentavos || args.minSpendCentavos <= 0) {
+        throw new ConvexError("Minimum spend must be positive");
+      }
+      if (!args.giftMaxValueCentavos || args.giftMaxValueCentavos <= 0) {
+        throw new ConvexError("The gift's value cap must be positive");
       }
       break;
     }

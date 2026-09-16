@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { ConvexError } from "convex/values";
 import { api } from "@/convex/_generated/api";
@@ -40,6 +40,7 @@ import { ReceiptViewer } from "@/components/pos/ReceiptViewer";
 import { CrossSellStrip } from "@/components/pos/CrossSellStrip";
 import { usePromoPreview, type PromoSuggestions } from "@/lib/hooks/usePromoPreview";
 import type { PromoStack, PromoRules } from "@/convex/_helpers/promoStacking";
+import { isGiftInScope, toPromoInput } from "@/convex/_helpers/promoCalculations";
 
 type TransactionResult = {
   transactionId: Id<"transactions">;
@@ -54,14 +55,59 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
     items, heldTransactions, updateQuantity, removeItem, clearCart,
     holdTransaction, resumeTransaction, discardHeldTransaction, discountType, setDiscountType, taxBreakdown,
     selectedPromoIds, setPromoIds,
+    giftVariantId, giftSubstituted, setGift,
   } = usePOSCart();
 
-  const { activePromos, promoStack, promoSuggestions, rules: promoRules } = usePromoPreview(
+  // The gift is part of what the promotions are worked out from, so the preview
+  // has to know which line it is before it can price the sale.
+  const gift = useMemo(
+    () => ({ variantId: giftVariantId, substituted: giftSubstituted }),
+    [giftVariantId, giftSubstituted]
+  );
+
+  const {
+    activePromos,
+    promoStack,
+    promoSuggestions,
+    giftPromos,
+    enrichedItems,
+    rules: promoRules,
+  } = usePromoPreview(
     items,
     selectedPromoIds,
     discountType,
-    taxBreakdown.totalCentavos
+    taxBreakdown.totalCentavos,
+    gift
   );
+
+  // Which cart lines the chosen gift promotions are willing to give away. Empty
+  // when every promotion takes anything, which the picker reads as "any line".
+  const giftChoices = useMemo(() => {
+    if (giftPromos.length === 0 || !enrichedItems) return null;
+    const scoped = new Set<string>();
+    let anyAllowed = false;
+    for (const promo of giftPromos) {
+      const input = toPromoInput(promo as unknown as Parameters<typeof toPromoInput>[0]);
+      for (const item of enrichedItems) {
+        if (isGiftInScope(item, input)) {
+          scoped.add(item.variantId);
+          if (
+            (input.rewardBrandIds?.length ?? 0) === 0 &&
+            (input.rewardCategoryIds?.length ?? 0) === 0 &&
+            (input.rewardStyleIds?.length ?? 0) === 0 &&
+            (input.rewardVariantIds?.length ?? 0) === 0
+          ) {
+            anyAllowed = true;
+          }
+        }
+      }
+    }
+    return {
+      allowed: scoped,
+      anyAllowed,
+      canSubstitute: giftPromos.some((promo) => promo.giftAllowSubstitute),
+    };
+  }, [giftPromos, enrichedItems]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
@@ -122,6 +168,10 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
           selectedPromoIds={selectedPromoIds}
           setPromoIds={setPromoIds}
           promoRules={promoRules}
+          giftChoices={giftChoices}
+          giftVariantId={giftVariantId}
+          giftSubstituted={giftSubstituted}
+          setGift={setGift}
           activePromos={activePromos}
           promoStack={promoStack}
           promoSuggestions={promoSuggestions}
@@ -250,6 +300,9 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
                       items={items}
                       updateQuantity={updateQuantity}
                       removeItem={removeItem}
+                      giftChoices={giftChoices}
+                      giftVariantId={giftVariantId}
+                      setGift={setGift}
                     />
                     <DiscountToggle
                       discountType={discountType}
@@ -331,6 +384,8 @@ export function POSCartPanel({ variant, isRushMode = false }: { variant: "deskto
           taxBreakdown={taxBreakdown}
           discountType={isRushMode ? "none" : discountType}
           selectedPromoIds={isRushMode ? [] : selectedPromoIds}
+          giftVariantId={isRushMode ? null : giftVariantId}
+          giftSubstituted={isRushMode ? false : giftSubstituted}
           promoStack={isRushMode ? null : promoStack}
           onComplete={handlePaymentComplete}
           onCancel={handlePaymentCancel}
@@ -416,15 +471,42 @@ function CartItemList({
   items,
   updateQuantity,
   removeItem,
+  giftChoices,
+  giftVariantId,
+  setGift,
 }: {
   items: CartItem[];
   updateQuantity: (variantId: CartItem["variantId"], delta: number) => void;
   removeItem: (variantId: CartItem["variantId"]) => void;
+  /** Set while a gift-with-purchase is on the sale — which lines may be the gift. */
+  giftChoices?: {
+    allowed: Set<string>;
+    anyAllowed: boolean;
+    canSubstitute: boolean;
+  } | null;
+  giftVariantId?: string | null;
+  setGift?: (variantId: string | null, substituted?: boolean) => void;
 }) {
   return (
     <div className="space-y-1.5">
-      {items.map((item) => (
-        <div key={item.variantId} className="flex items-center gap-2 rounded-md border px-2.5 py-1.5">
+      {items.map((item) => {
+        const id = String(item.variantId);
+        const isGift = giftVariantId === id;
+        // A line the promotion names, or anything at all when it names nothing.
+        const inScope = giftChoices
+          ? giftChoices.anyAllowed || giftChoices.allowed.has(id)
+          : false;
+        // Out of scope, but the promotion lets a cashier stand something in.
+        const canSubstitute = !!giftChoices && !inScope && giftChoices.canSubstitute;
+
+        return (
+        <div
+          key={item.variantId}
+          className={cn(
+            "flex items-center gap-2 rounded-md border px-2.5 py-1.5",
+            isGift && "border-emerald-300 bg-emerald-50/60"
+          )}
+        >
           {/* Info */}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium" title={item.styleName}>
@@ -433,6 +515,36 @@ function CartItemList({
             <p className="truncate text-xs text-muted-foreground">
               {item.size} · {item.color} · {formatCurrency(item.unitPriceCentavos)}
             </p>
+            {giftChoices && setGift && (
+              <div className="mt-1 flex items-center gap-1.5">
+                {isGift ? (
+                  <button
+                    type="button"
+                    onClick={() => setGift(null)}
+                    className="rounded-full bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white"
+                  >
+                    Free gift — tap to undo
+                  </button>
+                ) : inScope ? (
+                  <button
+                    type="button"
+                    onClick={() => setGift(id, false)}
+                    className="rounded-full border border-emerald-300 px-2 py-0.5 text-[11px] text-emerald-700 hover:bg-emerald-50"
+                  >
+                    Make this the gift
+                  </button>
+                ) : canSubstitute ? (
+                  <button
+                    type="button"
+                    onClick={() => setGift(id, true)}
+                    className="rounded-full border border-amber-300 px-2 py-0.5 text-[11px] text-amber-700 hover:bg-amber-50"
+                    title="Use this in place of the gift the promo names — recorded on the sale"
+                  >
+                    Use instead (out of stock)
+                  </button>
+                ) : null}
+              </div>
+            )}
           </div>
 
           {/* Quantity stepper */}
@@ -467,12 +579,16 @@ function CartItemList({
             size="icon"
             className="h-8 w-8 shrink-0 text-destructive hover:text-destructive"
             aria-label="Remove item"
-            onClick={() => removeItem(item.variantId)}
+            onClick={() => {
+              if (giftVariantId === String(item.variantId)) setGift?.(null);
+              removeItem(item.variantId);
+            }}
           >
             <Trash2 className="h-4 w-4" />
           </Button>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -981,7 +1097,7 @@ type ActivePromo = {
   _id: Id<"promotions">;
   name: string;
   description?: string;
-  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
+  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp" | "gwp";
   priority: number;
   /** A stand-alone promotion — it cannot share a sale with another. */
   exclusive?: boolean;
@@ -996,6 +1112,10 @@ function CartContent({
   selectedPromoIds,
   setPromoIds,
   promoRules,
+  giftChoices,
+  giftVariantId,
+  giftSubstituted,
+  setGift,
   activePromos,
   promoStack,
   promoSuggestions,
@@ -1021,6 +1141,14 @@ function CartContent({
   selectedPromoIds: string[];
   setPromoIds: (promoIds: string[]) => void;
   promoRules: PromoRules;
+  giftChoices?: {
+    allowed: Set<string>;
+    anyAllowed: boolean;
+    canSubstitute: boolean;
+  } | null;
+  giftVariantId: string | null;
+  giftSubstituted: boolean;
+  setGift: (variantId: string | null, substituted?: boolean) => void;
   activePromos: ActivePromo[];
   promoStack: PromoStack | null;
   promoSuggestions: PromoSuggestions;
@@ -1082,6 +1210,9 @@ function CartContent({
               items={items}
               updateQuantity={updateQuantity}
               removeItem={removeItem}
+              giftChoices={giftChoices}
+              giftVariantId={giftVariantId}
+              setGift={setGift}
             />
             {!showPayment && (
               <CrossSellStrip variantIds={items.map((i) => i.variantId)} />
@@ -1128,6 +1259,8 @@ function CartContent({
           taxBreakdown={taxBreakdown}
           discountType={discountType}
           selectedPromoIds={selectedPromoIds}
+          giftVariantId={giftVariantId}
+          giftSubstituted={giftSubstituted}
           promoStack={promoStack}
           onComplete={onPaymentComplete}
           onCancel={onPaymentCancel}
@@ -1160,6 +1293,8 @@ function PaymentPanel({
   taxBreakdown,
   discountType,
   selectedPromoIds,
+  giftVariantId,
+  giftSubstituted,
   promoStack,
   onComplete,
   onCancel,
@@ -1170,6 +1305,9 @@ function PaymentPanel({
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
   selectedPromoIds: string[];
+  /** Gift with purchase: the line given away, re-checked by the server. */
+  giftVariantId: string | null;
+  giftSubstituted: boolean;
   promoStack: PromoStack | null;
   onComplete: (result: TransactionResult) => void;
   onCancel: () => void;
@@ -1291,6 +1429,8 @@ function PaymentPanel({
           discountType,
           promotionIds:
             discountType === "none" && selectedPromoIds.length > 0 ? selectedPromoIds : undefined,
+          giftVariantId: giftVariantId ?? undefined,
+          giftSubstituted: giftSubstituted || undefined,
           amountTenderedCentavos: paymentMethod === "cash" ? amountTendered! : undefined,
           splitPayment: splitPaymentArg,
           paymentReference: needsReference ? paymentReference.trim() : undefined,
@@ -1343,6 +1483,10 @@ function PaymentPanel({
           discountType === "none" && selectedPromoIds.length > 0
             ? (selectedPromoIds as Id<"promotions">[])
             : undefined,
+        giftVariantId: giftVariantId
+          ? (giftVariantId as Id<"variants">)
+          : undefined,
+        giftSubstituted: giftSubstituted || undefined,
         splitPayment: splitPaymentArg,
         paymentReference: needsReference ? paymentReference.trim() : undefined,
         fashionAssistantId: selectedFaId !== "none"
@@ -1742,6 +1886,8 @@ function PaymentModal({
   taxBreakdown,
   discountType,
   selectedPromoIds,
+  giftVariantId,
+  giftSubstituted,
   promoStack,
   onComplete,
   onCancel,
@@ -1750,6 +1896,8 @@ function PaymentModal({
   taxBreakdown: TaxBreakdown;
   discountType: DiscountType;
   selectedPromoIds: string[];
+  giftVariantId: string | null;
+  giftSubstituted: boolean;
   promoStack: PromoStack | null;
   onComplete: (result: TransactionResult) => void;
   onCancel: () => void;
@@ -1860,6 +2008,8 @@ function PaymentModal({
               taxBreakdown={taxBreakdown}
               discountType={discountType}
               selectedPromoIds={selectedPromoIds}
+              giftVariantId={giftVariantId}
+              giftSubstituted={giftSubstituted}
               promoStack={promoStack}
               onComplete={onComplete}
               onCancel={onCancel}
@@ -1969,6 +2119,8 @@ function RushModeCart({
           taxBreakdown={taxBreakdown}
           discountType="none"
           selectedPromoIds={[]}
+          giftVariantId={null}
+          giftSubstituted={false}
           promoStack={null}
           onComplete={onPaymentComplete}
           onCancel={onPaymentCancel}

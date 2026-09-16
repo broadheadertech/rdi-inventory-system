@@ -503,6 +503,10 @@ export default defineSchema({
     promotionId: v.optional(v.id("promotions")),
     promoDiscountAmountCentavos: v.optional(v.number()),
     // Every promotion on the sale, with what each took off after any cap.
+    // The line given away under a gift-with-purchase, and whether it stood in
+    // for the gift the promotion named.
+    giftVariantId: v.optional(v.id("variants")),
+    giftSubstituted: v.optional(v.boolean()),
     appliedPromotions: v.optional(
       v.array(
         v.object({
@@ -1148,7 +1152,8 @@ export default defineSchema({
       v.literal("buyXGetY"),
       v.literal("tiered"),
       v.literal("crossSell"),
-      v.literal("pwp")
+      v.literal("pwp"),
+      v.literal("gwp")
     ),
     // percentage
     percentageValue: v.optional(v.number()),
@@ -1200,6 +1205,12 @@ export default defineSchema({
     pwpTriggerMinQuantity: v.optional(v.number()),
     pwpRewardVariantIds: v.optional(v.array(v.id("variants"))),
     pwpRewardPriceCentavos: v.optional(v.number()),
+    // gwp (Gift with Purchase) — spend minSpendCentavos and one item is free,
+    // worth up to giftMaxValueCentavos. The reward* fields say what the gift
+    // may be; giftAllowSubstitute lets a cashier put something else in its
+    // place when it is out of stock, recorded on the sale.
+    giftMaxValueCentavos: v.optional(v.number()),
+    giftAllowSubstitute: v.optional(v.boolean()),
     // Can't be combined: when this promotion is on a sale it is the only one
     // (buy 1 take 1, staff discounts). Absent means it may stack.
     exclusive: v.optional(v.boolean()),

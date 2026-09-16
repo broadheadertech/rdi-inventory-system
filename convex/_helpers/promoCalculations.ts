@@ -7,7 +7,7 @@ import type { Doc } from "../_generated/dataModel";
 
 export type PromoInput = {
   name: string;
-  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
+  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp" | "gwp";
   percentageValue?: number;
   maxDiscountCentavos?: number;
   fixedAmountCentavos?: number;
@@ -43,6 +43,20 @@ export type PromoInput = {
   pwpTriggerMinQuantity?: number;
   pwpRewardVariantIds?: string[];
   pwpRewardPriceCentavos?: number;
+  // gwp (Gift with Purchase) — the most the gift may be worth, and whether a
+  // cashier may put something else in its place when it is out of stock. The
+  // reward* fields above say what the gift may be.
+  giftMaxValueCentavos?: number;
+  giftAllowSubstitute?: boolean;
+};
+
+/**
+ * What the cashier chose, which some promotions need on top of the cart: which
+ * line is the gift, and whether it stands in for one that was out of stock.
+ */
+export type PromoContext = {
+  giftVariantId?: string;
+  giftSubstituted?: boolean;
 };
 
 export type CartItemForPromo = {
@@ -57,6 +71,8 @@ export type CartItemForPromo = {
   unitPriceCentavos: number;
   quantity: number;
   agingTier?: "green" | "yellow" | "red";
+  /** Only for reading back on a receipt — "Aero Cap free". */
+  styleName?: string;
 };
 
 /** A promotion document as the calculator reads it — shared by the POS sale and online vouchers. */
@@ -90,6 +106,8 @@ export function toPromoInput(p: Doc<"promotions">): PromoInput {
     pwpTriggerMinQuantity: p.pwpTriggerMinQuantity,
     pwpRewardVariantIds: (p.pwpRewardVariantIds ?? []).map(String),
     pwpRewardPriceCentavos: p.pwpRewardPriceCentavos,
+    giftMaxValueCentavos: p.giftMaxValueCentavos,
+    giftAllowSubstitute: p.giftAllowSubstitute,
   };
 }
 
@@ -161,7 +179,8 @@ export function filterEligibleItems(
  */
 export function calculatePromoDiscount(
   items: CartItemForPromo[],
-  promo: PromoInput
+  promo: PromoInput,
+  context: PromoContext = {}
 ): PromoResult {
   const eligible = filterEligibleItems(items, promo);
 
@@ -209,6 +228,8 @@ export function calculatePromoDiscount(
       return calcCrossSell(items, promo);
     case "pwp":
       return calcPWP(items, promo);
+    case "gwp":
+      return calcGWP(items, eligible, promo, context);
     default:
       return { applicable: false, discountCentavos: 0, description: "" };
   }
@@ -564,4 +585,121 @@ export function promoProgress(items_: CartItemForPromo[], promo: PromoInput): Pr
     }
   }
   return progress;
+}
+
+/**
+ * Gift with purchase: spend enough and one item comes free, up to a cap.
+ *
+ * The gift is a line in the cart, not something the promotion conjures — the
+ * cashier scans the cap and marks it as the gift, so it still leaves the
+ * branch's stock and still prints on the invoice. What comes off is the gift's
+ * price up to `giftMaxValueCentavos`; a gift dearer than the cap leaves the
+ * customer paying the difference.
+ *
+ * The spend is measured on everything *except* the gift's own unit. Counting
+ * the gift would let a ₱4,401 cart reach a ₱5,000 threshold by adding the
+ * ₱599 freebie — the promotion paying for itself.
+ *
+ * `rewardScope` (the reward* fields) says what may be the gift. With nothing
+ * set, anything in the cart may be. When the named gift is out of stock and
+ * the promotion allows it, a cashier may nominate something else instead;
+ * that substitution is recorded on the sale, and the cap still holds.
+ */
+function calcGWP(
+  allItems: CartItemForPromo[],
+  eligible: CartItemForPromo[],
+  promo: PromoInput,
+  context: PromoContext
+): PromoResult {
+  const minSpend = promo.minSpendCentavos ?? 0;
+  const cap = promo.giftMaxValueCentavos ?? 0;
+  if (minSpend <= 0 || cap <= 0) {
+    return { applicable: false, discountCentavos: 0, description: "" };
+  }
+
+  const spendLabel = `₱${(minSpend / 100).toFixed(0)}`;
+  const gift = context.giftVariantId
+    ? allItems.find((item) => item.variantId === context.giftVariantId)
+    : undefined;
+
+  // The spend, with the gift's own unit taken out of it.
+  const eligibleTotal = eligible.reduce(
+    (sum, item) => sum + item.unitPriceCentavos * item.quantity,
+    0
+  );
+  const giftInEligible = gift
+    ? eligible.some((item) => item.variantId === gift.variantId)
+    : false;
+  const spend = eligibleTotal - (gift && giftInEligible ? gift.unitPriceCentavos : 0);
+
+  if (spend < minSpend) {
+    const short = minSpend - spend;
+    return {
+      applicable: false,
+      discountCentavos: 0,
+      description: `${promo.name} (₱${(short / 100).toFixed(0)} more to spend)`,
+    };
+  }
+
+  if (!gift) {
+    return {
+      applicable: false,
+      discountCentavos: 0,
+      description: `${promo.name} (pick the free item)`,
+    };
+  }
+
+  // What may be the gift. Nothing set: anything in the cart.
+  const rewardScoped =
+    (promo.rewardBrandIds?.length ?? 0) > 0 ||
+    (promo.rewardCategoryIds?.length ?? 0) > 0 ||
+    (promo.rewardStyleIds?.length ?? 0) > 0 ||
+    (promo.rewardVariantIds?.length ?? 0) > 0;
+
+  if (rewardScoped && !isGiftInScope(gift, promo)) {
+    // Out of scope is only allowed as a recorded substitution.
+    if (!(promo.giftAllowSubstitute && context.giftSubstituted)) {
+      return {
+        applicable: false,
+        discountCentavos: 0,
+        description: `${promo.name} (that item isn't part of this gift)`,
+      };
+    }
+  }
+
+  const discountCentavos = Math.min(gift.unitPriceCentavos, cap);
+  const overCap = gift.unitPriceCentavos > cap;
+
+  return {
+    applicable: true,
+    discountCentavos,
+    description:
+      `${promo.name} (Spend ${spendLabel}, ${gift.styleName ?? "one item"} free` +
+      (overCap ? ` up to ₱${(cap / 100).toFixed(0)}` : "") +
+      (context.giftSubstituted ? ", substituted" : "") +
+      ")",
+  };
+}
+
+/** Whether an item is one the promotion is willing to give away. */
+export function isGiftInScope(item: CartItemForPromo, promo: PromoInput): boolean {
+  const brands = promo.rewardBrandIds ?? [];
+  const categories = promo.rewardCategoryIds ?? [];
+  const styles = promo.rewardStyleIds ?? [];
+  const variants = promo.rewardVariantIds ?? [];
+  if (
+    brands.length === 0 &&
+    categories.length === 0 &&
+    styles.length === 0 &&
+    variants.length === 0
+  ) {
+    return true;
+  }
+  // Any one of the reward lists naming the item is enough — a gift is "a Cap,
+  // or this particular SKU", not the intersection of every list.
+  if (variants.includes(item.variantId)) return true;
+  if (item.styleId && styles.includes(item.styleId)) return true;
+  if (categories.includes(item.categoryId)) return true;
+  if (brands.includes(item.brandId)) return true;
+  return false;
 }

@@ -84,6 +84,10 @@ export const createTransaction = mutation({
     // One promotion (older tills and replayed offline sales) or several.
     promotionId: v.optional(v.id("promotions")),
     promotionIds: v.optional(v.array(v.id("promotions"))),
+    // Gift with purchase: the line given away, and whether the cashier put it
+    // in place of the gift the promotion named because that was out of stock.
+    giftVariantId: v.optional(v.id("variants")),
+    giftSubstituted: v.optional(v.boolean()),
     splitPayment: v.optional(v.object({
       method: tenderValidator,
       amountCentavos: v.number(),
@@ -351,6 +355,7 @@ export const createTransaction = mutation({
           unitPriceCentavos: vi.unitPriceCentavos,
           quantity: vi.quantity,
           agingTier,
+          styleName: style.name,
         });
       }
 
@@ -364,7 +369,11 @@ export const createTransaction = mutation({
           exclusive: promo.exclusive ?? false,
         })),
         taxBreakdown.totalCentavos,
-        await readPromoRules(ctx)
+        await readPromoRules(ctx),
+        {
+          giftVariantId: args.giftVariantId ? String(args.giftVariantId) : undefined,
+          giftSubstituted: args.giftSubstituted,
+        }
       );
 
       promoDiscountCentavos = stack.discountCentavos;
@@ -433,6 +442,9 @@ export const createTransaction = mutation({
       discountType: args.discountType,
       promotionId: appliedPromotionId,
       appliedPromotions,
+      giftVariantId: promoDiscountCentavos > 0 ? args.giftVariantId : undefined,
+      giftSubstituted:
+        promoDiscountCentavos > 0 && args.giftSubstituted ? true : undefined,
       promoDiscountAmountCentavos:
         promoDiscountCentavos > 0 ? promoDiscountCentavos : undefined,
       splitPayment: args.splitPayment,
@@ -512,6 +524,8 @@ export const createTransaction = mutation({
         promotionId: appliedPromotionId ?? null,
         promotions: appliedPromotions?.map((a) => a.name) ?? [],
         promoDiscountCentavos,
+        giftVariantId: args.giftVariantId ?? null,
+        giftSubstituted: args.giftSubstituted ?? false,
       },
     });
 

@@ -41,7 +41,7 @@ type ActivePromo = {
   _id: Id<"promotions">;
   name: string;
   description?: string;
-  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
+  promoType: "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp" | "gwp";
   percentageValue?: number;
   maxDiscountCentavos?: number;
   fixedAmountCentavos?: number;
@@ -52,6 +52,8 @@ type ActivePromo = {
   tieredRewardType?: "amount" | "cheapestFree";
   minQuantity?: number;
   exclusive?: boolean;
+  giftMaxValueCentavos?: number;
+  giftAllowSubstitute?: boolean;
   discountApplication?: "wholePurchase" | "highestItem";
   brandIds: string[];
   categoryIds: string[];
@@ -79,7 +81,12 @@ export function usePromoPreview(
   selectedPromoIds: string[],
   discountType: string,
   /** The sale before promotions — what the discount cap is measured against. */
-  saleTotalCentavos: number
+  saleTotalCentavos: number,
+  /** Gift with purchase: the line being given away, and whether it is a substitute. */
+  gift: { variantId: string | null; substituted: boolean } = {
+    variantId: null,
+    substituted: false,
+  }
 ) {
   // Only fetch promos when discount type is "none" (promos don't stack with Senior/PWD)
   const activePromos = useQuery(
@@ -124,6 +131,7 @@ export function usePromoPreview(
         unitPriceCentavos: item.unitPriceCentavos,
         quantity: item.quantity,
         agingTier: hierarchy?.agingTier,
+        styleName: item.styleName,
       };
     });
   }, [items, variantHierarchy]);
@@ -148,8 +156,29 @@ export function usePromoPreview(
         agingTiers: promo.agingTiers ?? [],
       })) as unknown as Parameters<typeof stackPromos>[1];
     if (chosen.length === 0) return null;
-    return stackPromos(enrichedItems, chosen, saleTotalCentavos, rules);
-  }, [items, selectedPromoIds, discountType, activePromos, enrichedItems, saleTotalCentavos, rules]);
+    return stackPromos(enrichedItems, chosen, saleTotalCentavos, rules, {
+      giftVariantId: gift.variantId ?? undefined,
+      giftSubstituted: gift.substituted,
+    });
+  }, [
+    items,
+    selectedPromoIds,
+    discountType,
+    activePromos,
+    enrichedItems,
+    saleTotalCentavos,
+    rules,
+    gift.variantId,
+    gift.substituted,
+  ]);
+
+  // The promotions on this sale that want a gift picked, and what may be given.
+  const giftPromos = useMemo(() => {
+    if (!activePromos) return [];
+    return (activePromos as ActivePromo[]).filter(
+      (promo) => promo.promoType === "gwp" && selectedPromoIds.includes(String(promo._id))
+    );
+  }, [activePromos, selectedPromoIds]);
 
   // Every active promotion against this cart: which apply and save the most,
   // and what the cashier could suggest adding to reach the rest.
@@ -185,6 +214,8 @@ export function usePromoPreview(
     activePromos: (activePromos ?? []) as ActivePromo[],
     promoStack,
     promoSuggestions,
+    giftPromos,
+    enrichedItems,
     rules,
     isLoading: activePromos === undefined,
   };

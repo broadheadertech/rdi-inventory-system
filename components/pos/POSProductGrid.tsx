@@ -85,6 +85,8 @@ function promoTagLabel(p: ActivePromo): string {
       return "Bundle deal";
     case "pwp":
       return "With purchase";
+    case "gwp":
+      return `Spend ${pesos(p.minSpendCentavos)}, gift`;
   }
 }
 

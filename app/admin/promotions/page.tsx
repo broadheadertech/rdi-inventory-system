@@ -39,7 +39,7 @@ import { Pencil, Plus, Search, ToggleLeft, ToggleRight } from "lucide-react";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-type PromoType = "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp";
+type PromoType = "percentage" | "fixedAmount" | "buyXGetY" | "tiered" | "crossSell" | "pwp" | "gwp";
 
 const PROMO_TYPE_OPTIONS: { value: PromoType; label: string }[] = [
   { value: "percentage", label: "Percentage" },
@@ -48,6 +48,7 @@ const PROMO_TYPE_OPTIONS: { value: PromoType; label: string }[] = [
   { value: "tiered", label: "Tiered" },
   { value: "crossSell", label: "Cross-Sell Bundle" },
   { value: "pwp", label: "Purchase with Purchase" },
+  { value: "gwp", label: "Gift with Purchase" },
 ];
 
 const PROMO_TYPE_LABELS: Record<PromoType, string> = {
@@ -57,6 +58,7 @@ const PROMO_TYPE_LABELS: Record<PromoType, string> = {
   tiered: "Tiered",
   crossSell: "Cross-Sell",
   pwp: "PWP",
+  gwp: "Gift with Purchase",
 };
 
 const PROMO_TYPE_COLORS: Record<PromoType, string> = {
@@ -66,6 +68,7 @@ const PROMO_TYPE_COLORS: Record<PromoType, string> = {
   tiered: "bg-teal-100 text-teal-800",
   crossSell: "bg-pink-100 text-pink-800",
   pwp: "bg-orange-100 text-orange-800",
+  gwp: "bg-emerald-100 text-emerald-800",
 };
 
 type StatusFilter = "all" | "active" | "inactive" | "expired" | "upcoming";
@@ -151,6 +154,7 @@ function formatPromoValue(promo: {
   tieredRewardType?: TieredRewardType;
   minQuantity?: number;
   discountApplication?: DiscountApplication;
+  giftMaxValueCentavos?: number;
 }): string {
   const onHighest =
     (promo.discountApplication === "highestItem" ? " · highest item" : "") +
@@ -171,6 +175,8 @@ function formatPromoValue(promo: {
       return promo.tieredRewardType === "cheapestFree"
         ? `Spend ${formatCurrency(promo.minSpendCentavos ?? 0)} -> cheapest item free`
         : `Spend ${formatCurrency(promo.minSpendCentavos ?? 0)} -> ${formatCurrency(promo.tieredDiscountCentavos ?? 0)} off`;
+    case "gwp":
+      return `Spend ${formatCurrency(promo.minSpendCentavos ?? 0)} -> free item up to ${formatCurrency(promo.giftMaxValueCentavos ?? 0)}`;
     default:
       return "-";
   }
@@ -200,6 +206,8 @@ interface PromoForm {
   isActive: boolean;
   priority: string;
   exclusive: boolean;
+  giftMaxValueCentavos: string;
+  giftAllowSubstitute: boolean;
   branchScopeMode: "all" | "byClassification" | "specific";
   branchIds: Id<"branches">[];
   branchClassifications: ("premium" | "aclass" | "bnc" | "outlet")[];
@@ -247,6 +255,8 @@ function emptyForm(): PromoForm {
     isActive: true,
     priority: "0",
     exclusive: false,
+    giftMaxValueCentavos: "",
+    giftAllowSubstitute: false,
     branchScopeMode: "all",
     branchIds: [],
     branchClassifications: [],
@@ -460,6 +470,8 @@ export default function PromotionsPage() {
       isActive: promo.isActive,
       priority: promo.priority.toString(),
       exclusive: promo.exclusive ?? false,
+      giftMaxValueCentavos: promo.giftMaxValueCentavos?.toString() ?? "",
+      giftAllowSubstitute: promo.giftAllowSubstitute ?? false,
       branchScopeMode:
         (promo.branchClassifications && promo.branchClassifications.length > 0)
           ? "byClassification"
@@ -560,12 +572,23 @@ export default function PromotionsPage() {
       isActive: form.isActive,
       priority: parseInt(form.priority, 10) || 0,
       exclusive: form.exclusive,
+      giftMaxValueCentavos:
+        form.promoType === "gwp" ? parseInt(form.giftMaxValueCentavos, 10) || 0 : undefined,
+      giftAllowSubstitute: form.promoType === "gwp" ? form.giftAllowSubstitute : undefined,
       agingTiers: form.allStock ? undefined : form.agingTiers,
       crossSellRewardType: form.promoType === "crossSell" ? form.crossSellRewardType : undefined,
-      rewardBrandIds: form.promoType === "crossSell" ? form.rewardBrandIds : undefined,
-      rewardCategoryIds: form.promoType === "crossSell" ? form.rewardCategoryIds : undefined,
-      rewardStyleIds: form.promoType === "crossSell" && form.rewardStyleIds.length > 0 ? form.rewardStyleIds : undefined,
-      rewardVariantIds: form.promoType === "crossSell" && form.rewardVariantIds.length > 0 ? form.rewardVariantIds : ([] as Id<"variants">[]),
+      rewardBrandIds:
+        form.promoType === "crossSell" || form.promoType === "gwp" ? form.rewardBrandIds : undefined,
+      rewardCategoryIds:
+        form.promoType === "crossSell" || form.promoType === "gwp" ? form.rewardCategoryIds : undefined,
+      rewardStyleIds:
+        (form.promoType === "crossSell" || form.promoType === "gwp") && form.rewardStyleIds.length > 0
+          ? form.rewardStyleIds
+          : undefined,
+      rewardVariantIds:
+        (form.promoType === "crossSell" || form.promoType === "gwp") && form.rewardVariantIds.length > 0
+          ? form.rewardVariantIds
+          : ([] as Id<"variants">[]),
       pwpTriggerMinQuantity: form.promoType === "pwp" && form.pwpTriggerMinQuantity ? parseInt(form.pwpTriggerMinQuantity, 10) : undefined,
       pwpRewardVariantIds: form.promoType === "pwp" && form.pwpRewardVariantIds.length > 0 ? form.pwpRewardVariantIds : undefined,
       pwpRewardPriceCentavos: form.promoType === "pwp" && form.pwpRewardPriceCentavos !== "" ? parseInt(form.pwpRewardPriceCentavos, 10) : undefined,
@@ -1078,17 +1101,79 @@ export default function PromotionsPage() {
               </div>
             )}
 
-            {form.promoType === "crossSell" && (
-              <div className="space-y-3 rounded-md border border-pink-200 bg-pink-50/40 p-3">
-                <p className="text-xs font-semibold text-pink-700">
-                  Cross-Sell: Reward Discount
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  When trigger products (defined in Product Scope below) are in the cart,
-                  this discount applies to the reward products selected here.
-                </p>
+            {(form.promoType === "crossSell" || form.promoType === "gwp") && (
+              <div
+                className={
+                  form.promoType === "gwp"
+                    ? "space-y-3 rounded-md border border-emerald-200 bg-emerald-50/40 p-3"
+                    : "space-y-3 rounded-md border border-pink-200 bg-pink-50/40 p-3"
+                }
+              >
+                {form.promoType === "gwp" ? (
+                  <>
+                    <p className="text-xs font-semibold text-emerald-700">
+                      Gift with Purchase
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Spend the minimum below and one item is free, up to the gift&apos;s
+                      value cap. The cashier marks which line in the cart is the gift.
+                      The spend is counted without the gift, so the freebie cannot help
+                      reach the threshold.
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label>
+                          Minimum Spend (centavos) <span className="text-destructive">*</span>
+                        </Label>
+                        <Input
+                          type="number" min="1" placeholder="e.g. 500000 = 5,000 pesos"
+                          value={form.minSpendCentavos}
+                          onChange={(e) => updateField("minSpendCentavos", e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>
+                          Gift Value Cap (centavos) <span className="text-destructive">*</span>
+                        </Label>
+                        <Input
+                          type="number" min="1" placeholder="e.g. 59900 = 599 pesos"
+                          value={form.giftMaxValueCentavos}
+                          onChange={(e) => updateField("giftMaxValueCentavos", e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          A dearer gift is allowed - the customer pays the difference.
+                        </p>
+                      </div>
+                    </div>
+
+                    <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={form.giftAllowSubstitute}
+                        onChange={(e) => updateField("giftAllowSubstitute", e.target.checked)}
+                        className="mt-0.5 rounded border-gray-300"
+                      />
+                      <span>
+                        Let the cashier substitute another item when the gift below is out
+                        of stock. The cap still holds and the swap is recorded on the sale.
+                      </span>
+                    </label>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-xs font-semibold text-pink-700">
+                      Cross-Sell: Reward Discount
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      When trigger products (defined in Product Scope below) are in the cart,
+                      this discount applies to the reward products selected here.
+                    </p>
+                  </>
+                )}
 
                 {/* Reward discount type */}
+                {form.promoType === "crossSell" && (
                 <div className="space-y-2">
                   <Label>Reward Discount Type</Label>
                   <Select
@@ -1104,8 +1189,9 @@ export default function PromotionsPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                )}
 
-                {form.crossSellRewardType === "percentage" && (
+                {form.promoType === "crossSell" && form.crossSellRewardType === "percentage" && (
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <Label>Reward % Off <span className="text-destructive">*</span></Label>
@@ -1126,7 +1212,7 @@ export default function PromotionsPage() {
                   </div>
                 )}
 
-                {form.crossSellRewardType === "fixedAmount" && (
+                {form.promoType === "crossSell" && form.crossSellRewardType === "fixedAmount" && (
                   <div className="space-y-2">
                     <Label>Reward Fixed Amount (centavos) <span className="text-destructive">*</span></Label>
                     <Input
@@ -1139,7 +1225,9 @@ export default function PromotionsPage() {
 
                 {/* Reward product scope */}
                 <div className="space-y-2">
-                  <Label>Reward Products — Brands</Label>
+                  <Label>
+                    {form.promoType === "gwp" ? "The Gift — Brands" : "Reward Products — Brands"}
+                  </Label>
                   <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1 bg-background">
                     {!brands || brands.length === 0 ? (
                       <p className="text-xs text-muted-foreground">No brands</p>
@@ -1281,7 +1369,9 @@ export default function PromotionsPage() {
                 )}
 
                 <p className="text-xs text-muted-foreground">
-                  Leave reward products empty = discount applies to ALL products not in the trigger scope.
+                  {form.promoType === "gwp"
+                    ? "Leave the gift empty and any item in the cart may be chosen as the gift."
+                    : "Leave reward products empty = discount applies to ALL products not in the trigger scope."}
                 </p>
               </div>
             )}
