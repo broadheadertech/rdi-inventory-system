@@ -209,7 +209,11 @@ export const markArrived = mutation({
 // transfer; this only records that the driver's part is done.
 
 export const driverConfirmDelivery = mutation({
-  args: { transferId: v.id("transfers") },
+  args: {
+    transferId: v.id("transfers"),
+    /** Who at the branch took the goods — the driver's half of the handover. */
+    receivedByName: v.string(),
+  },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, DRIVER_ROLES);
 
@@ -229,10 +233,18 @@ export const driverConfirmDelivery = mutation({
     if (transfer.driverHandedOverAt) {
       throw new ConvexError({ code: "INVALID_STATE", message: "Already handed over." });
     }
+    const receivedByName = args.receivedByName.trim();
+    if (receivedByName === "") {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "Name who at the branch took the goods.",
+      });
+    }
 
     const now = Date.now();
     await ctx.db.patch(args.transferId, {
       driverHandedOverAt: now,
+      driverReceivedByName: receivedByName,
       updatedAt: now,
     });
 
@@ -241,7 +253,7 @@ export const driverConfirmDelivery = mutation({
       userId: user._id,
       entityType: "transfers",
       entityId: args.transferId,
-      after: { driverHandedOverAt: now },
+      after: { driverHandedOverAt: now, receivedByName },
     });
 
     // Tells the branch to count it in Receiving.

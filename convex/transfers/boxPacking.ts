@@ -11,6 +11,7 @@ import {
   latestStandingScan,
   resolveScanCode,
 } from "../_helpers/receivingScans";
+import { requireDestinationBranch } from "../_helpers/custody";
 
 // ─── Box Code Generation ────────────────────────────────────────────────────
 
@@ -583,7 +584,6 @@ export async function wrongScanSummary(
 export const lookupBoxByCode = query({
   args: { boxCode: v.string() },
   handler: async (ctx, args) => {
-    // Allow branch staff to look up boxes too
     const box = await ctx.db
       .query("transferBoxes")
       .withIndex("by_boxCode", (q) => q.eq("boxCode", args.boxCode))
@@ -593,6 +593,11 @@ export const lookupBoxByCode = query({
 
     const transfer = await ctx.db.get(box.transferId);
     if (!transfer) return null;
+
+    // A box's contents are only the destination branch's business, and HQ's.
+    // This query had no check of any kind: a box code was enough to read what
+    // was in it from anywhere.
+    await requireDestinationBranch(ctx, transfer);
 
     const fromBranch = await ctx.db.get(transfer.fromBranchId);
     const toBranch = await ctx.db.get(transfer.toBranchId);
@@ -646,12 +651,15 @@ export const lookupBoxByCode = query({
 export const scanBoxPiece = mutation({
   args: { boxId: v.id("transferBoxes"), code: v.string() },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, ["admin", "manager", "warehouseStaff"]);
-
     const box = await ctx.db.get(args.boxId);
     if (!box) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Box not found." });
     }
+    const boxTransfer = await ctx.db.get(box.transferId);
+    if (!boxTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireDestinationBranch(ctx, boxTransfer);
     if (box.status !== "sealed") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -732,10 +740,16 @@ export const scanBoxPiece = mutation({
 export const undoLastBoxScan = mutation({
   args: { boxId: v.id("transferBoxes") },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, ["admin", "manager", "warehouseStaff"]);
-
     const box = await ctx.db.get(args.boxId);
-    if (!box || box.status !== "sealed") {
+    if (!box) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Box not found." });
+    }
+    const undoTransfer = await ctx.db.get(box.transferId);
+    if (!undoTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireDestinationBranch(ctx, undoTransfer);
+    if (box.status !== "sealed") {
       throw new ConvexError({
         code: "INVALID_STATE",
         message: "Only a box still being received can have a scan undone.",
@@ -770,14 +784,19 @@ export const confirmBoxReceipt = mutation({
     // there, so this is the one way to close it — and it can only credit zero,
     // so it opens no back door to a typed count.
     boxMissing: v.optional(v.boolean()),
+    /** Who handed the goods over. Defaults to the carrier on the transfer. */
+    receivedFromName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, ["admin", "manager", "warehouseStaff"]);
-
     const box = await ctx.db.get(args.boxId);
     if (!box) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Box not found." });
     }
+    const confirmTransfer = await ctx.db.get(box.transferId);
+    if (!confirmTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireDestinationBranch(ctx, confirmTransfer);
     if (box.status !== "sealed") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -928,10 +947,19 @@ export const confirmBoxReceipt = mutation({
         // Clear reserved stock at source
         await clearReservedOnDelivery(ctx, box.transferId, transfer.fromBranchId);
 
+        const carrierName = transfer.driverId
+          ? ((await ctx.db.get(transfer.driverId))?.name ?? null)
+          : transfer.courierId
+            ? ((await ctx.db.get(transfer.courierId))?.name ?? null)
+            : null;
+        const receivedFromName =
+          args.receivedFromName?.trim() || carrierName || undefined;
+
         await ctx.db.patch(box.transferId, {
           status: "delivered",
           deliveredAt: now,
           deliveredById: user._id,
+          ...(receivedFromName ? { receivedFromName } : {}),
           updatedAt: now,
         });
 

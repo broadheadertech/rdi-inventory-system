@@ -10,6 +10,11 @@ import {
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { clearReservedOnDelivery } from "../_helpers/transferStock";
+import {
+  custodyTimeline,
+  requireDestinationBranch,
+  HANDSHAKE_LIMITS,
+} from "../_helpers/custody";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
 import { internal } from "../_generated/api";
 import { raiseTransferDispute } from "../disputes";
@@ -255,6 +260,233 @@ export const listPackedTransfers = query({
   },
 });
 
+// ─── Loading out ────────────────────────────────────────────────────────────
+// The warehouse's half of the first handshake: what physically went onto the
+// vehicle, counted at the door, and the name of whoever took it.
+//
+// Until now a transfer went from "packed" to "in transit" on one click, and
+// nothing recorded what was actually loaded. Five boxes packed and four on the
+// truck looked identical, and the loss only surfaced when the branch received.
+//
+// A boxed transfer is loaded by scanning each box out, so a box that never left
+// the warehouse is told apart from one lost on the road. A loose transfer has
+// nothing box-shaped to scan — its pieces were counted at packing — so it is
+// loaded in one step against the packed count.
+
+export const scanBoxOut = mutation({
+  args: { transferId: v.id("transfers"), boxCode: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, WAREHOUSE_ROLES);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    if (transfer.status !== "packed") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only a packed transfer can be loaded out.",
+      });
+    }
+
+    const code = args.boxCode.trim().toUpperCase();
+    const box = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_boxCode", (q) => q.eq("boxCode", code))
+      .first();
+    if (!box) {
+      return { ok: false as const, message: `No box found with code "${code}".` };
+    }
+    if ((box.transferId as string) !== (args.transferId as string)) {
+      return {
+        ok: false as const,
+        message: `${box.boxCode} belongs to another transfer.`,
+      };
+    }
+    if (box.status !== "sealed") {
+      return {
+        ok: false as const,
+        message: `${box.boxCode} is "${box.status}" — only a sealed box can be loaded.`,
+      };
+    }
+    if (box.loadedAt) {
+      return { ok: false as const, message: `${box.boxCode} is already loaded.` };
+    }
+
+    await ctx.db.patch(box._id, { loadedAt: Date.now(), loadedById: user._id });
+
+    const boxes = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
+      .collect();
+    return {
+      ok: true as const,
+      boxCode: box.boxCode,
+      loadedCount: boxes.filter((b) => b.loadedAt || b._id === box._id).length,
+      totalBoxes: boxes.length,
+    };
+  },
+});
+
+export const undoLastBoxOut = mutation({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, WAREHOUSE_ROLES);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer || transfer.status !== "packed") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only a packed transfer can be loaded out.",
+      });
+    }
+    if (transfer.loadedAt) {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "The load-out is already closed. Reopen it to change what was loaded.",
+      });
+    }
+
+    const boxes = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
+      .collect();
+    const loaded = boxes
+      .filter((b) => b.loadedAt !== undefined)
+      .sort((a, b) => (b.loadedAt ?? 0) - (a.loadedAt ?? 0));
+    if (loaded.length === 0) {
+      throw new ConvexError({ code: "NOTHING_TO_UNDO", message: "No box has been loaded yet." });
+    }
+
+    await ctx.db.patch(loaded[0]._id, { loadedAt: undefined, loadedById: undefined });
+    return { boxCode: loaded[0].boxCode };
+  },
+});
+
+/**
+ * Closes the load-out and names who took the goods. A boxed transfer records
+ * how many boxes went; a short load is allowed but must be acknowledged, since
+ * a box left behind is a real event worth recording rather than a blocked
+ * screen.
+ */
+export const confirmLoadOut = mutation({
+  args: {
+    transferId: v.id("transfers"),
+    /** The driver or rider who took them. */
+    handedToName: v.string(),
+    /** Set when fewer boxes were loaded than were packed. */
+    confirmShortLoad: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, WAREHOUSE_ROLES);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    if (transfer.status !== "packed") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only a packed transfer can be loaded out.",
+      });
+    }
+    if (transfer.loadedAt) {
+      throw new ConvexError({ code: "INVALID_STATE", message: "Already loaded out." });
+    }
+    const handedToName = args.handedToName.trim();
+    if (handedToName === "") {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "Name who is taking the goods.",
+      });
+    }
+
+    const boxes = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
+      .collect();
+
+    const now = Date.now();
+    let loadedBoxCount: number | undefined;
+
+    if (boxes.length > 0) {
+      const loaded = boxes.filter((b) => b.loadedAt !== undefined);
+      if (loaded.length === 0) {
+        throw new ConvexError({
+          code: "NOTHING_LOADED",
+          message: "No box has been scanned out yet. Scan each box as it goes on the vehicle.",
+        });
+      }
+      if (loaded.length < boxes.length && !args.confirmShortLoad) {
+        throw new ConvexError({
+          code: "SHORT_LOAD",
+          message: `Only ${loaded.length} of ${boxes.length} boxes were scanned out. Confirm the rest are staying behind.`,
+        });
+      }
+      loadedBoxCount = loaded.length;
+    }
+
+    await ctx.db.patch(args.transferId, {
+      loadedAt: now,
+      loadedById: user._id,
+      handedToName,
+      ...(loadedBoxCount !== undefined ? { loadedBoxCount } : {}),
+      updatedAt: now,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "transfer.loadOut",
+      userId: user._id,
+      entityType: "transfers",
+      entityId: args.transferId,
+      after: {
+        handedToName,
+        ...(loadedBoxCount !== undefined
+          ? { loadedBoxCount, totalBoxes: boxes.length }
+          : {}),
+      },
+    });
+
+    return { loadedBoxCount: loadedBoxCount ?? null, totalBoxes: boxes.length };
+  },
+});
+
+/** Reopens a closed load-out, for a vehicle that has not left yet. */
+export const reopenLoadOut = mutation({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, WAREHOUSE_ROLES);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    if (transfer.status !== "packed") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "A transfer already on the road cannot be unloaded here.",
+      });
+    }
+
+    await ctx.db.patch(args.transferId, {
+      loadedAt: undefined,
+      loadedById: undefined,
+      loadedBoxCount: undefined,
+      handedToName: undefined,
+      updatedAt: Date.now(),
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "transfer.loadOutReopened",
+      userId: user._id,
+      entityType: "transfers",
+      entityId: args.transferId,
+    });
+  },
+});
+
+// ─── Dispatch ───────────────────────────────────────────────────────────────
+
 export const markTransferInTransit = mutation({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
@@ -268,6 +500,13 @@ export const markTransferInTransit = mutation({
       throw new ConvexError({
         code: "INVALID_STATE",
         message: "Only packed transfers can be dispatched.",
+      });
+    }
+    // The goods are only on the road once someone counted them onto it.
+    if (!transfer.loadedAt) {
+      throw new ConvexError({
+        code: "NOT_LOADED",
+        message: "Load the transfer out first — scan the boxes and name who is taking them.",
       });
     }
 
@@ -343,12 +582,11 @@ export const listInTransitTransfers = query({
 export const getTransferReceivingData = query({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    await requireDestinationBranch(ctx, transfer);
     if (transfer.status !== "inTransit") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -412,12 +650,11 @@ export const getTransferReceivingData = query({
 export const scanTransferPiece = mutation({
   args: { transferId: v.id("transfers"), code: v.string() },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    const user = await requireDestinationBranch(ctx, transfer);
     if (transfer.status !== "inTransit") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -467,10 +704,12 @@ export const scanTransferPiece = mutation({
 export const undoLastTransferScan = mutation({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
-
     const transfer = await ctx.db.get(args.transferId);
-    if (!transfer || transfer.status !== "inTransit") {
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireDestinationBranch(ctx, transfer);
+    if (transfer.status !== "inTransit") {
       throw new ConvexError({
         code: "INVALID_STATE",
         message: "Only in-transit transfers can be received.",
@@ -508,14 +747,15 @@ export const confirmTransferDelivery = mutation({
     // not there, so this is the one way to close it — and it can only receive
     // zero, so it opens no back door to a typed count.
     nothingArrived: v.optional(v.boolean()),
+    /** Who handed the goods over. Defaults to the carrier on the transfer. */
+    receivedFromName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    const user = await requireDestinationBranch(ctx, transfer);
     if (transfer.status !== "inTransit") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -655,10 +895,20 @@ export const confirmTransferDelivery = mutation({
     // Clear reserved stock at source — goods have physically left
     await clearReservedOnDelivery(ctx, args.transferId, transfer.fromBranchId);
 
+    // The branch's half of the handover. The carrier is named when there was
+    // one, so the two records can be read against each other.
+    const carrierName = transfer.driverId
+      ? ((await ctx.db.get(transfer.driverId))?.name ?? null)
+      : transfer.courierId
+        ? ((await ctx.db.get(transfer.courierId))?.name ?? null)
+        : null;
+    const receivedFromName = args.receivedFromName?.trim() || carrierName || undefined;
+
     await ctx.db.patch(args.transferId, {
       status: "delivered",
       deliveredAt: now,
       deliveredById: user._id,
+      ...(receivedFromName ? { receivedFromName } : {}),
       updatedAt: now,
     });
 
@@ -767,5 +1017,141 @@ export const listBranchInTransitTransfers = query({
     );
 
     return enriched.sort((a, b) => a.createdAt - b.createdAt);
+  },
+});
+
+// ─── The handshake, read back ───────────────────────────────────────────────
+
+/**
+ * One transfer's journey, step by step. Both ends of the chain read this, so
+ * the warehouse and the branch are never looking at different accounts of what
+ * happened.
+ */
+export const getTransferCustody = query({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+
+    // Either end of the journey may read it, and HQ may read any.
+    const ownsIt =
+      scope.canAccessAllBranches ||
+      (scope.branchId as string) === (transfer.fromBranchId as string) ||
+      (scope.branchId as string) === (transfer.toBranchId as string);
+    if (!ownsIt) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    const [fromBranch, toBranch] = await Promise.all([
+      ctx.db.get(transfer.fromBranchId),
+      ctx.db.get(transfer.toBranchId),
+    ]);
+
+    return {
+      transferId: transfer._id,
+      status: transfer.status,
+      fromBranchName: fromBranch?.name ?? "Unknown",
+      toBranchName: toBranch?.name ?? "Unknown",
+      steps: await custodyTimeline(ctx, transfer),
+    };
+  },
+});
+
+/**
+ * Handshakes that stopped halfway. Each one is a moment where the goods are
+ * somebody's responsibility and nobody has said so — which is exactly what a
+ * handshake is meant to prevent, so they are surfaced rather than waited on.
+ */
+export const listStalledHandshakes = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await withBranchScope(ctx);
+    if (!(WAREHOUSE_ROLES as readonly string[]).includes(scope.user.role) &&
+        scope.user.role !== "manager") {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+
+    const now = Date.now();
+    const branches = await ctx.db.query("branches").collect();
+    const nameById = new Map(branches.map((b) => [b._id as string, b.name]));
+
+    const open = [
+      ...(await ctx.db
+        .query("transfers")
+        .withIndex("by_status", (q) => q.eq("status", "inTransit"))
+        .collect()),
+      ...(await ctx.db
+        .query("transfers")
+        .withIndex("by_status", (q) => q.eq("status", "packed"))
+        .collect()),
+    ];
+
+    // A branch only sees journeys it is one end of.
+    const mine = scope.canAccessAllBranches
+      ? open
+      : open.filter(
+          (t) =>
+            (t.fromBranchId as string) === (scope.branchId as string) ||
+            (t.toBranchId as string) === (scope.branchId as string)
+        );
+
+    const rows = [];
+    for (const t of mine) {
+      let reason: string | null = null;
+      let since = t.updatedAt;
+
+      if (t.status === "packed" && t.loadedAt) {
+        // Loaded onto nothing: someone took it off the shelf and no vehicle came.
+        if (now - t.loadedAt > HANDSHAKE_LIMITS.packedNotDispatchedMs) {
+          reason = "Loaded out but never dispatched";
+          since = t.loadedAt;
+        }
+      } else if (t.status === "inTransit") {
+        if (t.driverHandedOverAt) {
+          if (now - t.driverHandedOverAt > HANDSHAKE_LIMITS.handedOverNotReceivedMs) {
+            reason = "Handed over, but the branch has not received it";
+            since = t.driverHandedOverAt;
+          }
+        } else if (t.expectedDeliveryDate && now > t.expectedDeliveryDate) {
+          reason = "Past its expected delivery date";
+          since = t.expectedDeliveryDate;
+        } else if (
+          !t.expectedDeliveryDate &&
+          t.shippedAt &&
+          now - t.shippedAt > HANDSHAKE_LIMITS.inTransitSilentMs
+        ) {
+          reason = "In transit with nothing recorded since dispatch";
+          since = t.shippedAt;
+        }
+      }
+
+      if (!reason) continue;
+
+      const carrier = t.driverId
+        ? ((await ctx.db.get(t.driverId))?.name ?? null)
+        : t.courierId
+          ? ((await ctx.db.get(t.courierId))?.name ?? null)
+          : null;
+
+      rows.push({
+        transferId: t._id,
+        status: t.status,
+        reason,
+        since,
+        hoursWaiting: Math.floor((now - since) / (60 * 60 * 1000)),
+        fromBranchName: nameById.get(t.fromBranchId as string) ?? "Unknown",
+        toBranchName: nameById.get(t.toBranchId as string) ?? "Unknown",
+        carrier,
+        handedToName: t.handedToName ?? null,
+        driverReceivedByName: t.driverReceivedByName ?? null,
+      });
+    }
+
+    // Longest wait first — the one most likely to have gone wrong.
+    return rows.sort((a, b) => a.since - b.since);
   },
 });

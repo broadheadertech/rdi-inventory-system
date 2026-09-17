@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Plus, ArrowUpRight, ArrowDownLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { StalledHandshakes } from "@/components/shared/StalledHandshakes";
 import {
   Table,
   TableBody,
@@ -80,6 +81,9 @@ export default function MovementsListPage() {
           </Link>
         </Button>
       </div>
+
+      {/* Handovers nobody has closed */}
+      <StalledHandshakes />
 
       {/* Stage filters (reports view) */}
       <div className="flex flex-wrap gap-1.5">

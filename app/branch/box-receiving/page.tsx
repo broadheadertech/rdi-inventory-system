@@ -9,6 +9,7 @@ import { getErrorMessage, cn } from "@/lib/utils";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
 import { BarcodeScanner } from "@/components/shared/BarcodeScanner";
+import { StalledHandshakes } from "@/components/shared/StalledHandshakes";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -62,6 +63,8 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
   const [discrepancyNotes, setDiscrepancyNotes] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [scanAlert, setScanAlert] = useState<string | null>(null);
+  // Who handed the boxes over. Left blank, the carrier on the transfer is used.
+  const [boxReceivedFrom, setBoxReceivedFrom] = useState("");
 
   const boxLookup = useQuery(
     api.transfers.boxPacking.lookupBoxByCode,
@@ -172,6 +175,7 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
           boxId: receivingBox.boxId as Id<"transferBoxes">,
           ...(discrepancyNotes.trim() ? { discrepancyNotes: discrepancyNotes.trim() } : {}),
           ...(boxMissing ? { boxMissing: true } : {}),
+          ...(boxReceivedFrom.trim() ? { receivedFromName: boxReceivedFrom.trim() } : {}),
         });
         if (result.allProcessed) {
           toast.success("All boxes received. Transfer complete.");
@@ -589,6 +593,14 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
               </>
             )}
             <div className="space-y-2">
+              <Label>Received from (optional)</Label>
+              <Input
+                placeholder="Who handed the boxes over"
+                value={boxReceivedFrom}
+                onChange={(e) => setBoxReceivedFrom(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
               <Label>Notes (optional)</Label>
               <Textarea
                 placeholder="e.g., box crushed, stock damp…"
@@ -671,6 +683,8 @@ function PieceReceivingView({
   const [manualBarcode, setManualBarcode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [receiveError, setReceiveError] = useState<string | null>(null);
+  // Who handed the goods over. Left blank, the carrier on the transfer is used.
+  const [receivedFrom, setReceivedFrom] = useState("");
 
   useEffect(() => {
     setDamagedIds(new Set());
@@ -679,6 +693,7 @@ function PieceReceivingView({
     setManualBarcode("");
     setSubmitting(false);
     setReceiveError(null);
+    setReceivedFrom("");
   }, [transferId]);
 
   const handleScan = useCallback(
@@ -741,6 +756,7 @@ function PieceReceivingView({
       transferId,
       confirmOverage: hasOverage,
       ...(nothingArrived ? { nothingArrived: true } : {}),
+      ...(receivedFrom.trim() ? { receivedFromName: receivedFrom.trim() } : {}),
       damageNotes: [...damagedIds].map((itemId) => ({
         itemId: itemId as Id<"transferItems">,
         notes: damageNotes[itemId]?.trim() || "Damaged (no notes provided)",
@@ -950,6 +966,18 @@ function PieceReceivingView({
       {/* Footer */}
       <div className="flex flex-wrap items-center justify-between gap-2">
         {receiveError && <p className="text-sm text-destructive">{receiveError}</p>}
+        <label className="space-y-1">
+          <span className="block text-xs text-muted-foreground">
+            Received from{" "}
+            {receivingData?.driverName ? `(${receivingData.driverName})` : "(optional)"}
+          </span>
+          <Input
+            className="h-9 w-56 text-sm"
+            placeholder={receivingData?.driverName ?? "Who handed it over"}
+            value={receivedFrom}
+            onChange={(e) => setReceivedFrom(e.target.value)}
+          />
+        </label>
         <div className="ml-auto flex gap-2">
           {scannedTotal === 0 && receivingData && (
             <Button variant="outline" onClick={handleNothingArrived} disabled={submitting}>
@@ -1001,6 +1029,9 @@ export default function BranchReceivingPage() {
           Confirm delivery of incoming transfers by box or by piece.
         </p>
       </div>
+
+      {/* Deliveries handed over but not yet scanned in */}
+      <StalledHandshakes />
 
       {!inTransitTransfers ? (
         <div className="p-8 space-y-2">

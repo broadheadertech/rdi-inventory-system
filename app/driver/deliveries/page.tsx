@@ -122,6 +122,7 @@ function DeliveryDetail({
   );
 
   const [submitting, setSubmitting] = useState(false);
+  const [receivedByName, setReceivedByName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   if (detail === undefined) {
@@ -191,9 +192,16 @@ function DeliveryDetail({
   }
 
   function handleConfirmDelivery() {
+    // The driver's half of the handover: the goods are not just "delivered",
+    // they were handed to someone with a name.
+    const name = receivedByName.trim();
+    if (!name) {
+      setError("Enter the name of who took the goods.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
-    confirmDeliveryMut({ transferId }).then(
+    confirmDeliveryMut({ transferId, receivedByName: name }).then(
       () => {
         onBack();
       },
@@ -301,14 +309,33 @@ function DeliveryDetail({
 
         {/* Status indicator */}
         {hasArrived && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-            <p className="text-sm font-medium text-amber-800">
-              Arrived at destination
-            </p>
-            <p className="text-xs text-amber-600">
-              Hand the goods to branch staff. They count them in Receiving, and their count is
-              what goes into stock.
-            </p>
+          <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <div>
+              <p className="text-sm font-medium text-amber-800">
+                Arrived at destination
+              </p>
+              <p className="text-xs text-amber-600">
+                Hand the goods to branch staff. They count them in Receiving, and their count is
+                what goes into stock.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <label
+                htmlFor="received-by"
+                className="block text-xs font-medium text-amber-800"
+              >
+                Who took the goods?
+              </label>
+              <input
+                id="received-by"
+                type="text"
+                value={receivedByName}
+                onChange={(e) => setReceivedByName(e.target.value)}
+                placeholder="Name of the branch staff"
+                autoComplete="off"
+                className="h-12 w-full rounded-lg border border-amber-300 bg-white px-3 text-base"
+              />
+            </div>
           </div>
         )}
 
@@ -353,7 +380,7 @@ function DeliveryDetail({
           <button
             type="button"
             onClick={handleConfirmDelivery}
-            disabled={submitting}
+            disabled={submitting || receivedByName.trim() === ""}
             className="w-full h-14 rounded-lg bg-green-600 text-white text-base font-semibold active:opacity-90 disabled:opacity-50"
           >
             {submitting ? "Confirming..." : "Confirm Handover"}

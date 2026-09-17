@@ -571,6 +571,22 @@ export default defineSchema({
     // The driver's handover at the branch. It adds no stock: the branch's count
     // at Receiving does, and that is what closes the transfer.
     driverHandedOverAt: v.optional(v.number()),
+    // ── The handshake ───────────────────────────────────────────────────────
+    // Custody changes hands twice: the warehouse gives the goods to a carrier,
+    // and the carrier gives them to the branch. Each side is recorded, so the
+    // goods are never unaccounted for between the packing bench and the
+    // branch's first scan.
+    //
+    // Loading out: what physically went onto the vehicle, counted at the door.
+    // A transfer cannot be dispatched until this is done.
+    loadedAt: v.optional(v.number()),
+    loadedById: v.optional(v.id("users")),
+    loadedBoxCount: v.optional(v.number()),     // boxes scanned out, for boxed transfers
+    handedToName: v.optional(v.string()),       // the driver or rider who took them
+    // The other side of the handover: who at the branch took the goods, as the
+    // carrier recorded it, and who the branch says it took them from.
+    driverReceivedByName: v.optional(v.string()),
+    receivedFromName: v.optional(v.string()),
     // Third-party courier dispatch (alternative to an internal driver)
     courierId: v.optional(v.id("couriers")),
     trackingNumber: v.optional(v.string()),
@@ -609,6 +625,11 @@ export default defineSchema({
     sealedById: v.optional(v.id("users")),
     receivedAt: v.optional(v.number()),
     receivedById: v.optional(v.id("users")),
+    // Scanned onto the vehicle at the warehouse door. A sealed box that was
+    // never loaded never left, which is how a box lost before the truck is
+    // told apart from one lost on the road.
+    loadedAt: v.optional(v.number()),
+    loadedById: v.optional(v.id("users")),
     status: v.union(
       v.literal("packing"),            // items being scanned in
       v.literal("sealed"),             // finalized, ready for transit

@@ -190,6 +190,13 @@ export const assignDriverToTransfer = mutation({
         message: "Only packed transfers can be assigned to drivers.",
       });
     }
+    // The goods are only on the road once someone counted them onto it.
+    if (!transfer.loadedAt) {
+      throw new ConvexError({
+        code: "NOT_LOADED",
+        message: "Load the transfer out first — scan the boxes and name who is taking them.",
+      });
+    }
 
     const driver = await ctx.db.get(args.driverId);
     if (!driver || !driver.isActive || driver.role !== "driver") {

@@ -17,6 +17,7 @@ import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
 import { releaseHeldStock } from "../_helpers/transferStock";
+import { _logAuditEntry } from "../_helpers/auditLog";
 import { internal } from "../_generated/api";
 
 // Maintenance: cancel a non-terminal movement and release its held source stock.
@@ -294,6 +295,13 @@ export const dispatchViaCourier = mutation({
         message: "Only packed movements can be dispatched.",
       });
     }
+    // The goods are only on the road once someone counted them onto it.
+    if (!transfer.loadedAt) {
+      throw new ConvexError({
+        code: "NOT_LOADED",
+        message: "Load the transfer out first — scan the boxes and name who is taking them.",
+      });
+    }
 
     const courier = await ctx.db.get(args.courierId);
     if (!courier || !courier.isActive) {
@@ -313,6 +321,29 @@ export const dispatchViaCourier = mutation({
       trackingNumber: args.trackingNumber?.trim() || undefined,
       ...(expectedDeliveryDate ? { expectedDeliveryDate } : {}),
       updatedAt: now,
+    });
+
+    // A courier dispatch left no trace before this — the one handover with an
+    // outside party was the only one with nothing written down.
+    await _logAuditEntry(ctx, {
+      action: "transfer.dispatchCourier",
+      userId: user._id,
+      entityType: "transfers",
+      entityId: args.transferId,
+      before: { status: "packed" },
+      after: {
+        status: "inTransit",
+        courier: courier.name,
+        trackingNumber: args.trackingNumber?.trim() ?? null,
+        handedToName: transfer.handedToName ?? null,
+        expectedDeliveryDate: expectedDeliveryDate ?? null,
+      },
+    });
+
+    // The receiving branch is told it is coming, as it is for a driver.
+    await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
+      type: "driver_in_transit",
+      transferId: args.transferId,
     });
   },
 });
@@ -413,6 +444,12 @@ export const getMovement = query({
     const driver = transfer.driverId ? await ctx.db.get(transfer.driverId) : null;
     const courier = transfer.courierId ? await ctx.db.get(transfer.courierId) : null;
 
+    // The load-out: how much of the transfer is on the vehicle so far.
+    const boxes = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+      .collect();
+
     return {
       _id: transfer._id,
       direction,
@@ -431,6 +468,12 @@ export const getMovement = query({
       driverName: driver?.name ?? null,
       courierName: courier?.name ?? null,
       trackingNumber: transfer.trackingNumber ?? null,
+      // Load out
+      boxCount: boxes.length,
+      loadedBoxes: boxes.filter((b) => b.loadedAt !== undefined).length,
+      loadedAt: transfer.loadedAt ?? null,
+      loadedBoxCount: transfer.loadedBoxCount ?? null,
+      handedToName: transfer.handedToName ?? null,
       items: enriched,
     };
   },

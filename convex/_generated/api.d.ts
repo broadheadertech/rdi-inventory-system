@@ -11,6 +11,7 @@
 import type * as _helpers_auditLog from "../_helpers/auditLog.js";
 import type * as _helpers_branchPricing from "../_helpers/branchPricing.js";
 import type * as _helpers_constants from "../_helpers/constants.js";
+import type * as _helpers_custody from "../_helpers/custody.js";
 import type * as _helpers_internalInvoice from "../_helpers/internalInvoice.js";
 import type * as _helpers_passwordHash from "../_helpers/passwordHash.js";
 import type * as _helpers_permissions from "../_helpers/permissions.js";
@@ -184,6 +185,7 @@ declare const fullApi: ApiFromModules<{
   "_helpers/auditLog": typeof _helpers_auditLog;
   "_helpers/branchPricing": typeof _helpers_branchPricing;
   "_helpers/constants": typeof _helpers_constants;
+  "_helpers/custody": typeof _helpers_custody;
   "_helpers/internalInvoice": typeof _helpers_internalInvoice;
   "_helpers/passwordHash": typeof _helpers_passwordHash;
   "_helpers/permissions": typeof _helpers_permissions;
