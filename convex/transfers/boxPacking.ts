@@ -6,6 +6,11 @@ import { _logAuditEntry } from "../_helpers/auditLog";
 import { clearReservedOnDelivery } from "../_helpers/transferStock";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
 import { raiseBoxDispute } from "../disputes";
+import {
+  boxScanCounts,
+  latestStandingScan,
+  resolveScanCode,
+} from "../_helpers/receivingScans";
 
 // ─── Box Code Generation ────────────────────────────────────────────────────
 
@@ -512,6 +517,9 @@ export const lookupBoxByCode = query({
       .withIndex("by_box", (q) => q.eq("boxId", box._id))
       .collect();
 
+    // What has been scanned out of the box so far — the only count it has.
+    const scanned = await boxScanCounts(ctx, box._id);
+
     const enrichedItems = await Promise.all(
       items.map(async (bi) => {
         const variant = await ctx.db.get(bi.variantId);
@@ -524,6 +532,7 @@ export const lookupBoxByCode = query({
           color: variant?.color ?? "",
           styleName: style?.name ?? "Unknown",
           quantity: bi.quantity,
+          scannedQuantity: scanned.get(bi.variantId as string) ?? 0,
         };
       })
     );
@@ -543,13 +552,108 @@ export const lookupBoxByCode = query({
   },
 });
 
+// ─── Branch scans a box in, piece by piece ──────────────────────────────────
+// A box is not received by confirming its code. Every piece in it is scanned,
+// and the box is received for the pieces that were — so a box short at packing
+// shows up short at the branch instead of being credited in full unopened.
+
+export const scanBoxPiece = mutation({
+  args: { boxId: v.id("transferBoxes"), code: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, ["admin", "manager", "warehouseStaff"]);
+
+    const box = await ctx.db.get(args.boxId);
+    if (!box) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Box not found." });
+    }
+    if (box.status !== "sealed") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: `Box is in "${box.status}" status — only sealed boxes can be received.`,
+      });
+    }
+
+    const match = await resolveScanCode(ctx, args.code);
+    if (!match) {
+      throw new ConvexError({
+        code: "NOT_FOUND",
+        message: `No product found for barcode/SKU "${args.code.trim()}".`,
+      });
+    }
+
+    const packed = await ctx.db
+      .query("transferBoxItems")
+      .withIndex("by_box", (q) => q.eq("boxId", args.boxId))
+      .collect();
+    const packedQuantity = packed
+      .filter((bi) => bi.variantId === match.variant._id)
+      .reduce((sum, bi) => sum + bi.quantity, 0);
+    if (packedQuantity === 0) {
+      throw new ConvexError({
+        code: "NOT_IN_BOX",
+        message: `${match.variant.sku} was not packed in this box.`,
+      });
+    }
+
+    await ctx.db.insert("receivingScans", {
+      boxId: args.boxId,
+      variantId: match.variant._id,
+      code: args.code.trim(),
+      matchedBy: match.matchedBy,
+      scannedById: user._id,
+      scannedAt: Date.now(),
+    });
+
+    const counts = await boxScanCounts(ctx, args.boxId);
+    return {
+      sku: match.variant.sku,
+      scannedQuantity: counts.get(match.variant._id as string) ?? 0,
+      packedQuantity,
+    };
+  },
+});
+
+export const undoLastBoxScan = mutation({
+  args: { boxId: v.id("transferBoxes") },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, ["admin", "manager", "warehouseStaff"]);
+
+    const box = await ctx.db.get(args.boxId);
+    if (!box || box.status !== "sealed") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only a box still being received can have a scan undone.",
+      });
+    }
+
+    const scan = await latestStandingScan(ctx, { boxId: args.boxId });
+    if (!scan) {
+      throw new ConvexError({ code: "NOTHING_TO_UNDO", message: "No scan to undo." });
+    }
+    await ctx.db.patch(scan._id, { undoneAt: Date.now(), undoneById: user._id });
+
+    const variant = await ctx.db.get(scan.variantId);
+    return { sku: variant?.sku ?? scan.code };
+  },
+});
+
 // ─── Branch confirms box receipt ────────────────────────────────────────────
+// Whether a box has a discrepancy is decided by its scans against what was
+// packed, not by a button. A box is always credited for what was scanned in
+// it: crediting a 59-of-60 box nothing, as before, left 59 real pieces in the
+// store and out of the system. Disputes record the difference; they never add
+// stock, so nothing is counted twice.
 
 export const confirmBoxReceipt = mutation({
   args: {
     boxId: v.id("transferBoxes"),
-    hasDiscrepancy: v.boolean(),
+    // Anything the receiver saw that the counts do not — a crushed box, wet
+    // stock. Added to the discrepancy note, never used to decide it.
     discrepancyNotes: v.optional(v.string()),
+    // The box never arrived. Nothing can be scanned from a box that is not
+    // there, so this is the one way to close it — and it can only credit zero,
+    // so it opens no back door to a typed count.
+    boxMissing: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, ["admin", "manager", "warehouseStaff"]);
@@ -565,16 +669,60 @@ export const confirmBoxReceipt = mutation({
       });
     }
 
+    const packedItems = await ctx.db
+      .query("transferBoxItems")
+      .withIndex("by_box", (q) => q.eq("boxId", args.boxId))
+      .collect();
+    const scanned = await boxScanCounts(ctx, args.boxId);
+
+    const totalScanned = [...scanned.values()].reduce((sum, n) => sum + n, 0);
+    if (args.boxMissing && totalScanned > 0) {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "Pieces from this box have been scanned, so it is not missing. Undo them first.",
+      });
+    }
+    if (!args.boxMissing && totalScanned === 0) {
+      throw new ConvexError({
+        code: "NOTHING_SCANNED",
+        message:
+          "Nothing in this box has been scanned. Scan each piece, or report the box missing.",
+      });
+    }
+
+    // Packed against scanned, per variant.
+    const packedByVariant = new Map<string, number>();
+    for (const bi of packedItems) {
+      const key = bi.variantId as string;
+      packedByVariant.set(key, (packedByVariant.get(key) ?? 0) + bi.quantity);
+    }
+    const differences: string[] = [];
+    for (const [variantKey, packedQty] of packedByVariant) {
+      const scannedQty = scanned.get(variantKey) ?? 0;
+      if (scannedQty === packedQty) continue;
+      const sku =
+        (await ctx.db.get(variantKey as Id<"variants">))?.sku ?? variantKey;
+      const diff = scannedQty - packedQty;
+      differences.push(`${sku} ${scannedQty} of ${packedQty} (${diff > 0 ? "+" : ""}${diff})`);
+    }
+
+    const hasDiscrepancy = differences.length > 0;
+    const receiverNotes = args.discrepancyNotes?.trim();
+    const discrepancyNotes = [
+      ...(args.boxMissing ? ["Box missing — nothing received"] : []),
+      ...differences,
+      ...(receiverNotes ? [receiverNotes] : []),
+    ].join("; ");
+
     const now = Date.now();
     await ctx.db.patch(args.boxId, {
-      status: args.hasDiscrepancy ? "discrepancy" : "received",
+      status: hasDiscrepancy ? "discrepancy" : "received",
       receivedAt: now,
       receivedById: user._id,
-      ...(args.discrepancyNotes ? { discrepancyNotes: args.discrepancyNotes } : {}),
+      ...(discrepancyNotes ? { discrepancyNotes } : {}),
     });
 
-    // A flagged box goes to the receiving branch's Disputes.
-    if (args.hasDiscrepancy) {
+    if (hasDiscrepancy) {
       await raiseBoxDispute(ctx, (await ctx.db.get(args.boxId))!);
     }
 
@@ -591,32 +739,20 @@ export const confirmBoxReceipt = mutation({
     if (allProcessed) {
       const transfer = await ctx.db.get(box.transferId);
       if (transfer && transfer.status === "inTransit") {
-        // Auto-complete the transfer delivery
         const transferItems = await ctx.db
           .query("transferItems")
           .withIndex("by_transfer", (q) => q.eq("transferId", box.transferId))
           .collect();
 
-        // Sum received quantities from box items
-        const allBoxItems = await ctx.db
-          .query("transferBoxItems")
-          .withIndex("by_transfer", (q) => q.eq("transferId", box.transferId))
-          .collect();
-
+        // What every box in the transfer actually received, from its scans.
         const receivedByVariant = new Map<string, number>();
-        for (const bi of allBoxItems) {
-          // Only count items from received boxes (not discrepancy ones)
-          const biBox = allBoxes.find((b) => b._id === bi.boxId);
-          const boxStatus = bi.boxId === args.boxId
-            ? (args.hasDiscrepancy ? "discrepancy" : "received")
-            : biBox?.status;
-          if (boxStatus === "received") {
-            const vid = bi.variantId as string;
-            receivedByVariant.set(vid, (receivedByVariant.get(vid) ?? 0) + bi.quantity);
+        for (const b of allBoxes) {
+          const counts = await boxScanCounts(ctx, b._id);
+          for (const [variantKey, n] of counts) {
+            receivedByVariant.set(variantKey, (receivedByVariant.get(variantKey) ?? 0) + n);
           }
         }
 
-        // Update transferItems and inventory
         for (const ti of transferItems) {
           const received = receivedByVariant.get(ti.variantId as string) ?? 0;
           await ctx.db.patch(ti._id, { receivedQuantity: received });
@@ -663,11 +799,6 @@ export const confirmBoxReceipt = mutation({
         // Clear reserved stock at source
         await clearReservedOnDelivery(ctx, box.transferId, transfer.fromBranchId);
 
-        // Mark transfer delivered
-        const hasAnyDiscrepancy = allBoxes.some(
-          (b) => (b._id === args.boxId ? args.hasDiscrepancy : b.status === "discrepancy")
-        );
-
         await ctx.db.patch(box.transferId, {
           status: "delivered",
           deliveredAt: now,
@@ -693,16 +824,16 @@ export const confirmBoxReceipt = mutation({
           after: {
             status: "delivered",
             boxesReceived: allBoxes.filter((b) =>
-              b._id === args.boxId ? !args.hasDiscrepancy : b.status === "received"
+              b._id === args.boxId ? !hasDiscrepancy : b.status === "received"
             ).length,
             boxesWithDiscrepancy: allBoxes.filter((b) =>
-              b._id === args.boxId ? args.hasDiscrepancy : b.status === "discrepancy"
+              b._id === args.boxId ? hasDiscrepancy : b.status === "discrepancy"
             ).length,
           },
         });
       }
     }
 
-    return { allProcessed };
+    return { allProcessed, hasDiscrepancy, differences };
   },
 });

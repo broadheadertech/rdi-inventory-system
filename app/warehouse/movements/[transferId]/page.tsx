@@ -61,7 +61,6 @@ export default function MovementDetailPage() {
   const dispatch = useMutation(api.transfers.fulfillment.markTransferInTransit);
   const assignDriver = useMutation(api.logistics.assignments.assignDriverToTransfer);
   const dispatchCourier = useMutation(api.warehouse.movements.dispatchViaCourier);
-  const confirm = useMutation(api.transfers.fulfillment.confirmTransferDelivery);
 
   const isHQ = currentUser ? HQ_ROLES.includes(currentUser.role) : false;
 
@@ -75,7 +74,6 @@ export default function MovementDetailPage() {
   );
 
   const [packQty, setPackQty] = useState<Record<string, number>>({});
-  const [recvQty, setRecvQty] = useState<Record<string, number>>({});
   const [driverId, setDriverId] = useState("");
   const [courierId, setCourierId] = useState("");
   const [tracking, setTracking] = useState("");
@@ -345,7 +343,7 @@ export default function MovementDetailPage() {
       )}
 
       {status === "inTransit" && !movement.driverId && (
-        <StageCard title="Confirm Receipt">
+        <StageCard title="On its way">
           {movement.courierName && (
             <p className="mb-2 inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-2.5 py-1 text-xs text-blue-700">
               <Truck className="h-3.5 w-3.5" />
@@ -353,42 +351,14 @@ export default function MovementDetailPage() {
               {movement.trackingNumber ? ` · Tracking ${movement.trackingNumber}` : ""}
             </p>
           )}
-          <p className="mb-3 text-sm text-muted-foreground">
-            Confirm what arrived at{" "}
-            <span className="font-medium text-foreground">{movement.toBranchName}</span>. Any
-            difference from “Packed” is flagged as a discrepancy.
+          {/* Receiving is scanned piece by piece where the goods are. The
+              warehouse cannot scan stock sitting at another branch, so it no
+              longer types a count for it. */}
+          <p className="text-sm text-muted-foreground">
+            <span className="font-medium text-foreground">{movement.toBranchName}</span> receives
+            this delivery by scanning each piece at Receiving. Their scans add the stock and
+            complete the delivery; any difference from &ldquo;Packed&rdquo; goes to Disputes.
           </p>
-          <Button
-            disabled={busy}
-            onClick={() => {
-              const received = (i: (typeof movement.items)[number]) =>
-                recvQty[i.itemId as string] ?? i.packedQuantity ?? i.requestedQuantity;
-              // Counting more than packed adds stock the source never deducted.
-              const hasOverage = movement.items.some(
-                (i) => received(i) > (i.packedQuantity ?? i.requestedQuantity)
-              );
-              if (
-                hasOverage &&
-                !window.confirm(
-                  "More pieces were counted than packed on at least one line. They are added to stock and flagged — confirm only if the extra pieces are physically there."
-                )
-              ) {
-                return;
-              }
-              run(() =>
-                confirm({
-                  transferId,
-                  confirmOverage: hasOverage,
-                  receivedItems: movement.items.map((i) => ({
-                    itemId: i.itemId as Id<"transferItems">,
-                    receivedQuantity: received(i),
-                  })),
-                })
-              );
-            }}
-          >
-            Confirm Receipt
-          </Button>
         </StageCard>
       )}
 
@@ -443,29 +413,15 @@ export default function MovementDetailPage() {
                   ) : (
                     <TableCell className="text-right">{i.packedQuantity ?? "—"}</TableCell>
                   )}
-                  {/* Received column / input */}
-                  {status === "inTransit" && !movement.driverId ? (
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        min={0}
-                        value={recvQty[id] ?? i.packedQuantity ?? i.requestedQuantity}
-                        onChange={(e) =>
-                          setRecvQty((p) => ({ ...p, [id]: parseInt(e.target.value) || 0 }))
-                        }
-                        className="ml-auto w-20 text-right"
-                      />
-                    </TableCell>
-                  ) : (
-                    <TableCell
-                      className={cn(
-                        "text-right",
-                        discrepancy ? "font-medium text-red-600" : ""
-                      )}
-                    >
-                      {i.receivedQuantity ?? "—"}
-                    </TableCell>
-                  )}
+                  {/* Received — set by the branch's scans, never typed here */}
+                  <TableCell
+                    className={cn(
+                      "text-right",
+                      discrepancy ? "font-medium text-red-600" : ""
+                    )}
+                  >
+                    {i.receivedQuantity ?? "—"}
+                  </TableCell>
                 </TableRow>
               );
             })}

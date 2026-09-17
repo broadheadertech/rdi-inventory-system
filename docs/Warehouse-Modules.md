@@ -40,14 +40,16 @@ PO number + photo, barcode scanning, and discrepancy reporting.
   - `staffNotifications` — new type `supply_discrepancy` + `supplierReceiptId?`.
 - **Backend:** `convex/suppliers/receiving.ts`
   - `generateReceiptUploadUrl`, `searchVariants`, `createReceipt`,
-    `listReceipts`, `getReceipt`, `scanItem`, `setReceivedQuantity`,
-    `completeReceipt`. Gated to `WAREHOUSE_ROLES`.
+    `listReceipts`, `getReceipt`, `scanItem`, `undoLastSupplierScan`,
+    `completeReceipt`. Gated to `WAREHOUSE_ROLES`. There is no typed received
+    quantity: a line's count is its scans, logged in `receivingScans`
+    (see `convex/_helpers/receivingScans.ts`).
 - **UI:**
   - `app/warehouse/receiving/page.tsx` — list + "Start Receiving / Continue / View".
   - `app/warehouse/receiving/new/page.tsx` — supplier, PO #, date range, photo,
     declared‑allocation builder (SKU search + qty).
-  - `app/warehouse/receiving/[receiptId]/page.tsx` — scan (manual + camera),
-    each scan = +1; live declared/received/discrepancy; Complete.
+  - `app/warehouse/receiving/[receiptId]/page.tsx` — scan (scanner field + camera),
+    each scan = +1, undo last scan; received is read-only; Complete.
 - **Behavior:**
   - A scanned SKU not in the declared allocation is added as an **unexpected**
     line (declared 0 → overage).

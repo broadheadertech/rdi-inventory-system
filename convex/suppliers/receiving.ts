@@ -13,6 +13,7 @@ import type { QueryCtx, MutationCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
+import { latestStandingScan, resolveScanCode } from "../_helpers/receivingScans";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -35,20 +36,6 @@ async function resolveWarehouseBranch(
   return warehouse._id;
 }
 
-async function findVariantByCode(
-  ctx: QueryCtx | MutationCtx,
-  code: string
-): Promise<Doc<"variants"> | null> {
-  const byBarcode = await ctx.db
-    .query("variants")
-    .withIndex("by_barcode", (q) => q.eq("barcode", code))
-    .first();
-  if (byBarcode) return byBarcode;
-  return await ctx.db
-    .query("variants")
-    .withIndex("by_sku", (q) => q.eq("sku", code))
-    .first();
-}
 
 async function variantLabel(ctx: QueryCtx | MutationCtx, variantId: Id<"variants">) {
   const variant = await ctx.db.get(variantId);
@@ -287,7 +274,7 @@ export const scanItem = mutation({
     barcode: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireRole(ctx, WAREHOUSE_ROLES);
+    const user = await requireRole(ctx, WAREHOUSE_ROLES);
 
     const receipt = await ctx.db.get(args.receiptId);
     if (!receipt) {
@@ -300,13 +287,14 @@ export const scanItem = mutation({
       });
     }
 
-    const variant = await findVariantByCode(ctx, args.barcode.trim());
-    if (!variant) {
+    const match = await resolveScanCode(ctx, args.barcode);
+    if (!match) {
       throw new ConvexError({
         code: "NOT_FOUND",
         message: `No product found for barcode/SKU "${args.barcode}".`,
       });
     }
+    const variant = match.variant;
 
     const items = await ctx.db
       .query("supplierReceiptItems")
@@ -341,6 +329,16 @@ export const scanItem = mutation({
       await ctx.db.patch(args.receiptId, { status: "receiving", updatedAt: now });
     }
 
+    // The scan itself, so the count can be traced and a mis-scan taken back.
+    await ctx.db.insert("receivingScans", {
+      supplierReceiptId: args.receiptId,
+      variantId: variant._id,
+      code: args.barcode.trim(),
+      matchedBy: match.matchedBy,
+      scannedById: user._id,
+      scannedAt: now,
+    });
+
     const style = await ctx.db.get(variant.styleId);
     return {
       sku: variant.sku,
@@ -354,36 +352,51 @@ export const scanItem = mutation({
   },
 });
 
-// ─── Manual quantity adjustment ────────────────────────────────────────────────
+// ─── Undo last scan ─────────────────────────────────────────────────────────────
+// There is no typed quantity on a receipt: a count is the number of scans. A
+// mis-scan is taken back here, which can only lower a line, never raise it.
 
-export const setReceivedQuantity = mutation({
-  args: {
-    itemId: v.id("supplierReceiptItems"),
-    receivedQuantity: v.number(),
-  },
+export const undoLastSupplierScan = mutation({
+  args: { receiptId: v.id("supplierReceipts") },
   handler: async (ctx, args) => {
-    await requireRole(ctx, WAREHOUSE_ROLES);
+    const user = await requireRole(ctx, WAREHOUSE_ROLES);
 
-    if (!Number.isInteger(args.receivedQuantity) || args.receivedQuantity < 0) {
-      throw new ConvexError({
-        code: "INVALID_ARGUMENT",
-        message: "Received quantity must be a non-negative whole number.",
-      });
+    const receipt = await ctx.db.get(args.receiptId);
+    if (!receipt) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Receipt not found." });
     }
-
-    const item = await ctx.db.get(args.itemId);
-    if (!item) {
-      throw new ConvexError({ code: "NOT_FOUND", message: "Line not found." });
-    }
-    const receipt = await ctx.db.get(item.receiptId);
-    if (!receipt || receipt.status === "completed" || receipt.status === "discrepancy") {
+    if (receipt.status === "completed" || receipt.status === "discrepancy") {
       throw new ConvexError({
         code: "INVALID_STATE",
         message: "This receipt is already completed.",
       });
     }
 
-    await ctx.db.patch(args.itemId, { receivedQuantity: args.receivedQuantity });
+    const scan = await latestStandingScan(ctx, { supplierReceiptId: args.receiptId });
+    if (!scan) {
+      throw new ConvexError({ code: "NOTHING_TO_UNDO", message: "No scan to undo." });
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(scan._id, { undoneAt: now, undoneById: user._id });
+
+    const items = await ctx.db
+      .query("supplierReceiptItems")
+      .withIndex("by_receipt", (q) => q.eq("receiptId", args.receiptId))
+      .collect();
+    const line = items.find((i) => i.variantId === scan.variantId);
+    if (line) {
+      const receivedQuantity = Math.max(0, line.receivedQuantity - 1);
+      // A line that only existed because of the mis-scan goes with it.
+      if (line.isUnexpected && receivedQuantity === 0) {
+        await ctx.db.delete(line._id);
+      } else {
+        await ctx.db.patch(line._id, { receivedQuantity });
+      }
+    }
+
+    const variant = await ctx.db.get(scan.variantId);
+    return { sku: variant?.sku ?? scan.code };
   },
 });
 

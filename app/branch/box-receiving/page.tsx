@@ -44,50 +44,125 @@ function playBeep(frequency = 880, durationSec = 0.15) {
 }
 
 // ─── Box Receiving View ──────────────────────────────────────────────────────
+// Scan a box's code to open it, then scan every piece in it. There is no
+// "confirm the box as packed": a box is received for what was scanned out of
+// it, and the server decides from those scans whether it has a discrepancy.
+// Scanning another box's code while one is open simply opens that box.
+
+/** Box codes look like TRF-abc12345-BOX-001; anything else is a piece. */
+function isBoxCode(code: string): boolean {
+  return /^TRF-.+-BOX-\d+$/i.test(code.trim());
+}
 
 function BoxReceivingView({ onBack }: { onBack: () => void }) {
   const [scanInput, setScanInput] = useState("");
   const [lookupCode, setLookupCode] = useState<string | null>(null);
-  const [confirmBoxId, setConfirmBoxId] = useState<Id<"transferBoxes"> | null>(null);
-  const [hasDiscrepancy, setHasDiscrepancy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [missingOpen, setMissingOpen] = useState(false);
   const [discrepancyNotes, setDiscrepancyNotes] = useState("");
   const [confirming, setConfirming] = useState(false);
+  const [scanAlert, setScanAlert] = useState<string | null>(null);
 
   const boxLookup = useQuery(
     api.transfers.boxPacking.lookupBoxByCode,
     lookupCode ? { boxCode: lookupCode } : "skip"
   );
+  const scanPiece = useMutation(api.transfers.boxPacking.scanBoxPiece);
+  const undoLastScan = useMutation(api.transfers.boxPacking.undoLastBoxScan);
   const confirmBox = useMutation(api.transfers.boxPacking.confirmBoxReceipt);
 
-  const handleScan = useCallback((code: string) => {
+  // A box can take pieces only while it is sealed and on its way.
+  const receivingBox =
+    boxLookup && boxLookup.status === "sealed" && boxLookup.transferStatus === "inTransit"
+      ? boxLookup
+      : null;
+
+  const scannedTotal = receivingBox
+    ? receivingBox.items.reduce((sum, item) => sum + item.scannedQuantity, 0)
+    : 0;
+  const packedTotal = receivingBox
+    ? receivingBox.items.reduce((sum, item) => sum + item.quantity, 0)
+    : 0;
+  const mismatches = receivingBox
+    ? receivingBox.items.filter((item) => item.scannedQuantity !== item.quantity)
+    : [];
+
+  const openBox = useCallback((code: string) => {
     setLookupCode(code.trim().toUpperCase());
-    setScanInput("");
+    setScanAlert(null);
   }, []);
 
-  const handleConfirm = useCallback(async () => {
-    if (!confirmBoxId) return;
-    setConfirming(true);
-    try {
-      const result = await confirmBox({
-        boxId: confirmBoxId,
-        hasDiscrepancy,
-        discrepancyNotes: hasDiscrepancy ? discrepancyNotes : undefined,
-      });
-      if (result.allProcessed) {
-        toast.success("All boxes confirmed! Transfer complete.");
-      } else {
-        toast.success(hasDiscrepancy ? "Box flagged with discrepancy" : "Box received successfully");
+  const handleScan = useCallback(
+    async (raw: string) => {
+      const code = raw.trim();
+      setScanInput("");
+      if (!code) return;
+
+      // No box open, or another box's code: open that box.
+      if (!receivingBox || isBoxCode(code)) {
+        openBox(code);
+        return;
       }
-      setConfirmBoxId(null);
-      setHasDiscrepancy(false);
-      setDiscrepancyNotes("");
-      setLookupCode(null);
+
+      try {
+        const res = await scanPiece({
+          boxId: receivingBox.boxId as Id<"transferBoxes">,
+          code,
+        });
+        playBeep(res.scannedQuantity > res.packedQuantity ? 440 : 880);
+        setScanAlert(
+          res.scannedQuantity > res.packedQuantity
+            ? `${res.sku}: ${res.scannedQuantity} scanned, only ${res.packedQuantity} packed`
+            : null
+        );
+      } catch (err) {
+        playBeep(300, 0.3);
+        setScanAlert(getErrorMessage(err));
+      }
+    },
+    [receivingBox, openBox, scanPiece]
+  );
+
+  const handleUndo = useCallback(async () => {
+    if (!receivingBox) return;
+    try {
+      const res = await undoLastScan({ boxId: receivingBox.boxId as Id<"transferBoxes"> });
+      setScanAlert(`Undid the last scan of ${res.sku}`);
     } catch (err) {
       toast.error(getErrorMessage(err));
-    } finally {
-      setConfirming(false);
     }
-  }, [confirmBoxId, hasDiscrepancy, discrepancyNotes, confirmBox]);
+  }, [receivingBox, undoLastScan]);
+
+  const finish = useCallback(
+    async (boxMissing: boolean) => {
+      if (!receivingBox) return;
+      setConfirming(true);
+      try {
+        const result = await confirmBox({
+          boxId: receivingBox.boxId as Id<"transferBoxes">,
+          ...(discrepancyNotes.trim() ? { discrepancyNotes: discrepancyNotes.trim() } : {}),
+          ...(boxMissing ? { boxMissing: true } : {}),
+        });
+        if (result.allProcessed) {
+          toast.success("All boxes received. Transfer complete.");
+        } else if (result.hasDiscrepancy) {
+          toast.warning("Box received with a discrepancy — sent to Disputes.");
+        } else {
+          toast.success("Box received — every piece matched.");
+        }
+        setConfirmOpen(false);
+        setMissingOpen(false);
+        setDiscrepancyNotes("");
+        setLookupCode(null);
+        setScanAlert(null);
+      } catch (err) {
+        toast.error(getErrorMessage(err));
+      } finally {
+        setConfirming(false);
+      }
+    },
+    [receivingBox, discrepancyNotes, confirmBox]
+  );
 
   return (
     <div className="space-y-6">
@@ -98,36 +173,62 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
             <h1 className="text-2xl font-bold">Box Receiving</h1>
           </div>
           <p className="text-sm text-muted-foreground mt-1">
-            Scan box QR codes to see contents and confirm receipt.
+            Scan a box to open it, then scan every piece inside.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={onBack}>Back</Button>
       </div>
 
-      {/* Scanner */}
+      {/* Scanner — opens a box, or counts a piece into the open one */}
       <div className="rounded-lg border p-4 bg-card">
         <div className="flex items-center gap-2 mb-3">
           <ScanBarcode className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-semibold">Scan Box QR / Barcode</h3>
+          <h3 className="text-sm font-semibold">
+            {receivingBox
+              ? `Scanning pieces into ${receivingBox.boxCode}`
+              : "Scan a box QR / barcode"}
+          </h3>
         </div>
         <BarcodeScanner onScan={handleScan} isActive={true} />
         <div className="flex gap-2 mt-3">
           <Input
-            placeholder="Type box code (e.g., TRF-abc12345-BOX-001)..."
+            placeholder={receivingBox ? "Scan a barcode or SKU label" : "Scan the box code"}
             value={scanInput}
             onChange={(e) => setScanInput(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && scanInput.trim()) handleScan(scanInput.trim());
+              if (e.key === "Enter" && scanInput.trim()) handleScan(scanInput);
             }}
             className="flex-1"
+            autoFocus
           />
-          <Button onClick={() => scanInput.trim() && handleScan(scanInput.trim())} size="sm">Lookup</Button>
+          <Button onClick={() => scanInput.trim() && handleScan(scanInput)} size="sm">
+            {receivingBox ? "Add" : "Open"}
+          </Button>
+          {receivingBox && (
+            <Button variant="ghost" size="sm" onClick={handleUndo}>
+              Undo last scan
+            </Button>
+          )}
           {lookupCode && (
-            <Button variant="ghost" size="sm" onClick={() => setLookupCode(null)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setLookupCode(null);
+                setScanAlert(null);
+              }}
+              title="Close this box"
+            >
               <X className="h-4 w-4" />
             </Button>
           )}
         </div>
+        {scanAlert && (
+          <p className="mt-2 flex items-center gap-1.5 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            {scanAlert}
+          </p>
+        )}
       </div>
 
       {/* Lookup Result */}
@@ -163,35 +264,72 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
               )}>
                 {boxLookup.status.toUpperCase()}
               </Badge>
-              <Badge variant="outline" className="text-xs">{boxLookup.totalItems} pcs</Badge>
+              {receivingBox ? (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-xs tabular-nums",
+                    scannedTotal === packedTotal && "text-green-600 border-green-500/30"
+                  )}
+                >
+                  {scannedTotal} / {packedTotal} scanned
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="text-xs">{boxLookup.totalItems} pcs</Badge>
+              )}
             </div>
           </div>
 
           <div>
             <p className="text-sm font-semibold mb-2">Contents</p>
             <div className="rounded border divide-y">
-              {boxLookup.items.map((item, i) => (
-                <div key={i} className="flex items-center justify-between px-3 py-2 text-sm">
-                  <div>
-                    <p className="font-medium">{item.styleName}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {item.size} / {item.color}
-                      {item.sku && <span className="ml-2">SKU: {item.sku}</span>}
-                    </p>
+              {boxLookup.items.map((item, i) => {
+                const done = item.scannedQuantity === item.quantity;
+                const over = item.scannedQuantity > item.quantity;
+                return (
+                  <div key={i} className="flex items-center justify-between px-3 py-2 text-sm">
+                    <div>
+                      <p className="font-medium">{item.styleName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {item.size} / {item.color}
+                        {item.sku && <span className="ml-2">SKU: {item.sku}</span>}
+                      </p>
+                    </div>
+                    {receivingBox ? (
+                      <span
+                        className={cn(
+                          "font-mono font-semibold tabular-nums",
+                          over ? "text-red-600" : done ? "text-green-600" : "text-muted-foreground"
+                        )}
+                      >
+                        {item.scannedQuantity} / {item.quantity}
+                      </span>
+                    ) : (
+                      <span className="font-mono font-semibold">x{item.quantity}</span>
+                    )}
                   </div>
-                  <span className="font-mono font-semibold">x{item.quantity}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
-          {boxLookup.status === "sealed" && boxLookup.transferStatus === "inTransit" && (
+          {receivingBox && (
             <div className="flex gap-2">
-              <Button className="flex-1" onClick={() => { setConfirmBoxId(boxLookup.boxId as Id<"transferBoxes">); setHasDiscrepancy(false); }}>
-                <CheckCircle2 className="h-4 w-4 mr-1" /> Confirm Receipt
+              <Button
+                className="flex-1"
+                disabled={scannedTotal === 0}
+                onClick={() => setConfirmOpen(true)}
+              >
+                <CheckCircle2 className="h-4 w-4 mr-1" /> Finish box
               </Button>
-              <Button variant="destructive" className="flex-1" onClick={() => { setConfirmBoxId(boxLookup.boxId as Id<"transferBoxes">); setHasDiscrepancy(true); }}>
-                <AlertTriangle className="h-4 w-4 mr-1" /> Report Discrepancy
+              <Button
+                variant="outline"
+                className="flex-1"
+                disabled={scannedTotal > 0}
+                title={scannedTotal > 0 ? "Pieces have been scanned from this box" : undefined}
+                onClick={() => setMissingOpen(true)}
+              >
+                <AlertTriangle className="h-4 w-4 mr-1" /> Box missing
               </Button>
             </div>
           )}
@@ -202,44 +340,93 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
           )}
           {boxLookup.status === "discrepancy" && (
             <div className="flex items-center gap-2 text-sm text-red-600">
-              <AlertTriangle className="h-4 w-4" /> This box was flagged with a discrepancy.
+              <AlertTriangle className="h-4 w-4" /> This box was received with a discrepancy.
             </div>
           )}
         </div>
       )}
 
-      <Dialog open={!!confirmBoxId} onOpenChange={(open) => { if (!open) setConfirmBoxId(null); }}>
+      {/* Finish: the server judges the discrepancy from the scans */}
+      <Dialog open={confirmOpen} onOpenChange={(open) => { if (!open) setConfirmOpen(false); }}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>{hasDiscrepancy ? "Report Discrepancy" : "Confirm Receipt"}</DialogTitle>
+            <DialogTitle>
+              {mismatches.length === 0 ? "Finish box" : "Finish box with a discrepancy"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            {hasDiscrepancy ? (
-              <>
-                <p className="text-sm text-muted-foreground">Describe what&apos;s wrong with this box.</p>
-                <div className="space-y-2">
-                  <Label>Discrepancy Details</Label>
-                  <Textarea
-                    placeholder="e.g., Missing 3 units, box was damaged..."
-                    value={discrepancyNotes}
-                    onChange={(e) => setDiscrepancyNotes(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-              </>
+            {mismatches.length === 0 ? (
+              <p className="text-sm">
+                All {packedTotal} pieces scanned and matched. The box will be received in full.
+              </p>
             ) : (
-              <p className="text-sm">Confirm all items in this box have been received and are in good condition?</p>
+              <>
+                <p className="text-sm text-muted-foreground">
+                  The box will be received for what was scanned, and the difference sent to
+                  Disputes:
+                </p>
+                <ul className="space-y-1 text-sm">
+                  {mismatches.map((item) => (
+                    <li key={item.sku} className="flex justify-between gap-2 font-mono text-xs">
+                      <span className="truncate">{item.sku}</span>
+                      <span className="shrink-0 tabular-nums text-red-600">
+                        {item.scannedQuantity} of {item.quantity}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
             )}
+            <div className="space-y-2">
+              <Label>Notes (optional)</Label>
+              <Textarea
+                placeholder="e.g., box crushed, stock damp…"
+                value={discrepancyNotes}
+                onChange={(e) => setDiscrepancyNotes(e.target.value)}
+                rows={2}
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmBoxId(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Keep scanning</Button>
             <Button
-              variant={hasDiscrepancy ? "destructive" : "default"}
-              onClick={handleConfirm}
-              disabled={confirming || (hasDiscrepancy && !discrepancyNotes.trim())}
+              variant={mismatches.length === 0 ? "default" : "destructive"}
+              onClick={() => finish(false)}
+              disabled={confirming}
             >
               {confirming ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
-              {hasDiscrepancy ? "Submit Discrepancy" : "Confirm Received"}
+              Finish box
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* A box that never arrived — the one way to close it, and it receives nothing */}
+      <Dialog open={missingOpen} onOpenChange={(open) => { if (!open) setMissingOpen(false); }}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Report box missing</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <p className="text-sm text-muted-foreground">
+              Nothing from this box will be received, and all {packedTotal} pieces go to
+              Disputes as missing. Use this only if the box did not arrive.
+            </p>
+            <div className="space-y-2">
+              <Label>Notes (optional)</Label>
+              <Textarea
+                placeholder="e.g., not on the delivery, driver says 3 boxes loaded…"
+                value={discrepancyNotes}
+                onChange={(e) => setDiscrepancyNotes(e.target.value)}
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMissingOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={() => finish(true)} disabled={confirming}>
+              {confirming ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Report missing
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -261,9 +448,12 @@ function PieceReceivingView({
     api.transfers.fulfillment.getTransferReceivingData,
     { transferId }
   );
+  // Every scan is counted on the server — the page never holds a count of its
+  // own, so there is nothing here that could be nudged up by hand.
+  const scanPiece = useMutation(api.transfers.fulfillment.scanTransferPiece);
+  const undoLastScan = useMutation(api.transfers.fulfillment.undoLastTransferScan);
   const confirmDelivery = useMutation(api.transfers.fulfillment.confirmTransferDelivery);
 
-  const [receivedCounts, setReceivedCounts] = useState<Record<string, number>>({});
   const [damagedIds, setDamagedIds] = useState<Set<string>>(new Set());
   const [damageNotes, setDamageNotes] = useState<Record<string, string>>({});
   const [scanAlert, setScanAlert] = useState<string | null>(null);
@@ -272,7 +462,6 @@ function PieceReceivingView({
   const [receiveError, setReceiveError] = useState<string | null>(null);
 
   useEffect(() => {
-    setReceivedCounts({});
     setDamagedIds(new Set());
     setDamageNotes({});
     setScanAlert(null);
@@ -282,23 +471,34 @@ function PieceReceivingView({
   }, [transferId]);
 
   const handleScan = useCallback(
-    (barcode: string) => {
-      if (!receivingData) return;
-      const matched = receivingData.items.find((item) => item.barcode === barcode);
-      if (matched) {
-        setReceivedCounts((prev) => ({
-          ...prev,
-          [matched.itemId]: (prev[matched.itemId] ?? 0) + 1,
-        }));
-        playBeep(880);
-        setScanAlert(null);
-      } else {
+    async (raw: string) => {
+      const code = raw.trim();
+      if (!code) return;
+      try {
+        const res = await scanPiece({ transferId, code });
+        const over = res.scannedQuantity > res.packedQuantity;
+        playBeep(over ? 440 : 880);
+        setScanAlert(
+          over
+            ? `${res.sku}: ${res.scannedQuantity} scanned, only ${res.packedQuantity} packed`
+            : null
+        );
+      } catch (err) {
         playBeep(300, 0.3);
-        setScanAlert(`Not in manifest: ${barcode}`);
+        setScanAlert(getErrorMessage(err));
       }
     },
-    [receivingData]
+    [scanPiece, transferId]
   );
+
+  async function handleUndo() {
+    try {
+      const res = await undoLastScan({ transferId });
+      setScanAlert(`Undid the last scan of ${res.sku}`);
+    } catch (err) {
+      setScanAlert(getErrorMessage(err));
+    }
+  }
 
   function toggleDamage(itemId: string) {
     const isCurrentlyDamaged = damagedIds.has(itemId);
@@ -317,12 +517,35 @@ function PieceReceivingView({
     }
   }
 
-  // The branch's count is what arrived. It may be short of what was packed —
-  // recorded against the sending branch — or over, which adds stock the sender
-  // never deducted and so has to be confirmed.
-  const isReadyToComplete =
-    receivingData !== undefined && receivingData !== null && receivingData.items.length > 0;
+  const scannedTotal =
+    receivingData?.items.reduce((sum, item) => sum + item.scannedQuantity, 0) ?? 0;
 
+  function submit(nothingArrived: boolean) {
+    setSubmitting(true);
+    setReceiveError(null);
+    const hasOverage =
+      !nothingArrived &&
+      (receivingData?.items.some((item) => item.scannedQuantity > item.packedQuantity) ?? false);
+    confirmDelivery({
+      transferId,
+      confirmOverage: hasOverage,
+      ...(nothingArrived ? { nothingArrived: true } : {}),
+      damageNotes: [...damagedIds].map((itemId) => ({
+        itemId: itemId as Id<"transferItems">,
+        notes: damageNotes[itemId]?.trim() || "Damaged (no notes provided)",
+      })),
+    }).then(
+      () => onBack(),
+      (err: unknown) => {
+        setReceiveError(getErrorMessage(err));
+        setSubmitting(false);
+      }
+    );
+  }
+
+  // The scans are what arrived. Short of what was packed is recorded against
+  // the sending branch; over adds stock the sender never deducted, so it has
+  // to be confirmed.
   function handleComplete() {
     if (!receivingData) return;
 
@@ -330,7 +553,7 @@ function PieceReceivingView({
     let hasOverage = false;
     for (const item of receivingData.items) {
       if (damagedIds.has(item.itemId)) continue;
-      const received = receivedCounts[item.itemId] ?? 0;
+      const received = item.scannedQuantity;
       if (received < item.packedQuantity) {
         differences.push(
           `${item.sku}: ${received} of ${item.packedQuantity} packed — ${item.packedQuantity - received} short`
@@ -338,14 +561,14 @@ function PieceReceivingView({
       } else if (received > item.packedQuantity) {
         hasOverage = true;
         differences.push(
-          `${item.sku}: ${received} counted, ${item.packedQuantity} packed — ${received - item.packedQuantity} extra`
+          `${item.sku}: ${received} scanned, ${item.packedQuantity} packed — ${received - item.packedQuantity} extra`
         );
       }
     }
     if (
       differences.length > 0 &&
       !window.confirm(
-        `The count doesn't match what was packed:\n\n${differences.join("\n")}\n\n` +
+        `The scans don't match what was packed:\n\n${differences.join("\n")}\n\n` +
           "Shortages are recorded against the sending branch." +
           (hasOverage
             ? " Extra pieces are added to your stock and flagged for the warehouse — confirm only if they are physically here."
@@ -355,26 +578,20 @@ function PieceReceivingView({
     ) {
       return;
     }
+    submit(false);
+  }
 
-    setSubmitting(true);
-    setReceiveError(null);
-    confirmDelivery({
-      transferId,
-      confirmOverage: hasOverage,
-      receivedItems: receivingData.items.map((item) => ({
-        itemId: item.itemId,
-        receivedQuantity: receivedCounts[item.itemId] ?? 0,
-        ...(damagedIds.has(item.itemId)
-          ? { damageNotes: damageNotes[item.itemId] || "Damaged (no notes provided)" }
-          : {}),
-      })),
-    }).then(
-      () => onBack(),
-      (err: unknown) => {
-        setReceiveError(getErrorMessage(err));
-        setSubmitting(false);
-      }
-    );
+  function handleNothingArrived() {
+    if (!receivingData) return;
+    const packed = receivingData.items.reduce((sum, item) => sum + item.packedQuantity, 0);
+    if (
+      !window.confirm(
+        `Report that nothing arrived?\n\nNo stock is received, and all ${packed} pieces go to Disputes as missing. Use this only if the delivery did not come.`
+      )
+    ) {
+      return;
+    }
+    submit(true);
   }
 
   return (
@@ -398,7 +615,7 @@ function PieceReceivingView({
                 : receivingData.driverArrivedAt
                   ? "arrived, handover not confirmed yet"
                   : "not marked arrived yet"}
-              . Your count completes this delivery.
+              . Your scans complete this delivery.
             </p>
           )}
         </div>
@@ -409,22 +626,26 @@ function PieceReceivingView({
       <div className="rounded-lg border bg-card p-4 space-y-3">
         <div className="flex items-center gap-2">
           <ScanBarcode className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-semibold">Barcode Scanner</h3>
+          <h3 className="text-sm font-semibold">Scan every piece — each scan receives one</h3>
         </div>
         <BarcodeScanner onScan={handleScan} isActive={true} />
         <div className="flex gap-2">
           <Input
-            placeholder="Type barcode and press Enter"
+            placeholder="Scan a barcode or SKU label"
             value={manualBarcode}
             onChange={(e) => setManualBarcode(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && manualBarcode.trim()) {
-                handleScan(manualBarcode.trim());
+                handleScan(manualBarcode);
                 setManualBarcode("");
               }
             }}
             className="max-w-xs"
+            autoFocus
           />
+          <Button variant="ghost" size="sm" onClick={handleUndo} disabled={scannedTotal === 0}>
+            Undo last scan
+          </Button>
         </div>
         {scanAlert && (
           <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
@@ -442,7 +663,7 @@ function PieceReceivingView({
               <TableHead>Product</TableHead>
               <TableHead>Size / Color</TableHead>
               <TableHead className="text-center">Packed</TableHead>
-              <TableHead className="text-center">Received</TableHead>
+              <TableHead className="text-center">Scanned</TableHead>
               <TableHead>Notes</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Actions</TableHead>
@@ -458,7 +679,7 @@ function PieceReceivingView({
                 </TableRow>
               ))}
             {receivingData?.items.map((item) => {
-              const received = receivedCounts[item.itemId] ?? 0;
+              const received = item.scannedQuantity;
               const isDamaged = damagedIds.has(item.itemId);
               const isOver = !isDamaged && received > item.packedQuantity;
               const isReceived = !isDamaged && received === item.packedQuantity;
@@ -472,24 +693,8 @@ function PieceReceivingView({
                   <TableCell>{item.styleName}</TableCell>
                   <TableCell className="text-sm">{item.size} / {item.color}</TableCell>
                   <TableCell className="text-center">{item.packedQuantity}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center justify-center gap-1">
-                      <Button
-                        variant="ghost" size="sm" className="h-6 w-6 p-0"
-                        onClick={() => setReceivedCounts((prev) => ({
-                          ...prev, [item.itemId]: Math.max(0, (prev[item.itemId] ?? 0) - 1),
-                        }))}
-                        disabled={received === 0}
-                      >−</Button>
-                      <span className="w-8 text-center">{received}</span>
-                      <Button
-                        variant="ghost" size="sm" className="h-6 w-6 p-0"
-                        onClick={() => setReceivedCounts((prev) => ({
-                          ...prev, [item.itemId]: (prev[item.itemId] ?? 0) + 1,
-                        }))}
-                      >+</Button>
-                    </div>
-                  </TableCell>
+                  {/* Counted by scanning only — there is nothing to type or tap here. */}
+                  <TableCell className="text-center font-semibold tabular-nums">{received}</TableCell>
                   <TableCell>
                     {isDamaged && (
                       <Input
@@ -532,10 +737,15 @@ function PieceReceivingView({
       </div>
 
       {/* Footer */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         {receiveError && <p className="text-sm text-destructive">{receiveError}</p>}
-        <div className="ml-auto">
-          <Button onClick={handleComplete} disabled={!isReadyToComplete || submitting}>
+        <div className="ml-auto flex gap-2">
+          {scannedTotal === 0 && receivingData && (
+            <Button variant="outline" onClick={handleNothingArrived} disabled={submitting}>
+              Nothing arrived
+            </Button>
+          )}
+          <Button onClick={handleComplete} disabled={scannedTotal === 0 || submitting}>
             {submitting ? "Saving..." : "Complete Receiving"}
           </Button>
         </div>

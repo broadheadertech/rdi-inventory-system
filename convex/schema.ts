@@ -836,6 +836,28 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_createdAt", ["createdAt"]),
 
+  // Every piece scanned while receiving stock. Receiving has no typed
+  // quantity: what a supplier receipt, a transfer or a box received is the
+  // number of scans on it that have not been undone. Exactly one of the three
+  // targets is set — a box scan carries boxId only, so a transfer's piece count
+  // never includes scans made against its boxes.
+  receivingScans: defineTable({
+    supplierReceiptId: v.optional(v.id("supplierReceipts")),
+    transferId: v.optional(v.id("transfers")),
+    boxId: v.optional(v.id("transferBoxes")),
+    variantId: v.id("variants"),
+    code: v.string(),                                   // exactly what was scanned
+    matchedBy: v.union(v.literal("barcode"), v.literal("sku")),
+    scannedById: v.id("users"),
+    scannedAt: v.number(),
+    // A mis-scan is marked undone, never deleted, so the log keeps what happened.
+    undoneAt: v.optional(v.number()),
+    undoneById: v.optional(v.id("users")),
+  })
+    .index("by_supplierReceipt", ["supplierReceiptId", "scannedAt"])
+    .index("by_transfer", ["transferId", "scannedAt"])
+    .index("by_box", ["boxId", "scannedAt"]),
+
   supplierReceiptItems: defineTable({
     receiptId: v.id("supplierReceipts"),
     variantId: v.id("variants"),

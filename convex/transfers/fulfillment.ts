@@ -2,6 +2,11 @@ import { query, mutation } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
+import {
+  latestStandingScan,
+  resolveScanCode,
+  transferScanCounts,
+} from "../_helpers/receivingScans";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { clearReservedOnDelivery } from "../_helpers/transferStock";
@@ -359,6 +364,9 @@ export const getTransferReceivingData = query({
       .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
       .collect();
 
+    // What has been scanned so far — the only count receiving has.
+    const scanned = await transferScanCounts(ctx, transfer._id);
+
     const enrichedItems = await Promise.all(
       items.map(async (item) => {
         const variant = await ctx.db.get(item.variantId);
@@ -373,6 +381,7 @@ export const getTransferReceivingData = query({
           styleName: style?.name ?? "Unknown",
           // Manifest shows what was packed, not original request
           packedQuantity: item.packedQuantity ?? item.requestedQuantity,
+          scannedQuantity: scanned.get(item.variantId as string) ?? 0,
         };
       })
     );
@@ -395,19 +404,110 @@ export const getTransferReceivingData = query({
   },
 });
 
+// ─── Scanning a transfer in, piece by piece ─────────────────────────────────
+// Receiving has no typed quantity. Each scan is its own call and its own row,
+// and confirmTransferDelivery counts those rows — so a transfer can only be
+// received for the pieces someone actually scanned.
+
+export const scanTransferPiece = mutation({
+  args: { transferId: v.id("transfers"), code: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    if (transfer.status !== "inTransit") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only in-transit transfers can be received.",
+      });
+    }
+
+    const match = await resolveScanCode(ctx, args.code);
+    if (!match) {
+      throw new ConvexError({
+        code: "NOT_FOUND",
+        message: `No product found for barcode/SKU "${args.code.trim()}".`,
+      });
+    }
+
+    const items = await ctx.db
+      .query("transferItems")
+      .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
+      .collect();
+    const line = items.find((i) => i.variantId === match.variant._id);
+    if (!line) {
+      throw new ConvexError({
+        code: "NOT_ON_TRANSFER",
+        message: `${match.variant.sku} is not on this transfer.`,
+      });
+    }
+
+    await ctx.db.insert("receivingScans", {
+      transferId: args.transferId,
+      variantId: match.variant._id,
+      code: args.code.trim(),
+      matchedBy: match.matchedBy,
+      scannedById: user._id,
+      scannedAt: Date.now(),
+    });
+
+    const counts = await transferScanCounts(ctx, args.transferId);
+    return {
+      itemId: line._id,
+      sku: match.variant.sku,
+      scannedQuantity: counts.get(match.variant._id as string) ?? 0,
+      packedQuantity: line.packedQuantity ?? line.requestedQuantity,
+    };
+  },
+});
+
+export const undoLastTransferScan = mutation({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
+
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer || transfer.status !== "inTransit") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only in-transit transfers can be received.",
+      });
+    }
+
+    const scan = await latestStandingScan(ctx, { transferId: args.transferId });
+    if (!scan) {
+      throw new ConvexError({ code: "NOTHING_TO_UNDO", message: "No scan to undo." });
+    }
+    await ctx.db.patch(scan._id, { undoneAt: Date.now(), undoneById: user._id });
+
+    const variant = await ctx.db.get(scan.variantId);
+    return { sku: variant?.sku ?? scan.code };
+  },
+});
+
 export const confirmTransferDelivery = mutation({
   args: {
     transferId: v.id("transfers"),
-    receivedItems: v.array(
-      v.object({
-        itemId: v.id("transferItems"),
-        receivedQuantity: v.number(),
-        damageNotes: v.optional(v.string()),
-      })
+    // What was received is counted from the scans, never sent by the page.
+    // Only a note about damage travels with the confirmation.
+    damageNotes: v.optional(
+      v.array(
+        v.object({
+          itemId: v.id("transferItems"),
+          notes: v.string(),
+        })
+      )
     ),
     // Counting more than was packed adds stock the source never deducted, so
     // the receiver has to confirm the extra pieces are physically there.
     confirmOverage: v.optional(v.boolean()),
+    // The delivery never arrived. Nothing can be scanned from goods that are
+    // not there, so this is the one way to close it — and it can only receive
+    // zero, so it opens no back door to a typed count.
+    nothingArrived: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, [...WAREHOUSE_ROLES, "manager"]);
@@ -425,33 +525,15 @@ export const confirmTransferDelivery = mutation({
     // A driver's delivery is finished by this count too. The driver only
     // records the handover; what arrived is what the receiver counts here.
 
-    // Validate quantities
-    for (const item of args.receivedItems) {
-      if (!Number.isInteger(item.receivedQuantity) || item.receivedQuantity < 0) {
-        throw new ConvexError({
-          code: "INVALID_ARGUMENT",
-          message: "receivedQuantity must be a non-negative integer.",
-        });
-      }
-    }
-
-    // H1 fix: verify item ownership BEFORE patching (learned from 6.2 code review)
     const transferItems = await ctx.db
       .query("transferItems")
       .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
       .collect();
 
-    // M3 fix: all items must be represented
-    if (args.receivedItems.length !== transferItems.length) {
-      throw new ConvexError({
-        code: "INVALID_ARGUMENT",
-        message: `Expected ${transferItems.length} items, got ${args.receivedItems.length}.`,
-      });
-    }
-
+    // Damage notes may only name lines on this transfer.
     const validItemIds = new Set(transferItems.map((row) => row._id as string));
-    for (const item of args.receivedItems) {
-      if (!validItemIds.has(item.itemId as string)) {
+    for (const note of args.damageNotes ?? []) {
+      if (!validItemIds.has(note.itemId as string)) {
         throw new ConvexError({
           code: "INVALID_ARGUMENT",
           message: "One or more items do not belong to this transfer.",
@@ -459,12 +541,40 @@ export const confirmTransferDelivery = mutation({
       }
     }
 
+    // The count is the scans. A line nobody scanned was received as zero.
+    const scanned = await transferScanCounts(ctx, args.transferId);
+    const notesByItem = new Map(
+      (args.damageNotes ?? [])
+        .filter((note) => note.notes.trim() !== "")
+        .map((note) => [note.itemId as string, note.notes.trim()])
+    );
+    const receivedItems = transferItems.map((row) => ({
+      itemId: row._id,
+      receivedQuantity: scanned.get(row.variantId as string) ?? 0,
+      damageNotes: notesByItem.get(row._id as string),
+    }));
+
+    const nothingScanned = receivedItems.every((item) => item.receivedQuantity === 0);
+    if (args.nothingArrived && !nothingScanned) {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "Pieces have been scanned, so the delivery did arrive. Undo them first.",
+      });
+    }
+    if (!args.nothingArrived && nothingScanned) {
+      throw new ConvexError({
+        code: "NOTHING_SCANNED",
+        message:
+          "Nothing has been scanned yet. Scan each piece, or report that nothing arrived.",
+      });
+    }
+
     const now = Date.now();
     const discrepancies: { sku: string; packed: number; received: number; type: string; damageNotes?: string }[] = [];
 
     const itemById = new Map(transferItems.map((row) => [row._id as string, row]));
 
-    const overCounted = args.receivedItems.some((item) => {
+    const overCounted = receivedItems.some((item) => {
       const original = itemById.get(item.itemId as string)!;
       return item.receivedQuantity > (original.packedQuantity ?? original.requestedQuantity);
     });
@@ -476,7 +586,7 @@ export const confirmTransferDelivery = mutation({
       });
     }
 
-    for (const item of args.receivedItems) {
+    for (const item of receivedItems) {
       const original = itemById.get(item.itemId as string)!;
       const packedQty = original.packedQuantity ?? original.requestedQuantity;
 

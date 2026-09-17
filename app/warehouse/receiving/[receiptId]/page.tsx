@@ -43,9 +43,8 @@ export default function ReceiptDetailPage() {
 
   const receipt = useQuery(api.suppliers.receiving.getReceipt, { receiptId });
   const scanItem = useMutation(api.suppliers.receiving.scanItem);
-  const setReceivedQuantity = useMutation(
-    api.suppliers.receiving.setReceivedQuantity
-  );
+  // No typed quantity: a line's count is its scans. A mis-scan is undone.
+  const undoLastScan = useMutation(api.suppliers.receiving.undoLastSupplierScan);
   const completeReceipt = useMutation(api.suppliers.receiving.completeReceipt);
 
   const [manualCode, setManualCode] = useState("");
@@ -74,6 +73,15 @@ export default function ReceiptDetailPage() {
         kind: "err",
         message: friendlyError(err, "That scan didn't work."),
       });
+    }
+  }
+
+  async function handleUndo() {
+    try {
+      const res = await undoLastScan({ receiptId });
+      setFeedback({ kind: "warn", message: `Undid the last scan of ${res.sku}` });
+    } catch (err) {
+      setFeedback({ kind: "err", message: friendlyError(err, "Nothing to undo.") });
     }
   }
 
@@ -178,13 +186,13 @@ export default function ReceiptDetailPage() {
       {isOpen && (
         <div className="space-y-3 rounded-lg border p-4">
           <div className="flex items-center gap-2 text-sm font-medium">
-            <ScanLine className="h-4 w-4" /> Scan items (each scan = 1 received)
+            <ScanLine className="h-4 w-4" /> Scan every piece — each scan receives one
           </div>
           <form onSubmit={handleManualScan} className="flex gap-2">
             <Input
               value={manualCode}
               onChange={(e) => setManualCode(e.target.value)}
-              placeholder="Scan or type SKU / barcode, then Enter"
+              placeholder="Scan a barcode or SKU label"
               autoFocus
             />
             <Button type="submit">Add</Button>
@@ -194,6 +202,9 @@ export default function ReceiptDetailPage() {
               onClick={() => setCameraOn((v) => !v)}
             >
               {cameraOn ? "Stop Camera" : "Use Camera"}
+            </Button>
+            <Button type="button" variant="ghost" onClick={handleUndo}>
+              Undo last scan
             </Button>
           </form>
 
@@ -272,23 +283,9 @@ export default function ReceiptDetailPage() {
                     </span>
                   </TableCell>
                   <TableCell className="text-right">{i.declaredQuantity}</TableCell>
-                  <TableCell className="text-right">
-                    {isOpen ? (
-                      <Input
-                        type="number"
-                        min={0}
-                        value={i.receivedQuantity}
-                        onChange={(e) =>
-                          setReceivedQuantity({
-                            itemId: i._id as Id<"supplierReceiptItems">,
-                            receivedQuantity: parseInt(e.target.value) || 0,
-                          })
-                        }
-                        className="ml-auto w-20 text-right"
-                      />
-                    ) : (
-                      i.receivedQuantity
-                    )}
+                  {/* Counted by scanning only — there is nothing to type here. */}
+                  <TableCell className="text-right font-medium tabular-nums">
+                    {i.receivedQuantity}
                   </TableCell>
                   <TableCell
                     className={`text-right font-medium ${

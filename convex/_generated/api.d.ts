@@ -19,6 +19,7 @@ import type * as _helpers_promoCalculations from "../_helpers/promoCalculations.
 import type * as _helpers_promoGiveaway from "../_helpers/promoGiveaway.js";
 import type * as _helpers_promoSettings from "../_helpers/promoSettings.js";
 import type * as _helpers_promoStacking from "../_helpers/promoStacking.js";
+import type * as _helpers_receivingScans from "../_helpers/receivingScans.js";
 import type * as _helpers_requireTerminal from "../_helpers/requireTerminal.js";
 import type * as _helpers_taxCalculations from "../_helpers/taxCalculations.js";
 import type * as _helpers_tenders from "../_helpers/tenders.js";
@@ -191,6 +192,7 @@ declare const fullApi: ApiFromModules<{
   "_helpers/promoGiveaway": typeof _helpers_promoGiveaway;
   "_helpers/promoSettings": typeof _helpers_promoSettings;
   "_helpers/promoStacking": typeof _helpers_promoStacking;
+  "_helpers/receivingScans": typeof _helpers_receivingScans;
   "_helpers/requireTerminal": typeof _helpers_requireTerminal;
   "_helpers/taxCalculations": typeof _helpers_taxCalculations;
   "_helpers/tenders": typeof _helpers_tenders;
