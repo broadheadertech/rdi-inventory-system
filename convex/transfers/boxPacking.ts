@@ -1,4 +1,4 @@
-import { query, mutation } from "../_generated/server";
+import { query, mutation, type QueryCtx, type MutationCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
@@ -495,6 +495,91 @@ export const getPackingProgress = query({
 
 // ─── Box QR Lookup (for branch receiving) ───────────────────────────────────
 
+/**
+ * The wrong items scanned into a box, grouped by what was scanned, with the box
+ * of the same transfer each stray product was actually packed in.
+ */
+export async function wrongScanSummary(
+  ctx: QueryCtx | MutationCtx,
+  box: Doc<"transferBoxes">
+) {
+  const rejected = await ctx.db
+    .query("receivingRejectedScans")
+    .withIndex("by_box", (q) => q.eq("boxId", box._id))
+    .collect();
+
+  // Where each product on this transfer was packed, so a stray can be sent home.
+  const transferBoxItems = await ctx.db
+    .query("transferBoxItems")
+    .withIndex("by_transfer", (q) => q.eq("transferId", box.transferId))
+    .collect();
+  const boxCodeById = new Map<string, string>();
+  for (const b of await ctx.db
+    .query("transferBoxes")
+    .withIndex("by_transfer", (q) => q.eq("transferId", box.transferId))
+    .collect()) {
+    boxCodeById.set(b._id as string, b.boxCode);
+  }
+
+  const groups = new Map<
+    string,
+    {
+      reason: "notInBox" | "unknownCode";
+      code: string;
+      sku: string | null;
+      label: string;
+      count: number;
+      packedInBoxCodes: string[];
+    }
+  >();
+
+  for (const scan of rejected) {
+    const key = scan.variantId ? `v:${scan.variantId}` : `c:${scan.code}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+
+    let sku: string | null = null;
+    let label = scan.code;
+    let packedInBoxCodes: string[] = [];
+    if (scan.variantId) {
+      const variant = await ctx.db.get(scan.variantId);
+      const style = variant ? await ctx.db.get(variant.styleId) : null;
+      sku = variant?.sku ?? null;
+      label = variant
+        ? `${style?.name ?? "Unknown"} · ${variant.size} / ${variant.color}`
+        : scan.code;
+      packedInBoxCodes = [
+        ...new Set(
+          transferBoxItems
+            .filter((bi) => bi.variantId === scan.variantId && bi.boxId !== box._id)
+            .map((bi) => boxCodeById.get(bi.boxId as string))
+            .filter((code): code is string => !!code)
+        ),
+      ];
+    }
+
+    groups.set(key, {
+      reason: scan.reason,
+      code: scan.code,
+      sku,
+      label,
+      count: 1,
+      packedInBoxCodes,
+    });
+  }
+
+  const items = [...groups.values()].sort((a, b) => b.count - a.count);
+  return {
+    total: rejected.length,
+    notInBox: rejected.filter((r) => r.reason === "notInBox").length,
+    unknownCode: rejected.filter((r) => r.reason === "unknownCode").length,
+    items,
+  };
+}
+
 export const lookupBoxByCode = query({
   args: { boxCode: v.string() },
   handler: async (ctx, args) => {
@@ -548,6 +633,7 @@ export const lookupBoxByCode = query({
       fromBranchName: fromBranch?.name ?? "Unknown",
       toBranchName: toBranch?.name ?? "Unknown",
       items: enrichedItems,
+      wrongScans: await wrongScanSummary(ctx, box),
     };
   },
 });
@@ -573,12 +659,23 @@ export const scanBoxPiece = mutation({
       });
     }
 
-    const match = await resolveScanCode(ctx, args.code);
+    const code = args.code.trim();
+    const now = Date.now();
+
+    const match = await resolveScanCode(ctx, code);
     if (!match) {
-      throw new ConvexError({
-        code: "NOT_FOUND",
-        message: `No product found for barcode/SKU "${args.code.trim()}".`,
+      await ctx.db.insert("receivingRejectedScans", {
+        boxId: args.boxId,
+        code,
+        reason: "unknownCode",
+        scannedById: user._id,
+        scannedAt: now,
       });
+      return {
+        ok: false as const,
+        reason: "unknownCode" as const,
+        message: `No product found for "${code}".`,
+      };
     }
 
     const packed = await ctx.db
@@ -589,23 +686,42 @@ export const scanBoxPiece = mutation({
       .filter((bi) => bi.variantId === match.variant._id)
       .reduce((sum, bi) => sum + bi.quantity, 0);
     if (packedQuantity === 0) {
-      throw new ConvexError({
-        code: "NOT_IN_BOX",
-        message: `${match.variant.sku} was not packed in this box.`,
+      await ctx.db.insert("receivingRejectedScans", {
+        boxId: args.boxId,
+        code,
+        reason: "notInBox",
+        variantId: match.variant._id,
+        scannedById: user._id,
+        scannedAt: now,
       });
+      // Say where it does belong, when it is on this transfer at all.
+      const elsewhere = await ctx.db
+        .query("transferBoxItems")
+        .withIndex("by_transfer", (q) => q.eq("transferId", box.transferId))
+        .collect();
+      const home = elsewhere.find((bi) => bi.variantId === match.variant._id);
+      const homeBox = home ? await ctx.db.get(home.boxId) : null;
+      return {
+        ok: false as const,
+        reason: "notInBox" as const,
+        message: homeBox
+          ? `Wrong item: ${match.variant.sku} is packed in ${homeBox.boxCode}, not this box.`
+          : `Wrong item: ${match.variant.sku} is not on this transfer.`,
+      };
     }
 
     await ctx.db.insert("receivingScans", {
       boxId: args.boxId,
       variantId: match.variant._id,
-      code: args.code.trim(),
+      code,
       matchedBy: match.matchedBy,
       scannedById: user._id,
-      scannedAt: Date.now(),
+      scannedAt: now,
     });
 
     const counts = await boxScanCounts(ctx, args.boxId);
     return {
+      ok: true as const,
       sku: match.variant.sku,
       scannedQuantity: counts.get(match.variant._id as string) ?? 0,
       packedQuantity,
@@ -708,9 +824,22 @@ export const confirmBoxReceipt = mutation({
 
     const hasDiscrepancy = differences.length > 0;
     const receiverNotes = args.discrepancyNotes?.trim();
+    const wrong = await wrongScanSummary(ctx, box);
+    const wrongNote =
+      wrong.total > 0
+        ? `${wrong.total} wrong-item scan${wrong.total === 1 ? "" : "s"}: ` +
+          wrong.items
+            .map(
+              (w) =>
+                `${w.sku ?? w.code} x${w.count}` +
+                (w.packedInBoxCodes.length > 0 ? ` (packed in ${w.packedInBoxCodes.join(", ")})` : "")
+            )
+            .join(", ")
+        : null;
     const discrepancyNotes = [
       ...(args.boxMissing ? ["Box missing — nothing received"] : []),
       ...differences,
+      ...(wrongNote ? [wrongNote] : []),
       ...(receiverNotes ? [receiverNotes] : []),
     ].join("; ");
 

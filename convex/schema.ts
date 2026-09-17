@@ -858,6 +858,19 @@ export default defineSchema({
     .index("by_transfer", ["transferId", "scannedAt"])
     .index("by_box", ["boxId", "scannedAt"]),
 
+  // A scan refused while receiving a box: a product that was not packed in it,
+  // or a code that matches no product at all. Nothing here changes a count —
+  // these are kept because a run of wrong items is the sign of mixed-up boxes,
+  // and knowing which box a stray piece was packed in is how they get sorted.
+  receivingRejectedScans: defineTable({
+    boxId: v.id("transferBoxes"),
+    code: v.string(),
+    reason: v.union(v.literal("notInBox"), v.literal("unknownCode")),
+    variantId: v.optional(v.id("variants")),   // set when the code is a real product
+    scannedById: v.id("users"),
+    scannedAt: v.number(),
+  }).index("by_box", ["boxId", "scannedAt"]),
+
   supplierReceiptItems: defineTable({
     receiptId: v.id("supplierReceipts"),
     variantId: v.id("variants"),

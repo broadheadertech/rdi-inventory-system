@@ -133,6 +133,12 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
           boxId: receivingBox.boxId as Id<"transferBoxes">,
           code,
         });
+        // A wrong item is recorded on the box and counted, but receives nothing.
+        if (!res.ok) {
+          playBeep(300, 0.3);
+          setScanAlert(res.message);
+          return;
+        }
         playBeep(res.scannedQuantity > res.packedQuantity ? 440 : 880);
         setScanAlert(
           res.scannedQuantity > res.packedQuantity
@@ -309,7 +315,7 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
           {receivingBox ? (
             <div className="space-y-3">
               {/* Where the box stands: what matched, what is still to find */}
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <div className="rounded-md border border-green-500/30 bg-green-50/60 p-3">
                   <p className="text-xs text-green-700">Matched</p>
                   <p className="text-2xl font-bold tabular-nums text-green-700">
@@ -343,7 +349,77 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
                     <p className="text-2xl font-bold tabular-nums text-red-700">{extraTotal}</p>
                   </div>
                 )}
+                {/* Scans refused — pieces from another box, or codes that match nothing */}
+                <div
+                  className={cn(
+                    "rounded-md border p-3",
+                    receivingBox.wrongScans.total > 0
+                      ? "border-red-500/30 bg-red-50/60"
+                      : "border-border bg-muted/30"
+                  )}
+                >
+                  <p
+                    className={cn(
+                      "text-xs",
+                      receivingBox.wrongScans.total > 0 ? "text-red-700" : "text-muted-foreground"
+                    )}
+                  >
+                    Wrong item
+                  </p>
+                  <p
+                    className={cn(
+                      "text-2xl font-bold tabular-nums",
+                      receivingBox.wrongScans.total > 0 ? "text-red-700" : "text-muted-foreground"
+                    )}
+                  >
+                    {receivingBox.wrongScans.total}
+                  </p>
+                </div>
               </div>
+
+              {/* What the wrong items were, and where each one belongs */}
+              {receivingBox.wrongScans.total > 0 && (
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-red-700">
+                    Wrong items scanned · {receivingBox.wrongScans.total}
+                  </p>
+                  <div className="divide-y rounded border border-red-500/30">
+                    {receivingBox.wrongScans.items.map((w) => (
+                      <div
+                        key={`${w.reason}:${w.sku ?? w.code}`}
+                        className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">
+                            {w.reason === "unknownCode" ? "Unknown code" : w.label}
+                          </p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {w.reason === "unknownCode" ? (
+                              <span className="font-mono">{w.code}</span>
+                            ) : w.packedInBoxCodes.length > 0 ? (
+                              <>
+                                {w.sku && <span className="mr-2 font-mono">{w.sku}</span>}
+                                belongs in{" "}
+                                <span className="font-mono font-medium text-foreground">
+                                  {w.packedInBoxCodes.join(", ")}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                {w.sku && <span className="mr-2 font-mono">{w.sku}</span>}
+                                not on this transfer
+                              </>
+                            )}
+                          </p>
+                        </div>
+                        <span className="shrink-0 font-semibold tabular-nums text-red-700">
+                          ×{w.count}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Exactly what to scan next */}
               {stillToScan.length > 0 ? (
