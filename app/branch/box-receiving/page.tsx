@@ -87,6 +87,30 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
     ? receivingBox.items.filter((item) => item.scannedQuantity !== item.quantity)
     : [];
 
+  // A piece matches when it was packed in the box. Scanning a line past what
+  // was packed does not add to "matched" — that is an extra, shown on its own.
+  const matchedTotal = receivingBox
+    ? receivingBox.items.reduce(
+        (sum, item) => sum + Math.min(item.scannedQuantity, item.quantity),
+        0
+      )
+    : 0;
+  const missingTotal = packedTotal - matchedTotal;
+  const extraTotal = receivingBox
+    ? receivingBox.items.reduce(
+        (sum, item) => sum + Math.max(0, item.scannedQuantity - item.quantity),
+        0
+      )
+    : 0;
+
+  // What is still to scan leads the list; finished lines drop to the bottom.
+  const stillToScan = receivingBox
+    ? receivingBox.items.filter((item) => item.scannedQuantity < item.quantity)
+    : [];
+  const finishedLines = receivingBox
+    ? receivingBox.items.filter((item) => item.scannedQuantity >= item.quantity)
+    : [];
+
   const openBox = useCallback((code: string) => {
     setLookupCode(code.trim().toUpperCase());
     setScanAlert(null);
@@ -269,10 +293,12 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
                   variant="outline"
                   className={cn(
                     "text-xs tabular-nums",
-                    scannedTotal === packedTotal && "text-green-600 border-green-500/30"
+                    missingTotal === 0
+                      ? "text-green-600 border-green-500/30"
+                      : "text-amber-700 border-amber-500/30"
                   )}
                 >
-                  {scannedTotal} / {packedTotal} scanned
+                  {missingTotal === 0 ? "All matched" : `${missingTotal} missing`}
                 </Badge>
               ) : (
                 <Badge variant="outline" className="text-xs">{boxLookup.totalItems} pcs</Badge>
@@ -280,13 +306,133 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
             </div>
           </div>
 
-          <div>
-            <p className="text-sm font-semibold mb-2">Contents</p>
-            <div className="rounded border divide-y">
-              {boxLookup.items.map((item, i) => {
-                const done = item.scannedQuantity === item.quantity;
-                const over = item.scannedQuantity > item.quantity;
-                return (
+          {receivingBox ? (
+            <div className="space-y-3">
+              {/* Where the box stands: what matched, what is still to find */}
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                <div className="rounded-md border border-green-500/30 bg-green-50/60 p-3">
+                  <p className="text-xs text-green-700">Matched</p>
+                  <p className="text-2xl font-bold tabular-nums text-green-700">
+                    {matchedTotal}
+                    <span className="text-sm font-medium text-green-700/70"> / {packedTotal}</span>
+                  </p>
+                </div>
+                <div
+                  className={cn(
+                    "rounded-md border p-3",
+                    missingTotal > 0
+                      ? "border-amber-500/30 bg-amber-50/60"
+                      : "border-green-500/30 bg-green-50/60"
+                  )}
+                >
+                  <p className={cn("text-xs", missingTotal > 0 ? "text-amber-700" : "text-green-700")}>
+                    Still missing
+                  </p>
+                  <p
+                    className={cn(
+                      "text-2xl font-bold tabular-nums",
+                      missingTotal > 0 ? "text-amber-700" : "text-green-700"
+                    )}
+                  >
+                    {missingTotal}
+                  </p>
+                </div>
+                {extraTotal > 0 && (
+                  <div className="rounded-md border border-red-500/30 bg-red-50/60 p-3">
+                    <p className="text-xs text-red-700">Extra</p>
+                    <p className="text-2xl font-bold tabular-nums text-red-700">{extraTotal}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Exactly what to scan next */}
+              {stillToScan.length > 0 ? (
+                <div>
+                  <p className="mb-2 text-sm font-semibold">
+                    Still to scan · {stillToScan.length} item{stillToScan.length === 1 ? "" : "s"}
+                  </p>
+                  <div className="divide-y rounded border">
+                    {stillToScan.map((item) => (
+                      <div
+                        key={item.variantId}
+                        className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate font-medium">{item.styleName}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {item.size} / {item.color}
+                            {item.sku && <span className="ml-2 font-mono">{item.sku}</span>}
+                          </p>
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <p className="font-semibold tabular-nums text-amber-700">
+                            {item.quantity - item.scannedQuantity} missing
+                          </p>
+                          <p className="text-[11px] tabular-nums text-muted-foreground">
+                            {item.scannedQuantity} of {item.quantity} scanned
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-sm text-green-700">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Every piece in this box has been scanned.
+                </p>
+              )}
+
+              {/* Done — out of the way, but there to check */}
+              {finishedLines.length > 0 && (
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-muted-foreground">
+                    Complete · {finishedLines.length} item{finishedLines.length === 1 ? "" : "s"}
+                  </p>
+                  <div className="divide-y rounded border">
+                    {finishedLines.map((item) => {
+                      const extra = item.scannedQuantity - item.quantity;
+                      return (
+                        <div
+                          key={item.variantId}
+                          className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <CheckCircle2
+                              className={cn(
+                                "h-4 w-4 shrink-0",
+                                extra > 0 ? "text-red-600" : "text-green-600"
+                              )}
+                            />
+                            <p className="truncate">
+                              {item.styleName}{" "}
+                              <span className="text-xs text-muted-foreground">
+                                {item.size} / {item.color}
+                              </span>
+                            </p>
+                          </div>
+                          <span
+                            className={cn(
+                              "shrink-0 font-mono text-xs tabular-nums",
+                              extra > 0 ? "font-semibold text-red-600" : "text-green-600"
+                            )}
+                          >
+                            {extra > 0
+                              ? `${item.scannedQuantity} of ${item.quantity} · +${extra} extra`
+                              : `${item.quantity} of ${item.quantity}`}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm font-semibold mb-2">Contents</p>
+              <div className="rounded border divide-y">
+                {boxLookup.items.map((item, i) => (
                   <div key={i} className="flex items-center justify-between px-3 py-2 text-sm">
                     <div>
                       <p className="font-medium">{item.styleName}</p>
@@ -295,23 +441,12 @@ function BoxReceivingView({ onBack }: { onBack: () => void }) {
                         {item.sku && <span className="ml-2">SKU: {item.sku}</span>}
                       </p>
                     </div>
-                    {receivingBox ? (
-                      <span
-                        className={cn(
-                          "font-mono font-semibold tabular-nums",
-                          over ? "text-red-600" : done ? "text-green-600" : "text-muted-foreground"
-                        )}
-                      >
-                        {item.scannedQuantity} / {item.quantity}
-                      </span>
-                    ) : (
-                      <span className="font-mono font-semibold">x{item.quantity}</span>
-                    )}
+                    <span className="font-mono font-semibold">x{item.quantity}</span>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {receivingBox && (
             <div className="flex gap-2">
