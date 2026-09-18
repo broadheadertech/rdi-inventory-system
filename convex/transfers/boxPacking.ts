@@ -3,7 +3,10 @@ import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
-import { clearReservedOnDelivery } from "../_helpers/transferStock";
+import {
+  clearReservedOnDelivery,
+  releaseUnpackedStock,
+} from "../_helpers/transferStock";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
 import { raiseBoxDispute } from "../disputes";
 import {
@@ -364,6 +367,10 @@ export const completeBoxPacking = mutation({
       const packed = packedByVariant.get(ti.variantId as string) ?? 0;
       await ctx.db.patch(ti._id, { packedQuantity: packed });
     }
+
+    // Anything requested but not boxed goes back on the source's shelf. It was
+    // charged at request time and is not travelling anywhere.
+    await releaseUnpackedStock(ctx, args.transferId);
 
     const now = Date.now();
     await ctx.db.patch(args.transferId, {

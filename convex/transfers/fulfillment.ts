@@ -9,7 +9,10 @@ import {
 } from "../_helpers/receivingScans";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { _logAuditEntry } from "../_helpers/auditLog";
-import { clearReservedOnDelivery } from "../_helpers/transferStock";
+import {
+  clearReservedOnDelivery,
+  releaseUnpackedStock,
+} from "../_helpers/transferStock";
 import {
   custodyTimeline,
   requireDestinationBranch,
@@ -197,6 +200,11 @@ export const completeTransferPacking = mutation({
     for (const item of args.packedItems) {
       await ctx.db.patch(item.itemId, { packedQuantity: item.packedQuantity });
     }
+
+    // The source was charged for the whole request. Only the packed pieces are
+    // going anywhere, so the rest goes back on its shelf now — before, it was
+    // charged to nobody and simply disappeared.
+    await releaseUnpackedStock(ctx, args.transferId);
 
     const now = Date.now();
     await ctx.db.patch(args.transferId, {

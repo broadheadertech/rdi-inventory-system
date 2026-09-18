@@ -927,6 +927,35 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_supplier_status", ["supplierId", "status"]),
 
+  // The batch slices a transfer is holding at its source.
+  //
+  // Stock is taken off the source the moment a transfer is requested, eating
+  // the oldest batches to pay for it. Each slice eaten is written down here so
+  // that releasing gives back exactly what was taken — same cost, same received
+  // date — instead of inventing a fresh batch and quietly making old stock look
+  // new. A hold disappears when its units are released or when the goods are
+  // delivered and genuinely gone.
+  transferStockHolds: defineTable({
+    transferId: v.id("transfers"),
+    branchId: v.id("branches"),
+    variantId: v.id("variants"),
+    quantity: v.number(),
+    // A faithful copy of the batch this came from, to rebuild it.
+    costPriceCentavos: v.number(),
+    receivedAt: v.number(),
+    source: v.union(
+      v.literal("supplier"),
+      v.literal("transfer"),
+      v.literal("adjustment"),
+      v.literal("legacy"),
+    ),
+    sourceId: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_transfer", ["transferId"])
+    .index("by_transfer_variant", ["transferId", "variantId"]),
+
   inventoryBatches: defineTable({
     branchId: v.id("branches"),
     variantId: v.id("variants"),

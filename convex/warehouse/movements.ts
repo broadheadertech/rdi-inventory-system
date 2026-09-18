@@ -16,7 +16,7 @@ import type { QueryCtx, MutationCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
-import { releaseHeldStock } from "../_helpers/transferStock";
+import { holdStockForTransfer, releaseHeldStock } from "../_helpers/transferStock";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { internal } from "../_generated/api";
 
@@ -217,33 +217,6 @@ export const createMovement = mutation({
 
     const now = Date.now();
 
-    // Hold stock: quantity → reserved, consume FIFO batches at source
-    for (const item of resolved) {
-      await ctx.db.patch(item.inventoryId, {
-        quantity: item.currentQty - item.quantity,
-        reservedQuantity: item.currentReserved + item.quantity,
-        updatedAt: now,
-      });
-
-      let remaining = item.quantity;
-      const batches = await ctx.db
-        .query("inventoryBatches")
-        .withIndex("by_branch_variant_received", (q) =>
-          q.eq("branchId", args.fromBranchId).eq("variantId", item.variantId)
-        )
-        .collect();
-      for (const batch of batches) {
-        if (remaining <= 0) break;
-        const take = Math.min(batch.quantity, remaining);
-        if (take === batch.quantity) {
-          await ctx.db.delete(batch._id);
-        } else {
-          await ctx.db.patch(batch._id, { quantity: batch.quantity - take });
-        }
-        remaining -= take;
-      }
-    }
-
     // Create the movement as a Request — it flows through the staged pipeline
     // (Approve → Pack → Assign/Dispatch → Confirm). Source stock is held now.
     const transferId = await ctx.db.insert("transfers", {
@@ -264,6 +237,16 @@ export const createMovement = mutation({
         requestedQuantity: item.quantity,
       });
     }
+
+    // Charge the source, recording every batch slice against this movement.
+    await holdStockForTransfer(ctx, {
+      transferId,
+      fromBranchId: args.fromBranchId,
+      items: resolved.map((item) => ({
+        variantId: item.variantId,
+        quantity: item.quantity,
+      })),
+    });
 
     await ctx.scheduler.runAfter(0, internal.logistics.notifications._processNotification, {
       type: "transfer_requested",

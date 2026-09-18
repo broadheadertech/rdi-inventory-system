@@ -9,6 +9,7 @@ import { internalMutation, query, mutation } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
+import { holdStockForTransfer } from "../_helpers/transferStock";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { getAllVariantSnapshots, getPHTDate } from "../snapshots/readers";
 
@@ -245,13 +246,23 @@ export const acceptSuggestion = mutation({
         q.eq("branchId", args.fromBranchId).eq("variantId", suggestion.variantId)
       )
       .unique();
-    if (!sourceInventory || sourceInventory.quantity <= 0) throw new ConvexError({ code: "INVALID_ARGUMENT", message: "Source branch has no stock of this variant." });
+    // Enough for the whole suggestion, not merely some. Accepting a
+    // suggestion charges the source exactly as any other request does, so a
+    // source with 2 pieces cannot be asked for 20.
+    const available = sourceInventory?.quantity ?? 0;
+    if (available < suggestion.suggestedQuantity) {
+      throw new ConvexError({
+        code: "INSUFFICIENT_STOCK",
+        message: `Not enough stock at source: need ${suggestion.suggestedQuantity}, have ${available}.`,
+      });
+    }
 
     const now = Date.now();
     const transferId = await ctx.db.insert("transfers", {
       fromBranchId: args.fromBranchId,
       toBranchId: suggestion.branchId,
       requestedById: user._id,
+      type: "stockRequest" as const,
       status: "requested",
       notes: `AI Restock: ${suggestion.rationale}`,
       createdAt: now,
@@ -262,6 +273,18 @@ export const acceptSuggestion = mutation({
       transferId,
       variantId: suggestion.variantId,
       requestedQuantity: suggestion.suggestedQuantity,
+    });
+
+    // This never held the stock it asked for. Everything downstream assumed it
+    // had: cancelling "returned" units the source was never charged, and
+    // delivery credited the destination for goods the source still had on its
+    // shelf — stock invented out of nothing, twice over.
+    await holdStockForTransfer(ctx, {
+      transferId,
+      fromBranchId: args.fromBranchId,
+      items: [
+        { variantId: suggestion.variantId, quantity: suggestion.suggestedQuantity },
+      ],
     });
 
     await ctx.db.patch(args.suggestionId, {

@@ -4,7 +4,7 @@ import type { Id } from "../_generated/dataModel";
 import { withBranchScope, type BranchScope } from "../_helpers/withBranchScope";
 import { HQ_ROLES, BRANCH_MANAGEMENT_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
-import { releaseHeldStock } from "../_helpers/transferStock";
+import { holdStockForTransfer, releaseHeldStock } from "../_helpers/transferStock";
 import { internal } from "../_generated/api";
 
 // L2 fix: build the combined role set without duplicating "admin"
@@ -192,35 +192,6 @@ export async function createTransferForRequester(
       });
     }
 
-    // Hold stock: deduct from quantity, add to reservedQuantity
-    for (const item of resolvedItems) {
-      await ctx.db.patch(item.inventoryId, {
-        quantity: item.currentQty - item.requestedQuantity,
-        reservedQuantity: item.currentReserved + item.requestedQuantity,
-        updatedAt: Date.now(),
-      });
-
-      // FIFO: consume oldest batches at source branch
-      let remaining = item.requestedQuantity;
-      const batches = await ctx.db
-        .query("inventoryBatches")
-        .withIndex("by_branch_variant_received", (q) =>
-          q.eq("branchId", args.fromBranchId).eq("variantId", item.variantId)
-        )
-        .collect();
-
-      for (const batch of batches) {
-        if (remaining <= 0) break;
-        const take = Math.min(batch.quantity, remaining);
-        if (take === batch.quantity) {
-          await ctx.db.delete(batch._id);
-        } else {
-          await ctx.db.patch(batch._id, { quantity: batch.quantity - take });
-        }
-        remaining -= take;
-      }
-    }
-
     const now = Date.now();
     const newTransferId = await ctx.db.insert("transfers", {
       fromBranchId: args.fromBranchId,
@@ -240,6 +211,17 @@ export async function createTransferForRequester(
         requestedQuantity: item.requestedQuantity,
       });
     }
+
+    // The source is charged now, and every batch slice it gives up is recorded
+    // against this transfer so a cancel can hand back exactly what was taken.
+    await holdStockForTransfer(ctx, {
+      transferId: newTransferId,
+      fromBranchId: args.fromBranchId,
+      items: resolvedItems.map((item) => ({
+        variantId: item.variantId,
+        quantity: item.requestedQuantity,
+      })),
+    });
 
     await _logAuditEntry(ctx, {
       action: "transfer.create",
