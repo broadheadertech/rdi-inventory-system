@@ -17,6 +17,7 @@ import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
 import { holdStockForTransfer, releaseHeldStock } from "../_helpers/transferStock";
+import { requireSourceBranch } from "../_helpers/custody";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { internal } from "../_generated/api";
 
@@ -266,12 +267,11 @@ export const dispatchViaCourier = mutation({
     trackingNumber: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, MOVEMENT_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Movement not found." });
     }
+    const user = await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "packed") {
       throw new ConvexError({
         code: "INVALID_STATE",

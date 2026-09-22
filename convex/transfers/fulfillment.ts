@@ -16,6 +16,7 @@ import {
 import {
   custodyTimeline,
   requireDestinationBranch,
+  requireSourceBranch,
   HANDSHAKE_LIMITS,
 } from "../_helpers/custody";
 import { generateInternalInvoice } from "../_helpers/internalInvoice";
@@ -140,12 +141,13 @@ export const completeTransferPacking = mutation({
     expectedDeliveryDays: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    // Packed where the goods are: the warehouse for its own sends, and a
+    // branch for the returns and transfers it is sending out itself.
+    const user = await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "approved") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -284,12 +286,11 @@ export const listPackedTransfers = query({
 export const scanBoxOut = mutation({
   args: { transferId: v.id("transfers"), boxCode: v.string() },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    const user = await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "packed") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -339,10 +340,14 @@ export const scanBoxOut = mutation({
 export const undoLastBoxOut = mutation({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    await requireRole(ctx, WAREHOUSE_ROLES);
+    const loadTransfer = await ctx.db.get(args.transferId);
+    if (!loadTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    await requireSourceBranch(ctx, loadTransfer);
 
-    const transfer = await ctx.db.get(args.transferId);
-    if (!transfer || transfer.status !== "packed") {
+    const transfer = loadTransfer;
+    if (transfer.status !== "packed") {
       throw new ConvexError({
         code: "INVALID_STATE",
         message: "Only a packed transfer can be loaded out.",
@@ -386,12 +391,11 @@ export const confirmLoadOut = mutation({
     confirmShortLoad: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    const user = await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "packed") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -463,12 +467,11 @@ export const confirmLoadOut = mutation({
 export const reopenLoadOut = mutation({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    const user = await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "packed") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -498,12 +501,11 @@ export const reopenLoadOut = mutation({
 export const markTransferInTransit = mutation({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    const user = await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "packed") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -1161,5 +1163,121 @@ export const listStalledHandshakes = query({
 
     // Longest wait first — the one most likely to have gone wrong.
     return rows.sort((a, b) => a.since - b.since);
+  },
+});
+
+// ─── A branch's own outgoing transfers ──────────────────────────────────────
+// A store can raise a return or a transfer to another branch, and then has to
+// send it: pack it, load it out and dispatch it. Those steps used to be shut
+// to everyone but warehouse staff, which left a branch able to create a send
+// it had no way to move.
+
+export const listBranchOutboundTransfers = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await withBranchScope(ctx);
+    if (!scope.branchId) return [];
+
+    const transfers = await ctx.db
+      .query("transfers")
+      .withIndex("by_from_branch", (q) => q.eq("fromBranchId", scope.branchId!))
+      .collect();
+
+    // Everything still in this branch's hands: approved and waiting to be
+    // packed, or packed and waiting to go.
+    const outbound = transfers.filter(
+      (t) => t.status === "approved" || t.status === "packed"
+    );
+
+    const branches = await ctx.db.query("branches").collect();
+    const nameById = new Map(branches.map((b) => [b._id as string, b.name]));
+
+    return await Promise.all(
+      outbound.map(async (transfer) => {
+        const items = await ctx.db
+          .query("transferItems")
+          .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+          .collect();
+        const boxes = await ctx.db
+          .query("transferBoxes")
+          .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+          .collect();
+
+        return {
+          _id: transfer._id,
+          type: transfer.type ?? null,
+          status: transfer.status,
+          toBranchName: nameById.get(transfer.toBranchId as string) ?? "Unknown",
+          createdAt: transfer.createdAt,
+          approvedAt: transfer.approvedAt ?? null,
+          packedAt: transfer.packedAt ?? null,
+          loadedAt: transfer.loadedAt ?? null,
+          handedToName: transfer.handedToName ?? null,
+          itemCount: items.length,
+          requestedPieces: items.reduce((sum, i) => sum + i.requestedQuantity, 0),
+          packedPieces: items.reduce((sum, i) => sum + (i.packedQuantity ?? 0), 0),
+          boxCount: boxes.length,
+          loadedBoxes: boxes.filter((b) => b.loadedAt !== undefined).length,
+        };
+      })
+    );
+  },
+});
+
+/** One outgoing transfer, with the lines to pack. */
+export const getBranchOutboundTransfer = query({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    await requireSourceBranch(ctx, transfer);
+
+    const [fromBranch, toBranch] = await Promise.all([
+      ctx.db.get(transfer.fromBranchId),
+      ctx.db.get(transfer.toBranchId),
+    ]);
+
+    const items = await ctx.db
+      .query("transferItems")
+      .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+      .collect();
+
+    const enriched = await Promise.all(
+      items.map(async (item) => {
+        const variant = await ctx.db.get(item.variantId);
+        const style = variant ? await ctx.db.get(variant.styleId) : null;
+        return {
+          itemId: item._id,
+          sku: variant?.sku ?? "",
+          styleName: style?.name ?? "Unknown",
+          size: variant?.size ?? "",
+          color: variant?.color ?? "",
+          requestedQuantity: item.requestedQuantity,
+          packedQuantity: item.packedQuantity ?? null,
+        };
+      })
+    );
+
+    const boxes = await ctx.db
+      .query("transferBoxes")
+      .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
+      .collect();
+
+    return {
+      _id: transfer._id,
+      type: transfer.type ?? null,
+      status: transfer.status,
+      fromBranchName: fromBranch?.name ?? "Unknown",
+      toBranchName: toBranch?.name ?? "Unknown",
+      notes: transfer.notes ?? null,
+      loadedAt: transfer.loadedAt ?? null,
+      loadedBoxCount: transfer.loadedBoxCount ?? null,
+      handedToName: transfer.handedToName ?? null,
+      boxCount: boxes.length,
+      loadedBoxes: boxes.filter((b) => b.loadedAt !== undefined).length,
+      items: enriched,
+    };
   },
 });

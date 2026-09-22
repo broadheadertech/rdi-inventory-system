@@ -1,7 +1,6 @@
 import { query, mutation, type QueryCtx, type MutationCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Id, Doc } from "../_generated/dataModel";
-import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import {
   clearReservedOnDelivery,
@@ -14,7 +13,7 @@ import {
   latestStandingScan,
   resolveScanCode,
 } from "../_helpers/receivingScans";
-import { requireDestinationBranch } from "../_helpers/custody";
+import { requireDestinationBranch, requireSourceBranch } from "../_helpers/custody";
 
 // ─── Box Code Generation ────────────────────────────────────────────────────
 
@@ -30,12 +29,12 @@ function generateBoxCode(transferId: string, boxNumber: number): string {
 export const createBox = mutation({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    // Packed where the goods are — the warehouse, or the branch sending them.
+    const user = await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "approved" && transfer.status !== "packed") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -82,7 +81,15 @@ export const scanItemIntoBox = mutation({
     quantity: v.number(),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
+    const scanBox = await ctx.db.get(args.boxId);
+    if (!scanBox) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Box not found." });
+    }
+    const scanTransfer = await ctx.db.get(scanBox.transferId);
+    if (!scanTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireSourceBranch(ctx, scanTransfer);
 
     if (!Number.isInteger(args.quantity) || args.quantity < 1) {
       throw new ConvexError({
@@ -207,12 +214,15 @@ export const removeItemFromBox = mutation({
     boxItemId: v.id("transferBoxItems"),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const boxItem = await ctx.db.get(args.boxItemId);
     if (!boxItem) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Box item not found." });
     }
+    const itemTransfer = await ctx.db.get(boxItem.transferId);
+    if (!itemTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireSourceBranch(ctx, itemTransfer);
 
     const box = await ctx.db.get(boxItem.boxId);
     if (!box || box.status !== "packing") {
@@ -235,12 +245,15 @@ export const removeItemFromBox = mutation({
 export const sealBox = mutation({
   args: { boxId: v.id("transferBoxes") },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const box = await ctx.db.get(args.boxId);
     if (!box) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Box not found." });
     }
+    const boxTransfer = await ctx.db.get(box.transferId);
+    if (!boxTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireSourceBranch(ctx, boxTransfer);
     if (box.status !== "packing") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -276,12 +289,15 @@ export const sealBox = mutation({
 export const deleteBox = mutation({
   args: { boxId: v.id("transferBoxes") },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const box = await ctx.db.get(args.boxId);
     if (!box) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Box not found." });
     }
+    const boxTransfer = await ctx.db.get(box.transferId);
+    if (!boxTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireSourceBranch(ctx, boxTransfer);
     if (box.status !== "packing") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -310,12 +326,12 @@ export const completeBoxPacking = mutation({
     expectedDeliveryDays: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const user = await requireRole(ctx, WAREHOUSE_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    // Packed where the goods are — the warehouse, or the branch sending them.
+    const user = await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "approved") {
       throw new ConvexError({
         code: "INVALID_STATE",
@@ -400,7 +416,11 @@ export const completeBoxPacking = mutation({
 export const getBoxesForTransfer = query({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    await requireRole(ctx, WAREHOUSE_ROLES);
+    const scopeTransfer = await ctx.db.get(args.transferId);
+    if (!scopeTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    await requireSourceBranch(ctx, scopeTransfer);
 
     const boxes = await ctx.db
       .query("transferBoxes")
@@ -451,7 +471,11 @@ export const getBoxesForTransfer = query({
 export const getPackingProgress = query({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    await requireRole(ctx, WAREHOUSE_ROLES);
+    const scopeTransfer = await ctx.db.get(args.transferId);
+    if (!scopeTransfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    await requireSourceBranch(ctx, scopeTransfer);
 
     const transferItems = await ctx.db
       .query("transferItems")

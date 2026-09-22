@@ -51,6 +51,39 @@ export async function requireDestinationBranch(
   return scope.user;
 }
 
+/** Roles that may handle stock at all — a cashier at the source is not one. */
+const STOCK_HANDLING_ROLES = ["admin", "hqStaff", "warehouseStaff", "manager"] as const;
+
+/**
+ * The goods may only be packed, loaded and dispatched where they physically
+ * are. Warehouse staff sit at the warehouse, so they pass this for everything
+ * leaving it; a branch manager passes it for their own store's sends, which
+ * they previously could not touch at all — a branch could raise a return and
+ * then had no way to move it.
+ *
+ * It is also the tighter rule: warehouse staff can no longer pack a transfer
+ * between two other branches, which they were never in a position to pack.
+ */
+export async function requireSourceBranch(
+  ctx: Ctx,
+  transfer: Doc<"transfers">
+): Promise<Doc<"users">> {
+  const scope = await withBranchScope(ctx);
+
+  if (!(STOCK_HANDLING_ROLES as readonly string[]).includes(scope.user.role)) {
+    throw new ConvexError({ code: "UNAUTHORIZED" });
+  }
+  if (scope.canAccessAllBranches) return scope.user;
+
+  if ((scope.branchId as string) !== (transfer.fromBranchId as string)) {
+    throw new ConvexError({
+      code: "WRONG_BRANCH",
+      message: "These goods are at another branch. Only that branch, or HQ, can send them.",
+    });
+  }
+  return scope.user;
+}
+
 export type CustodyStep = {
   key: string;
   label: string;
