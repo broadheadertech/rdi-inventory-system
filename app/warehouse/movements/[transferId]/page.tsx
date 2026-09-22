@@ -14,7 +14,7 @@ import {
   Check,
   Truck,
 } from "lucide-react";
-import { CustodyTimeline } from "@/components/shared/CustodyTimeline";
+import { PackByScan } from "@/components/shared/PackByScan";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,7 +58,6 @@ export default function MovementDetailPage() {
 
   const approve = useMutation(api.transfers.requests.approveTransfer);
   const reject = useMutation(api.transfers.requests.rejectTransfer);
-  const pack = useMutation(api.transfers.fulfillment.completeTransferPacking);
   const dispatch = useMutation(api.transfers.fulfillment.markTransferInTransit);
   const assignDriver = useMutation(api.logistics.assignments.assignDriverToTransfer);
   const dispatchCourier = useMutation(api.warehouse.movements.dispatchViaCourier);
@@ -224,25 +223,7 @@ export default function MovementDetailPage() {
 
       {status === "approved" && (
         <StageCard title="Pack (by piece)">
-          <p className="mb-3 text-sm text-muted-foreground">
-            Enter the quantity packed for each item, then confirm.
-          </p>
-          <Button
-            disabled={busy}
-            onClick={() =>
-              run(() =>
-                pack({
-                  transferId,
-                  packedItems: movement.items.map((i) => ({
-                    itemId: i.itemId as Id<"transferItems">,
-                    packedQuantity: packQty[i.itemId as string] ?? i.requestedQuantity,
-                  })),
-                })
-              )
-            }
-          >
-            Confirm Packing
-          </Button>
+          <PackByScan transferId={transferId} />
         </StageCard>
       )}
 

@@ -11,8 +11,13 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import {
   clearReservedOnDelivery,
+  releaseHeldStock,
   releaseUnpackedStock,
 } from "../_helpers/transferStock";
+import {
+  latestStandingPackScan,
+  packingScanCounts,
+} from "../_helpers/packingScans";
 import {
   custodyTimeline,
   requireDestinationBranch,
@@ -80,18 +85,20 @@ export const listApprovedTransfers = query({
 export const getTransferPackingData = query({
   args: { transferId: v.id("transfers") },
   handler: async (ctx, args) => {
-    await requireRole(ctx, WAREHOUSE_ROLES);
-
     const transfer = await ctx.db.get(args.transferId);
     if (!transfer) {
       throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
     }
+    await requireSourceBranch(ctx, transfer);
     if (transfer.status !== "approved") {
       throw new ConvexError({
         code: "INVALID_STATE",
         message: "Transfer is not in approved status.",
       });
     }
+
+    // What the bench has scanned so far — the only count packing has.
+    const scanned = await packingScanCounts(ctx, transfer._id);
 
     const fromBranch = await ctx.db.get(transfer.fromBranchId);
     const toBranch = await ctx.db.get(transfer.toBranchId);
@@ -114,6 +121,7 @@ export const getTransferPackingData = query({
           color: variant?.color ?? "",
           styleName: style?.name ?? "Unknown",
           requestedQuantity: item.requestedQuantity,
+          scannedQuantity: scanned.get(item.variantId as string) ?? 0,
         };
       })
     );
@@ -132,12 +140,9 @@ export const getTransferPackingData = query({
 export const completeTransferPacking = mutation({
   args: {
     transferId: v.id("transfers"),
-    packedItems: v.array(
-      v.object({
-        itemId: v.id("transferItems"),
-        packedQuantity: v.number(),
-      })
-    ),
+    // What was packed is counted from the bench's scans, never sent by the
+    // page — the mistyped pack was the thing that made a branch receive a
+    // discrepancy it had no part in.
     expectedDeliveryDays: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -155,52 +160,30 @@ export const completeTransferPacking = mutation({
       });
     }
 
-    // Validate all packed quantities are non-negative integers
-    for (const item of args.packedItems) {
-      if (!Number.isInteger(item.packedQuantity) || item.packedQuantity < 0) {
-        throw new ConvexError({
-          code: "INVALID_ARGUMENT",
-          message: "packedQuantity must be a non-negative integer.",
-        });
-      }
-    }
-
-    // H1+M3 fix: fetch actual transferItems to enforce ownership + completeness
     const transferItems = await ctx.db
       .query("transferItems")
       .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
       .collect();
 
-    // M3 fix: all items must be represented — no partial pack allowed
-    if (args.packedItems.length !== transferItems.length) {
+    // The count is the scans. Scanning already refuses anything past what was
+    // requested, so a line can only be short, never over.
+    const scanned = await packingScanCounts(ctx, args.transferId);
+    const packedTotal = transferItems.reduce(
+      (sum, row) => sum + (scanned.get(row.variantId as string) ?? 0),
+      0
+    );
+    if (packedTotal === 0) {
       throw new ConvexError({
-        code: "INVALID_ARGUMENT",
-        message: `Expected ${transferItems.length} packed items, got ${args.packedItems.length}.`,
+        code: "NOTHING_SCANNED",
+        message:
+          "Nothing has been scanned. Scan each piece as it goes in, or close the transfer if none can be sent.",
       });
     }
 
-    // H1 fix: every itemId must belong to this transfer — prevents cross-transfer corruption
-    const itemById = new Map(transferItems.map((row) => [row._id as string, row]));
-    for (const item of args.packedItems) {
-      const original = itemById.get(item.itemId as string);
-      if (!original) {
-        throw new ConvexError({
-          code: "INVALID_ARGUMENT",
-          message: "One or more items do not belong to this transfer.",
-        });
-      }
-      // Can't pack more than what was requested/reserved
-      if (item.packedQuantity > original.requestedQuantity) {
-        throw new ConvexError({
-          code: "INVALID_ARGUMENT",
-          message: `Cannot pack ${item.packedQuantity} — only ${original.requestedQuantity} were requested.`,
-        });
-      }
-    }
-
-    // Update each transferItems row with packed quantity
-    for (const item of args.packedItems) {
-      await ctx.db.patch(item.itemId, { packedQuantity: item.packedQuantity });
+    for (const row of transferItems) {
+      await ctx.db.patch(row._id, {
+        packedQuantity: scanned.get(row.variantId as string) ?? 0,
+      });
     }
 
     // The source was charged for the whole request. Only the packed pieces are
@@ -267,6 +250,153 @@ export const listPackedTransfers = query({
     );
 
     return enriched.sort((a, b) => a.createdAt - b.createdAt);
+  },
+});
+
+// ─── Packing, piece by piece ────────────────────────────────────────────────
+// The bench scans what it puts in the consignment, and completeTransferPacking
+// counts those scans. Nothing here takes a typed quantity.
+
+export const scanPackPiece = mutation({
+  args: { transferId: v.id("transfers"), code: v.string() },
+  handler: async (ctx, args) => {
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireSourceBranch(ctx, transfer);
+    if (transfer.status !== "approved") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only an approved transfer can be packed.",
+      });
+    }
+
+    const match = await resolveScanCode(ctx, args.code);
+    if (!match) {
+      return {
+        ok: false as const,
+        message: `No product found for "${args.code.trim()}".`,
+      };
+    }
+
+    const items = await ctx.db
+      .query("transferItems")
+      .withIndex("by_transfer", (q) => q.eq("transferId", args.transferId))
+      .collect();
+    const line = items.find((i) => i.variantId === match.variant._id);
+    if (!line) {
+      return {
+        ok: false as const,
+        message: `${match.variant.sku} is not on this transfer.`,
+      };
+    }
+
+    // Never more than was asked for: the source only ever held the requested
+    // quantity, so an extra piece has no stock behind it.
+    const counts = await packingScanCounts(ctx, args.transferId);
+    const already = counts.get(match.variant._id as string) ?? 0;
+    if (already >= line.requestedQuantity) {
+      return {
+        ok: false as const,
+        message: `${match.variant.sku}: all ${line.requestedQuantity} are already packed.`,
+      };
+    }
+
+    await ctx.db.insert("packingScans", {
+      transferId: args.transferId,
+      variantId: match.variant._id,
+      code: args.code.trim(),
+      matchedBy: match.matchedBy,
+      scannedById: user._id,
+      scannedAt: Date.now(),
+    });
+
+    return {
+      ok: true as const,
+      sku: match.variant.sku,
+      packedQuantity: already + 1,
+      requestedQuantity: line.requestedQuantity,
+    };
+  },
+});
+
+export const undoLastPackScan = mutation({
+  args: { transferId: v.id("transfers") },
+  handler: async (ctx, args) => {
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireSourceBranch(ctx, transfer);
+    if (transfer.status !== "approved") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "This transfer is already packed.",
+      });
+    }
+
+    const scan = await latestStandingPackScan(ctx, args.transferId);
+    if (!scan) {
+      throw new ConvexError({ code: "NOTHING_TO_UNDO", message: "No scan to undo." });
+    }
+    await ctx.db.patch(scan._id, { undoneAt: Date.now(), undoneById: user._id });
+
+    const variant = await ctx.db.get(scan.variantId);
+    return { sku: variant?.sku ?? scan.code };
+  },
+});
+
+/**
+ * Nothing could be packed — the stock is not on the shelf after all. The whole
+ * hold goes back and the transfer is closed, because a consignment of nothing
+ * has no business being dispatched and, once approved, there was otherwise no
+ * way out of it.
+ */
+export const cancelAtPacking = mutation({
+  args: { transferId: v.id("transfers"), reason: v.string() },
+  handler: async (ctx, args) => {
+    const transfer = await ctx.db.get(args.transferId);
+    if (!transfer) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Transfer not found." });
+    }
+    const user = await requireSourceBranch(ctx, transfer);
+    if (transfer.status !== "approved") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: "Only a transfer still to be packed can be closed here.",
+      });
+    }
+    const reason = args.reason.trim();
+    if (reason === "") {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "Say why nothing could be packed.",
+      });
+    }
+
+    // Everything held goes back on this branch's shelf, batches and all.
+    await releaseHeldStock(ctx, args.transferId, transfer.fromBranchId);
+
+    const now = Date.now();
+    await ctx.db.patch(args.transferId, {
+      status: "cancelled",
+      cancelledAt: now,
+      cancelledById: user._id,
+      notes: [transfer.notes, `Cancelled at packing: ${reason}`]
+        .filter(Boolean)
+        .join(" · "),
+      updatedAt: now,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "transfer.cancelAtPacking",
+      userId: user._id,
+      entityType: "transfers",
+      entityId: args.transferId,
+      before: { status: "approved" },
+      after: { status: "cancelled", reason },
+    });
   },
 });
 

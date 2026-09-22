@@ -13,6 +13,7 @@ import type * as _helpers_branchPricing from "../_helpers/branchPricing.js";
 import type * as _helpers_constants from "../_helpers/constants.js";
 import type * as _helpers_custody from "../_helpers/custody.js";
 import type * as _helpers_internalInvoice from "../_helpers/internalInvoice.js";
+import type * as _helpers_packingScans from "../_helpers/packingScans.js";
 import type * as _helpers_passwordHash from "../_helpers/passwordHash.js";
 import type * as _helpers_permissions from "../_helpers/permissions.js";
 import type * as _helpers_priceMath from "../_helpers/priceMath.js";
@@ -187,6 +188,7 @@ declare const fullApi: ApiFromModules<{
   "_helpers/constants": typeof _helpers_constants;
   "_helpers/custody": typeof _helpers_custody;
   "_helpers/internalInvoice": typeof _helpers_internalInvoice;
+  "_helpers/packingScans": typeof _helpers_packingScans;
   "_helpers/passwordHash": typeof _helpers_passwordHash;
   "_helpers/permissions": typeof _helpers_permissions;
   "_helpers/priceMath": typeof _helpers_priceMath;

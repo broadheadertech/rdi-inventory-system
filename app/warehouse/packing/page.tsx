@@ -3,6 +3,7 @@
 import { useState, useCallback } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { PackByScan } from "@/components/shared/PackByScan";
 import type { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
 import { getErrorMessage, cn } from "@/lib/utils";
@@ -52,7 +53,6 @@ export default function BoxPackingPage() {
   const [activeBoxId, setActiveBoxId] = useState<Id<"transferBoxes"> | null>(null);
 
   // Piece mode quantities
-  const [pieceQtys, setPieceQtys] = useState<Record<string, number>>({});
 
   // Scanner
   const [manualBarcode, setManualBarcode] = useState("");
@@ -85,7 +85,6 @@ export default function BoxPackingPage() {
   const deleteBox = useMutation(api.transfers.boxPacking.deleteBox);
   const removeItem = useMutation(api.transfers.boxPacking.removeItemFromBox);
   const completePacking = useMutation(api.transfers.boxPacking.completeBoxPacking);
-  const completePiecePacking = useMutation(api.transfers.fulfillment.completeTransferPacking);
 
   // ─── Box mode handlers ────────────────────────────────────────────────────
 
@@ -162,40 +161,16 @@ export default function BoxPackingPage() {
 
   // ─── Piece mode handlers ──────────────────────────────────────────────────
 
-  const handleFinalizePiece = useCallback(async () => {
-    if (!selectedTransferId || !packingData) return;
-    try {
-      const packedItems = packingData.items.map((item) => ({
-        itemId: item.itemId,
-        packedQuantity: pieceQtys[item.itemId as string] ?? item.requestedQuantity,
-      }));
-      await completePiecePacking({
-        transferId: selectedTransferId,
-        packedItems,
-        expectedDeliveryDays: parseInt(expectedDays) || undefined,
-      });
-      toast.success("Packing complete! Transfer is now packed.");
-      setSelectedTransferId(null);
-      setPackingMode(null);
-      setPieceQtys({});
-      setShowFinalize(false);
-    } catch (err) {
-      toast.error(getErrorMessage(err));
-    }
-  }, [selectedTransferId, packingData, pieceQtys, expectedDays, completePiecePacking]);
-
   const handleSelectTransfer = useCallback((transferId: Id<"transfers">) => {
     setSelectedTransferId(transferId);
     setPackingMode(null);
     setActiveBoxId(null);
-    setPieceQtys({});
   }, []);
 
   const handleBack = useCallback(() => {
     setSelectedTransferId(null);
     setActiveBoxId(null);
     setPackingMode(null);
-    setPieceQtys({});
   }, []);
 
   const transferPagination = usePagination(approvedTransfers ?? [], 10);
@@ -310,17 +285,7 @@ export default function BoxPackingPage() {
           </button>
           <button
             type="button"
-            onClick={() => {
-              setPackingMode("piece");
-              // Initialize piece quantities from requested quantities
-              if (packingData) {
-                const initial: Record<string, number> = {};
-                for (const item of packingData.items) {
-                  initial[item.itemId as string] = item.requestedQuantity;
-                }
-                setPieceQtys(initial);
-              }
-            }}
+            onClick={() => setPackingMode("piece")}
             className="rounded-lg border-2 border-muted p-6 text-left hover:border-primary transition-colors bg-card"
           >
             <List className="h-8 w-8 text-primary mb-3" />
@@ -337,9 +302,6 @@ export default function BoxPackingPage() {
   // ─── Piece mode ────────────────────────────────────────────────────────────
 
   if (packingMode === "piece") {
-    const totalRequested = packingData?.items.reduce((s, i) => s + i.requestedQuantity, 0) ?? 0;
-    const totalPacked = packingData?.items.reduce((s, i) => s + (pieceQtys[i.itemId as string] ?? 0), 0) ?? 0;
-
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between">
@@ -354,123 +316,18 @@ export default function BoxPackingPage() {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={handleBack}>Back</Button>
-            <Button size="sm" onClick={() => setShowFinalize(true)}>
-              <CheckCircle2 className="h-4 w-4 mr-1" /> Finalize
-            </Button>
-          </div>
+          <Button variant="outline" size="sm" onClick={handleBack}>Back</Button>
         </div>
 
-        {/* Progress bar */}
-        <div className="rounded-lg border p-4 bg-card">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold">Packing Progress</p>
-            <Badge variant={totalPacked >= totalRequested ? "default" : "outline"}>
-              {totalPacked} / {totalRequested} packed
-            </Badge>
-          </div>
-          <div className="w-full bg-muted rounded-full h-2">
-            <div
-              className="bg-primary h-2 rounded-full transition-all"
-              style={{ width: `${totalRequested > 0 ? (totalPacked / totalRequested) * 100 : 0}%` }}
-            />
-          </div>
-        </div>
-
-        {/* Items table with editable quantities */}
-        <div className="rounded-lg border overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Product</TableHead>
-                <TableHead>SKU</TableHead>
-                <TableHead>Size / Color</TableHead>
-                <TableHead className="text-right">Requested</TableHead>
-                <TableHead className="text-right">Packed Qty</TableHead>
-                <TableHead className="text-right">Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(packingData?.items ?? []).map((item) => {
-                const packed = pieceQtys[item.itemId as string] ?? 0;
-                const isComplete = packed >= item.requestedQuantity;
-                return (
-                  <TableRow key={String(item.itemId)}>
-                    <TableCell className="font-medium">{item.styleName}</TableCell>
-                    <TableCell className="font-mono text-xs">{item.sku}</TableCell>
-                    <TableCell className="text-sm">{item.size} / {item.color}</TableCell>
-                    <TableCell className="text-right tabular-nums">{item.requestedQuantity}</TableCell>
-                    <TableCell className="text-right">
-                      <Input
-                        type="number"
-                        min={0}
-                        max={item.requestedQuantity}
-                        value={packed}
-                        onChange={(e) => {
-                          const val = Math.max(0, Math.min(item.requestedQuantity, parseInt(e.target.value) || 0));
-                          setPieceQtys((prev) => ({ ...prev, [item.itemId as string]: val }));
-                        }}
-                        className="w-20 ml-auto text-right tabular-nums"
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {isComplete ? (
-                        <Badge variant="default" className="text-xs">
-                          <CheckCircle2 className="h-3 w-3 mr-1" /> Done
-                        </Badge>
-                      ) : packed > 0 ? (
-                        <Badge variant="outline" className="text-xs text-amber-600">Partial</Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs text-muted-foreground">Pending</Badge>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-
-        {/* Finalize Dialog */}
-        <Dialog open={showFinalize} onOpenChange={setShowFinalize}>
-          <DialogContent className="sm:max-w-sm">
-            <DialogHeader>
-              <DialogTitle>Finalize Packing</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label>Expected Delivery (days)</Label>
-                <Select value={expectedDays} onValueChange={setExpectedDays}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">1 day</SelectItem>
-                    <SelectItem value="2">2 days</SelectItem>
-                    <SelectItem value="3">3 days</SelectItem>
-                    <SelectItem value="5">5 days</SelectItem>
-                    <SelectItem value="7">7 days</SelectItem>
-                    <SelectItem value="14">14 days</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="text-sm">
-                <p><strong>Mode:</strong> Piece (no boxes)</p>
-                <p><strong>Total Items:</strong> {totalPacked} / {totalRequested}</p>
-                {totalPacked < totalRequested && (
-                  <p className="text-amber-500 text-xs mt-1">
-                    Warning: {totalRequested - totalPacked} items not yet packed.
-                  </p>
-                )}
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setShowFinalize(false)}>Cancel</Button>
-              <Button onClick={handleFinalizePiece}>
-                <CheckCircle2 className="h-4 w-4 mr-1" /> Complete Packing
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        {/* Counted by scanning, like receiving — nothing here is typed. */}
+        {selectedTransferId && (
+          <PackByScan
+            transferId={selectedTransferId}
+            expectedDeliveryDays={parseInt(expectedDays) || undefined}
+            onPacked={handleBack}
+            onCancelled={handleBack}
+          />
+        )}
       </div>
     );
   }

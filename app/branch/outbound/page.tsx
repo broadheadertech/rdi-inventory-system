@@ -18,13 +18,14 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { toast } from "sonner";
 import { cn, getErrorMessage } from "@/lib/utils";
 import { CustodyTimeline } from "@/components/shared/CustodyTimeline";
+import { PackByScan } from "@/components/shared/PackByScan";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, ArrowRight, PackageCheck, Send, Truck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Send, Truck } from "lucide-react";
 
 function StageCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -49,7 +50,6 @@ function OutboundDetail({
   });
   const couriers = useQuery(api.logistics.couriers.listActiveCouriers, {});
 
-  const completePacking = useMutation(api.transfers.fulfillment.completeTransferPacking);
   const scanBoxOut = useMutation(api.transfers.fulfillment.scanBoxOut);
   const undoBoxOut = useMutation(api.transfers.fulfillment.undoLastBoxOut);
   const confirmLoad = useMutation(api.transfers.fulfillment.confirmLoadOut);
@@ -57,7 +57,6 @@ function OutboundDetail({
   const dispatchPlain = useMutation(api.transfers.fulfillment.markTransferInTransit);
   const dispatchCourier = useMutation(api.warehouse.movements.dispatchViaCourier);
 
-  const [packQty, setPackQty] = useState<Record<string, number>>({});
   const [boxCode, setBoxCode] = useState("");
   const [handedTo, setHandedTo] = useState("");
   const [loadNote, setLoadNote] = useState<string | null>(null);
@@ -80,8 +79,6 @@ function OutboundDetail({
     return <div className="h-64 animate-pulse rounded-lg border bg-muted/40" />;
   }
 
-  const packed = (itemId: string, requested: number) => packQty[itemId] ?? requested;
-
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -99,31 +96,10 @@ function OutboundDetail({
         </Button>
       </div>
 
-      {/* Pack */}
+      {/* Pack — scanned, like everything else that moves stock */}
       {transfer.status === "approved" && (
         <StageCard title="Pack">
-          <p className="mb-3 text-sm text-muted-foreground">
-            Count out what is actually going. Anything you do not pack goes back on your
-            own shelf.
-          </p>
-          <Button
-            disabled={busy}
-            onClick={() =>
-              run(async () => {
-                await completePacking({
-                  transferId,
-                  packedItems: transfer.items.map((i) => ({
-                    itemId: i.itemId as Id<"transferItems">,
-                    packedQuantity: packed(i.itemId as string, i.requestedQuantity),
-                  })),
-                });
-                toast.success("Packed");
-              })
-            }
-          >
-            <PackageCheck className="mr-1.5 h-4 w-4" />
-            Confirm packed
-          </Button>
+          <PackByScan transferId={transferId} onCancelled={onBack} />
         </StageCard>
       )}
 
@@ -308,7 +284,7 @@ function OutboundDetail({
               <TableHead>SKU</TableHead>
               <TableHead>Product</TableHead>
               <TableHead className="text-right">Requested</TableHead>
-              <TableHead className="text-right">Packing</TableHead>
+              <TableHead className="text-right">Packed</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -324,27 +300,8 @@ function OutboundDetail({
                 <TableCell className="text-right tabular-nums">
                   {item.requestedQuantity}
                 </TableCell>
-                <TableCell className="text-right">
-                  {transfer.status === "approved" ? (
-                    <Input
-                      type="number"
-                      min={0}
-                      max={item.requestedQuantity}
-                      className="ml-auto w-20 text-right"
-                      value={packed(item.itemId as string, item.requestedQuantity)}
-                      onChange={(e) =>
-                        setPackQty((prev) => ({
-                          ...prev,
-                          [item.itemId as string]: Math.min(
-                            item.requestedQuantity,
-                            Math.max(0, parseInt(e.target.value) || 0)
-                          ),
-                        }))
-                      }
-                    />
-                  ) : (
-                    <span className="tabular-nums">{item.packedQuantity ?? "—"}</span>
-                  )}
+                <TableCell className="text-right tabular-nums">
+                  {item.packedQuantity ?? "—"}
                 </TableCell>
               </TableRow>
             ))}

@@ -857,6 +857,25 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_createdAt", ["createdAt"]),
 
+  // Every piece scanned onto the packing bench.
+  //
+  // Packing was the last place in the chain taking a typed count, and it is the
+  // one that decides what the far branch is told to expect — a mistyped pack
+  // becomes a discrepancy raised against a branch that received exactly what
+  // was sent. Kept apart from receivingScans because both are keyed by the same
+  // transferId, and folding them together would count a transfer's packing
+  // scans as pieces received at the other end.
+  packingScans: defineTable({
+    transferId: v.id("transfers"),
+    variantId: v.id("variants"),
+    code: v.string(),
+    matchedBy: v.union(v.literal("barcode"), v.literal("sku")),
+    scannedById: v.id("users"),
+    scannedAt: v.number(),
+    undoneAt: v.optional(v.number()),
+    undoneById: v.optional(v.id("users")),
+  }).index("by_transfer", ["transferId", "scannedAt"]),
+
   // Every piece scanned while receiving stock. Receiving has no typed
   // quantity: what a supplier receipt, a transfer or a box received is the
   // number of scans on it that have not been undone. Exactly one of the three
