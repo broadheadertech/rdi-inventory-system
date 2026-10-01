@@ -1012,6 +1012,51 @@ export default defineSchema({
     .index("by_variant", ["variantId"]),
 
   // Every price change, base or branch: who set a price, from what, and when.
+  // A price change waiting to be approved.
+  //
+  // Prices used to change the moment somebody pressed save. A bulk edit, or a
+  // spreadsheet with a stray column, could reprice the chain before anyone saw
+  // what it did — and priceChanges only recorded it afterwards. Now every
+  // change is proposed, the exact before-and-after is held here, and nothing
+  // moves until an admin has seen the difference and approved it.
+  priceProposals: defineTable({
+    source: v.union(v.literal("editor"), v.literal("csv")),
+    fileName: v.optional(v.string()),      // the spreadsheet it came from
+    summary: v.string(),                   // one line, for the queue
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("rejected")
+    ),
+    changedCount: v.number(),              // cells that would actually move
+    unchangedCount: v.number(),            // rows read that already matched
+    skippedCount: v.number(),              // rows that could not be used
+    belowBaseCount: v.number(),            // branch prices under the Base SRP
+    submittedById: v.id("users"),
+    submittedAt: v.number(),
+    reviewedById: v.optional(v.id("users")),
+    reviewedAt: v.optional(v.number()),
+    rejectionReason: v.optional(v.string()),
+    appliedCount: v.optional(v.number()),  // what approval actually wrote
+  })
+    .index("by_status", ["status", "submittedAt"])
+    .index("by_submittedAt", ["submittedAt"]),
+
+  // One price in one place, as it would be after approval. Labels are copied in
+  // so the queue reads the same months later, even if a product is renamed.
+  priceProposalCells: defineTable({
+    proposalId: v.id("priceProposals"),
+    variantId: v.id("variants"),
+    branchId: v.optional(v.id("branches")),   // absent: the Base SRP
+    sku: v.string(),
+    label: v.string(),
+    branchName: v.optional(v.string()),
+    action: v.union(v.literal("set"), v.literal("reset")),
+    oldPriceCentavos: v.number(),
+    newPriceCentavos: v.number(),
+    belowBase: v.boolean(),
+  }).index("by_proposal", ["proposalId"]),
+
   priceChanges: defineTable({
     variantId: v.id("variants"),
     branchId: v.optional(v.id("branches")), // absent: the base price
@@ -1280,7 +1325,11 @@ export default defineSchema({
     // total, or one unit of the highest-priced in-scope item. Absent means
     // whole purchase, which is how every promotion before this setting works.
     discountApplication: v.optional(
-      v.union(v.literal("wholePurchase"), v.literal("highestItem"))
+      v.union(
+        v.literal("wholePurchase"),
+        v.literal("lowestItem"),
+        v.literal("highestItem")
+      )
     ),
     // scoping
     branchIds: v.array(v.id("branches")),

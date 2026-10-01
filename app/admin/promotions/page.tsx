@@ -111,7 +111,7 @@ const STATUS_BADGE: Record<
   upcoming: { label: "Upcoming", className: "bg-blue-100 text-blue-800" },
 };
 
-type DiscountApplication = "wholePurchase" | "highestItem";
+type DiscountApplication = "wholePurchase" | "lowestItem" | "highestItem";
 
 type TieredRewardType = "amount" | "cheapestFree";
 
@@ -129,6 +129,11 @@ const TIERED_REWARD_OPTIONS: { value: TieredRewardType; label: string; hint: str
 ];
 
 const DISCOUNT_APPLICATION_OPTIONS: { value: DiscountApplication; label: string; hint: string }[] = [
+  {
+    value: "lowestItem",
+    label: "Lowest-priced item only",
+    hint: "One unit of the cheapest item in scope. Pants ₱100 + Shirt ₱50 at 10% off → ₱5 off the Shirt.",
+  },
   {
     value: "highestItem",
     label: "Highest-priced item only",
@@ -247,8 +252,9 @@ function emptyForm(): PromoForm {
     tieredDiscountCentavos: "",
     tieredRewardType: "amount",
     minQuantity: "",
-    // New promotions discount the highest-priced item unless set otherwise.
-    discountApplication: "highestItem",
+    // The house rule: a single-item discount lands on the cheapest piece,
+    // which is what a customer expects from "buy two, one discounted".
+    discountApplication: "lowestItem",
     startDate: "",
     endDate: "",
     noExpiration: false,

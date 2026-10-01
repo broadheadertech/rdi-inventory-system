@@ -12,7 +12,11 @@ import {
 /** The offer as a customer reads it, e.g. "20% OFF your highest-priced item". */
 function describeDiscount(promo: Doc<"promotions">): string {
   const onHighest =
-    (promo.discountApplication === "highestItem" ? " your highest-priced item" : "") +
+    (promo.discountApplication === "lowestItem"
+      ? " your lowest-priced item"
+      : promo.discountApplication === "highestItem"
+        ? " your highest-priced item"
+        : "") +
     (promo.minQuantity && promo.minQuantity > 1 ? ` when you buy ${promo.minQuantity}+` : "");
   if (promo.promoType === "percentage" && promo.percentageValue) {
     return `${promo.percentageValue}% OFF${onHighest}`;

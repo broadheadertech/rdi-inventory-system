@@ -14,6 +14,7 @@ import { useConvex, useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
 import { History, Loader2, RotateCcw, Search } from "lucide-react";
 import { api } from "@/convex/_generated/api";
+import { PriceCsv } from "@/components/shared/PriceCsv";
 import type { Id } from "@/convex/_generated/dataModel";
 import { applyPriceOp, invalidPrice, type PriceOp, type Rounding } from "@/convex/_helpers/priceMath";
 import { Button } from "@/components/ui/button";
@@ -96,7 +97,9 @@ function chunk<T>(items: T[], size: number): T[][] {
 export default function PricesPage() {
   const convex = useConvex();
   const options = useQuery(api.admin.prices.getPriceOptions);
-  const changePrices = useMutation(api.admin.prices.changePrices);
+  // Nothing here writes a price any more: it is proposed, and an admin
+  // approves it after seeing the difference.
+  const proposePriceChange = useMutation(api.admin.prices.proposePriceChange);
 
   // ── Filters ────────────────────────────────────────────────────────────────
   const [searchInput, setSearchInput] = useState("");
@@ -208,13 +211,19 @@ export default function PricesPage() {
     }
     setSavingCell(true);
     try {
-      const r = await changePrices({
+      const r = await proposePriceChange({
         variantIds: [cell.variantId],
         target: cell.branchId === "base" ? { kind: "base" } : { kind: "branches", branchIds: [cell.branchId] },
         op: { type: "set", priceCentavos: centavos! },
         belowBase: belowBase ? "allow" : "skip",
       });
-      if (r.skipped.length > 0) toast.error(r.skipped[0].reason);
+      if (r.changed === 0) {
+        toast.message(
+          r.unchanged > 0 ? "Already at that price" : "Nothing to change"
+        );
+      } else {
+        toast.success("Sent for approval");
+      }
       setEditing(null);
     } catch (err) {
       toast.error(getErrorMessage(err));
@@ -225,7 +234,14 @@ export default function PricesPage() {
 
   async function resetCell(variantId: Id<"variants">, branchId: Id<"branches">) {
     try {
-      await changePrices({ variantIds: [variantId], target: { kind: "branches", branchIds: [branchId] }, op: { type: "reset" } });
+      const r = await proposePriceChange({
+        variantIds: [variantId],
+        target: { kind: "branches", branchIds: [branchId] },
+        op: { type: "reset" },
+      });
+      toast[r.changed > 0 ? "success" : "message"](
+        r.changed > 0 ? "Sent for approval" : "Already on the Base SRP"
+      );
     } catch (err) {
       toast.error(getErrorMessage(err));
     }
@@ -343,9 +359,9 @@ export default function PricesPage() {
     try {
       let changed = 0;
       let unchanged = 0;
-      const skipped: typeof lastSkipped = [];
+      let skippedCount = 0;
       for (const part of chunk(ids, perCall())) {
-        const r = await changePrices({
+        const r = await proposePriceChange({
           variantIds: part,
           target: bulkTarget(),
           op,
@@ -354,14 +370,14 @@ export default function PricesPage() {
         });
         changed += r.changed;
         unchanged += r.unchanged;
-        skipped.push(...r.skipped);
+        skippedCount += r.skipped;
         setProgress((p) => ({ ...p, done: p.done + part.length }));
       }
-      setLastSkipped(skipped);
+      setLastSkipped([]);
       toast.success(
-        `${changed} price${changed === 1 ? "" : "s"} changed` +
+        `${changed} price${changed === 1 ? "" : "s"} sent for approval` +
           (unchanged ? ` · ${unchanged} already at that price` : "") +
-          (skipped.length ? ` · ${skipped.length} not changed` : "")
+          (skippedCount ? ` · ${skippedCount} not included` : "")
       );
       clearSelection();
     } catch (err) {
@@ -387,8 +403,12 @@ export default function PricesPage() {
           Base SRPs and branch prices. A branch sells at the Base SRP until it is given its own;
           <span className="font-medium text-foreground"> bold</span> prices are a branch&apos;s own.
           Click a price to edit it, or select products to change many at once.
+          Changes are sent for approval before they reach a till.
         </p>
       </div>
+
+      {/* The spreadsheet round trip, over whatever the filters below show */}
+      <PriceCsv filters={filters} branchIds={shownBranchIds} />
 
       {/* Filters */}
       <div className="flex flex-wrap items-end gap-3">

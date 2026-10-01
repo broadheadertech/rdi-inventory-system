@@ -47,7 +47,13 @@ const commonArgs = {
   tieredRewardType: v.optional(v.union(v.literal("amount"), v.literal("cheapestFree"))),
   minQuantity: v.optional(v.number()),
   exclusive: v.optional(v.boolean()),
-  discountApplication: v.optional(v.union(v.literal("wholePurchase"), v.literal("highestItem"))),
+  discountApplication: v.optional(
+    v.union(
+      v.literal("wholePurchase"),
+      v.literal("lowestItem"),
+      v.literal("highestItem")
+    )
+  ),
   branchIds: v.array(v.id("branches")),
   branchClassifications: v.optional(
     v.array(v.union(v.literal("premium"), v.literal("aclass"), v.literal("bnc"), v.literal("outlet")))

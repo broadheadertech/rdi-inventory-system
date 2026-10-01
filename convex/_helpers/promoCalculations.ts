@@ -21,7 +21,7 @@ export type PromoInput = {
   minQuantity?: number;
   // percentage / fixedAmount: take the discount from the in-scope total
   // (default), or from one unit of the highest-priced in-scope item.
-  discountApplication?: "wholePurchase" | "highestItem";
+  discountApplication?: "wholePurchase" | "lowestItem" | "highestItem";
   // Product scope (empty arrays = all products) — for crossSell/pwp this is the TRIGGER scope
   brandIds: string[];
   categoryIds: string[];
@@ -207,13 +207,23 @@ export function calculatePromoDiscount(
     };
   }
 
-  // What a percentage or fixed-amount discount is taken from. "highestItem" is
-  // a single unit of the priciest in-scope item: Pants ₱100 + Shirt ₱50 at 10%
-  // off gives ₱10, and two Pants still give ₱10.
+  // What a percentage or fixed-amount discount is taken from.
+  //
+  //   lowestItem   a single unit of the CHEAPEST in-scope item — the house rule,
+  //                and what a customer expects from "buy two, one discounted":
+  //                Pants ₱100 + Shirt ₱50 at 10% off gives ₱5, off the Shirt.
+  //   highestItem  a single unit of the priciest instead, for an offer that
+  //                deliberately leads with the dearest piece.
+  //   wholePurchase  everything in scope.
+  //
+  // Either single-item mode is one unit: two Pants still give one Pant's worth.
+  const unitPrices = eligible.map((item) => item.unitPriceCentavos);
   const discountBase =
-    promo.discountApplication === "highestItem"
-      ? Math.max(...eligible.map((item) => item.unitPriceCentavos))
-      : eligibleTotal;
+    promo.discountApplication === "lowestItem"
+      ? Math.min(...unitPrices)
+      : promo.discountApplication === "highestItem"
+        ? Math.max(...unitPrices)
+        : eligibleTotal;
 
   switch (promo.promoType) {
     case "percentage":
@@ -237,10 +247,16 @@ export function calculatePromoDiscount(
 
 // ─── Per-Type Calculators ───────────────────────────────────────────────────
 
-function highestItemSuffix(promo: PromoInput): string {
-  const onHighest = promo.discountApplication === "highestItem" ? " on the highest-priced item" : "";
+/** Says which item a single-item discount lands on, so a receipt reads true. */
+function appliesToSuffix(promo: PromoInput): string {
+  const onItem =
+    promo.discountApplication === "lowestItem"
+      ? " on the lowest-priced item"
+      : promo.discountApplication === "highestItem"
+        ? " on the highest-priced item"
+        : "";
   const minQuantity = promo.minQuantity && promo.minQuantity > 1 ? ` when buying ${promo.minQuantity}+` : "";
-  return onHighest + minQuantity;
+  return onItem + minQuantity;
 }
 
 function calcPercentage(
@@ -262,7 +278,7 @@ function calcPercentage(
   return {
     applicable: true,
     discountCentavos: discount,
-    description: `${promo.name} (${pct}% off${highestItemSuffix(promo)})`,
+    description: `${promo.name} (${pct}% off${appliesToSuffix(promo)})`,
   };
 }
 
@@ -281,7 +297,7 @@ function calcFixedAmount(
   return {
     applicable: true,
     discountCentavos: discount,
-    description: `${promo.name} (₱${(fixedOff / 100).toFixed(0)} off${highestItemSuffix(promo)})`,
+    description: `${promo.name} (₱${(fixedOff / 100).toFixed(0)} off${appliesToSuffix(promo)})`,
   };
 }
 

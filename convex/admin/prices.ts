@@ -18,6 +18,7 @@ const MAX_BRANCH_COLUMNS = 20;
 const MAX_PAGE_SIZE = 100;
 const MAX_CHANGE_VARIANTS = 100;
 const MAX_MATCHING_IDS = 5000;
+const MAX_CSV_ROWS = 5000;
 
 // ─── Filtering ────────────────────────────────────────────────────────────────
 
@@ -160,6 +161,56 @@ export const listPriceRows = query({
       });
     }
     return { rows, total: matches.length };
+  },
+});
+
+// ─── exportPriceRows ──────────────────────────────────────────────────────────
+// Every matching product, for the spreadsheet. A branch cell is left empty when
+// the branch has no price of its own, so the file says plainly which prices are
+// set and which simply follow the Base SRP — and a cell emptied by hand reads
+// back as "put this branch back on the base price".
+
+export const exportPriceRows = query({
+  args: {
+    ...filterArgs,
+    branchIds: v.array(v.id("branches")),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ADMIN_ROLES);
+    const branchIds = args.branchIds.slice(0, MAX_BRANCH_COLUMNS);
+
+    const branches = [];
+    for (const id of branchIds) {
+      const branch = await ctx.db.get(id);
+      if (branch) branches.push({ _id: branch._id, name: branch.name });
+    }
+
+    const matches = (await matchingVariants(ctx, args)).slice(0, MAX_CSV_ROWS);
+
+    const rows = [];
+    for (const { variant, style, brandName } of matches) {
+      const prices: (number | null)[] = [];
+      for (const branch of branches) {
+        const own = await branchPriceRow(ctx, branch._id, variant._id);
+        prices.push(own ? own.priceCentavos : null);
+      }
+      rows.push({
+        sku: variant.sku,
+        brandName,
+        styleName: style.name,
+        size: variant.size,
+        color: variant.color,
+        basePriceCentavos: variant.priceCentavos,
+        costPriceCentavos: variant.costPriceCentavos ?? null,
+        prices,
+      });
+    }
+
+    return {
+      branches: branches.map((b) => b.name),
+      rows,
+      truncated: rows.length < (await matchingVariants(ctx, args)).length,
+    };
   },
 });
 
@@ -352,87 +403,6 @@ export const previewPriceChange = query({
 
 // ─── changePrices ─────────────────────────────────────────────────────────────
 
-export const changePrices = mutation({
-  args: {
-    ...changeArgs,
-    // A branch price under the Base SRP is saved only when confirmed; otherwise
-    // it is skipped, so it can never happen by accident.
-    belowBase: v.optional(v.union(v.literal("allow"), v.literal("skip"))),
-  },
-  handler: async (ctx, args) => {
-    const user = await requireRole(ctx, ADMIN_ROLES);
-    const plan = await planChange(ctx, args);
-    const allowBelowBase = args.belowBase === "allow";
-    const now = Date.now();
-    let changed = 0;
-    let belowBaseSaved = 0;
-    const skipped = [...plan.skipped];
-
-    for (const cell of plan.cells) {
-      const { variant, branch, own, current, next } = cell;
-
-      if (cell.belowBase && !allowBelowBase) {
-        skipped.push({
-          variantId: variant._id,
-          sku: variant.sku,
-          branchName: branch?.name ?? null,
-          reason: `Below the Base SRP (₱${(variant.priceCentavos / 100).toFixed(2)}) — not confirmed.`,
-        });
-        continue;
-      }
-
-      if (!branch) {
-        await ctx.db.patch(variant._id, { priceCentavos: next, updatedAt: now });
-      } else if (args.op.type === "reset") {
-        await ctx.db.delete(own!._id);
-      } else if (own) {
-        await ctx.db.patch(own._id, { priceCentavos: next, updatedById: user._id, updatedAt: now });
-      } else {
-        await ctx.db.insert("branchPrices", {
-          branchId: branch._id,
-          variantId: variant._id,
-          styleId: variant.styleId,
-          priceCentavos: next,
-          updatedById: user._id,
-          updatedAt: now,
-        });
-      }
-
-      await ctx.db.insert("priceChanges", {
-        variantId: variant._id,
-        branchId: branch?._id,
-        action: args.op.type === "reset" ? "reset" : "set",
-        oldPriceCentavos: current,
-        newPriceCentavos: next,
-        changedById: user._id,
-        changedAt: now,
-      });
-      if (cell.belowBase) belowBaseSaved++;
-      changed++;
-    }
-
-    await _logAuditEntry(ctx, {
-      action: "prices.change",
-      userId: user._id,
-      entityType: "priceChanges",
-      entityId: args.variantIds.length === 1 ? args.variantIds[0] : `${args.variantIds.length} products`,
-      after: {
-        target: args.target.kind,
-        branchIds: args.target.kind === "branches" ? args.target.branchIds : undefined,
-        op: args.op,
-        rounding: args.rounding ?? "none",
-        products: args.variantIds.length,
-        changed,
-        unchanged: plan.unchanged,
-        skipped: skipped.length,
-        belowBaseConfirmed: belowBaseSaved,
-      },
-    });
-
-    return { changed, unchanged: plan.unchanged, skipped };
-  },
-});
-
 // ─── getPriceHistory ──────────────────────────────────────────────────────────
 
 export const getPriceHistory = query({
@@ -462,5 +432,534 @@ export const getPriceHistory = query({
       });
     }
     return out;
+  },
+});
+
+// ─── Price changes go through approval ──────────────────────────────────────
+// A price used to change the moment somebody pressed save. A bulk edit, or a
+// spreadsheet with a stray column, could reprice the chain before anyone saw
+// what it did. Now a change is proposed, the exact before-and-after is stored,
+// and nothing moves until an admin has looked at the difference.
+//
+// Approving is a review step rather than a second signature: the person who
+// submitted may approve it. The risk being caught here is a bad file, and
+// seeing the diff catches that.
+
+/** Writes the planned cells, and returns the proposal they belong to. */
+async function createProposal(
+  ctx: MutationCtx,
+  args: {
+    source: "editor" | "csv";
+    fileName?: string;
+    summary: string;
+    userId: Id<"users">;
+    unchanged: number;
+    skipped: number;
+    cells: {
+      variantId: Id<"variants">;
+      branchId?: Id<"branches">;
+      sku: string;
+      label: string;
+      branchName?: string;
+      action: "set" | "reset";
+      oldPriceCentavos: number;
+      newPriceCentavos: number;
+      belowBase: boolean;
+    }[];
+  }
+): Promise<Id<"priceProposals">> {
+  const proposalId = await ctx.db.insert("priceProposals", {
+    source: args.source,
+    ...(args.fileName ? { fileName: args.fileName } : {}),
+    summary: args.summary,
+    status: "pending" as const,
+    changedCount: args.cells.length,
+    unchangedCount: args.unchanged,
+    skippedCount: args.skipped,
+    belowBaseCount: args.cells.filter((c) => c.belowBase).length,
+    submittedById: args.userId,
+    submittedAt: Date.now(),
+  });
+
+  for (const cell of args.cells) {
+    await ctx.db.insert("priceProposalCells", { proposalId, ...cell });
+  }
+  return proposalId;
+}
+
+/**
+ * The on-screen editor: same arguments as before, but the change is queued
+ * rather than written.
+ */
+export const proposePriceChange = mutation({
+  args: {
+    ...changeArgs,
+    // A branch price under the Base SRP still has to be confirmed before it
+    // can even be proposed, so it is never queued by accident.
+    belowBase: v.optional(v.union(v.literal("allow"), v.literal("skip"))),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, ADMIN_ROLES);
+    const plan = await planChange(ctx, args);
+    const allowBelowBase = args.belowBase === "allow";
+
+    const cells = [];
+    let skipped = plan.skipped.length;
+    for (const cell of plan.cells) {
+      if (cell.belowBase && !allowBelowBase) {
+        skipped++;
+        continue;
+      }
+      cells.push({
+        variantId: cell.variant._id,
+        ...(cell.branch ? { branchId: cell.branch._id } : {}),
+        sku: cell.variant.sku,
+        label: `${cell.variant.size} / ${cell.variant.color}`,
+        ...(cell.branch ? { branchName: cell.branch.name } : {}),
+        action: (args.op.type === "reset" ? "reset" : "set") as "set" | "reset",
+        oldPriceCentavos: cell.current,
+        newPriceCentavos: cell.next,
+        belowBase: cell.belowBase,
+      });
+    }
+
+    if (cells.length === 0) {
+      return { proposalId: null, changed: 0, unchanged: plan.unchanged, skipped };
+    }
+
+    const where =
+      args.target.kind === "base"
+        ? "Base SRP"
+        : `${args.target.branchIds.length} branch${args.target.branchIds.length === 1 ? "" : "es"}`;
+    const summary =
+      args.note?.trim() ||
+      `${where}: ${cells.length} price${cells.length === 1 ? "" : "s"} across ${args.variantIds.length} product${args.variantIds.length === 1 ? "" : "s"}`;
+
+    const proposalId = await createProposal(ctx, {
+      source: "editor",
+      summary,
+      userId: user._id,
+      unchanged: plan.unchanged,
+      skipped,
+      cells,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "prices.propose",
+      userId: user._id,
+      entityType: "priceProposals",
+      entityId: proposalId,
+      after: { source: "editor", summary, changed: cells.length },
+    });
+
+    return { proposalId, changed: cells.length, unchanged: plan.unchanged, skipped };
+  },
+});
+
+/**
+ * A spreadsheet of prices, read back in.
+ *
+ * Every row is compared against what is in force now: a row that matches is
+ * counted as untouched and creates nothing, so a file where two lines were
+ * edited proposes two changes rather than ten thousand. A blank branch cell
+ * means "follow the Base SRP", which is how a branch price is taken away.
+ */
+export const proposePricesFromCsv = mutation({
+  args: {
+    fileName: v.string(),
+    note: v.optional(v.string()),
+    rows: v.array(
+      v.object({
+        sku: v.string(),
+        // Absent: this row is not setting the base price.
+        basePriceCentavos: v.optional(v.number()),
+        // One entry per branch column that carried a value, plus the branches
+        // whose cell was left blank, which asks for the branch price to go.
+        branchPrices: v.array(
+          v.object({
+            branchName: v.string(),
+            priceCentavos: v.optional(v.number()), // absent: follow the base
+          })
+        ),
+      })
+    ),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, ADMIN_ROLES);
+
+    if (args.rows.length === 0) {
+      throw new ConvexError({
+        code: "EMPTY_FILE",
+        message: "That file had no rows to read.",
+      });
+    }
+    if (args.rows.length > MAX_CSV_ROWS) {
+      throw new ConvexError({
+        code: "TOO_MANY_ROWS",
+        message: `That file has ${args.rows.length} rows. ${MAX_CSV_ROWS} at a time is the most this can read.`,
+      });
+    }
+
+    const branches = await ctx.db.query("branches").collect();
+    const branchByName = new Map(
+      branches.map((b) => [b.name.trim().toLowerCase(), b])
+    );
+
+    const cells = [];
+    const problems: { sku: string; reason: string }[] = [];
+    let unchanged = 0;
+
+    for (const row of args.rows) {
+      const sku = row.sku.trim();
+      if (!sku) continue;
+
+      const variant = await ctx.db
+        .query("variants")
+        .withIndex("by_sku", (q) => q.eq("sku", sku))
+        .first();
+      if (!variant) {
+        problems.push({ sku, reason: "No product with that SKU." });
+        continue;
+      }
+
+      const label = `${variant.size} / ${variant.color}`;
+
+      // The base price.
+      if (row.basePriceCentavos !== undefined) {
+        const next = Math.round(row.basePriceCentavos);
+        if (invalidPrice(next)) {
+          problems.push({ sku, reason: "Base SRP is not a usable price." });
+        } else if (next === variant.priceCentavos) {
+          unchanged++;
+        } else {
+          cells.push({
+            variantId: variant._id,
+            sku,
+            label,
+            action: "set" as const,
+            oldPriceCentavos: variant.priceCentavos,
+            newPriceCentavos: next,
+            belowBase: false,
+          });
+        }
+      }
+
+      // The branch prices. A blank cell asks for the branch's own price to go.
+      for (const entry of row.branchPrices) {
+        const branch = branchByName.get(entry.branchName.trim().toLowerCase());
+        if (!branch) {
+          problems.push({ sku, reason: `No branch named "${entry.branchName}".` });
+          continue;
+        }
+        const own = await branchPriceRow(ctx, branch._id, variant._id);
+        const current = own?.priceCentavos ?? variant.priceCentavos;
+
+        if (entry.priceCentavos === undefined) {
+          if (!own) {
+            unchanged++; // already following the base
+            continue;
+          }
+          cells.push({
+            variantId: variant._id,
+            branchId: branch._id,
+            sku,
+            label,
+            branchName: branch.name,
+            action: "reset" as const,
+            oldPriceCentavos: current,
+            newPriceCentavos: variant.priceCentavos,
+            belowBase: false,
+          });
+          continue;
+        }
+
+        const next = Math.round(entry.priceCentavos);
+        if (invalidPrice(next)) {
+          problems.push({ sku, reason: `${branch.name}: not a usable price.` });
+          continue;
+        }
+        if (own && next === own.priceCentavos) {
+          unchanged++;
+          continue;
+        }
+        if (!own && next === variant.priceCentavos) {
+          unchanged++; // writing the base price where none was set changes nothing
+          continue;
+        }
+        cells.push({
+          variantId: variant._id,
+          branchId: branch._id,
+          sku,
+          label,
+          branchName: branch.name,
+          action: "set" as const,
+          oldPriceCentavos: current,
+          newPriceCentavos: next,
+          belowBase: next < variant.priceCentavos,
+        });
+      }
+    }
+
+    if (cells.length === 0) {
+      return {
+        proposalId: null,
+        changed: 0,
+        unchanged,
+        problems,
+      };
+    }
+
+    const proposalId = await createProposal(ctx, {
+      source: "csv",
+      fileName: args.fileName,
+      summary:
+        args.note?.trim() ||
+        `${args.fileName}: ${cells.length} price${cells.length === 1 ? "" : "s"} changed`,
+      userId: user._id,
+      unchanged,
+      skipped: problems.length,
+      cells,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "prices.proposeCsv",
+      userId: user._id,
+      entityType: "priceProposals",
+      entityId: proposalId,
+      after: {
+        fileName: args.fileName,
+        rows: args.rows.length,
+        changed: cells.length,
+        unchanged,
+        problems: problems.length,
+      },
+    });
+
+    return { proposalId, changed: cells.length, unchanged, problems };
+  },
+});
+
+// ─── The queue ──────────────────────────────────────────────────────────────
+
+export const listPriceProposals = query({
+  args: {
+    status: v.optional(
+      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"))
+    ),
+  },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ADMIN_ROLES);
+
+    const all = await ctx.db
+      .query("priceProposals")
+      .withIndex("by_submittedAt")
+      .order("desc")
+      .take(200);
+
+    const rows = await Promise.all(
+      all
+        .filter((p) => (args.status ? p.status === args.status : true))
+        .map(async (p) => {
+          const [submitted, reviewed] = await Promise.all([
+            ctx.db.get(p.submittedById),
+            p.reviewedById ? ctx.db.get(p.reviewedById) : Promise.resolve(null),
+          ]);
+          return {
+            _id: p._id,
+            source: p.source,
+            fileName: p.fileName ?? null,
+            summary: p.summary,
+            status: p.status,
+            changedCount: p.changedCount,
+            unchangedCount: p.unchangedCount,
+            skippedCount: p.skippedCount,
+            belowBaseCount: p.belowBaseCount,
+            submittedAt: p.submittedAt,
+            submittedByName: submitted?.name ?? "Unknown",
+            reviewedAt: p.reviewedAt ?? null,
+            reviewedByName: reviewed?.name ?? null,
+            rejectionReason: p.rejectionReason ?? null,
+            appliedCount: p.appliedCount ?? null,
+          };
+        })
+    );
+    // Waiting first: the queue is the point of the page.
+    const order = { pending: 0, rejected: 1, approved: 2 } as const;
+    return rows.sort(
+      (a, b) => order[a.status] - order[b.status] || b.submittedAt - a.submittedAt
+    );
+  },
+});
+
+/** Every price in one proposal, as it would be after approval. */
+export const getPriceProposal = query({
+  args: { proposalId: v.id("priceProposals") },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ADMIN_ROLES);
+
+    const proposal = await ctx.db.get(args.proposalId);
+    if (!proposal) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Proposal not found." });
+    }
+    const cells = await ctx.db
+      .query("priceProposalCells")
+      .withIndex("by_proposal", (q) => q.eq("proposalId", args.proposalId))
+      .collect();
+
+    return {
+      _id: proposal._id,
+      status: proposal.status,
+      source: proposal.source,
+      fileName: proposal.fileName ?? null,
+      summary: proposal.summary,
+      submittedAt: proposal.submittedAt,
+      belowBaseCount: proposal.belowBaseCount,
+      unchangedCount: proposal.unchangedCount,
+      skippedCount: proposal.skippedCount,
+      rejectionReason: proposal.rejectionReason ?? null,
+      cells: cells
+        .map((c) => ({
+          _id: c._id,
+          sku: c.sku,
+          label: c.label,
+          scope: c.branchName ?? "Base SRP",
+          action: c.action,
+          oldPriceCentavos: c.oldPriceCentavos,
+          newPriceCentavos: c.newPriceCentavos,
+          belowBase: c.belowBase,
+        }))
+        .sort((a, b) => a.sku.localeCompare(b.sku) || a.scope.localeCompare(b.scope)),
+    };
+  },
+});
+
+// ─── Approving ──────────────────────────────────────────────────────────────
+
+export const approvePriceProposal = mutation({
+  args: { proposalId: v.id("priceProposals") },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, ADMIN_ROLES);
+
+    const proposal = await ctx.db.get(args.proposalId);
+    if (!proposal) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Proposal not found." });
+    }
+    if (proposal.status !== "pending") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: `This proposal was already ${proposal.status}.`,
+      });
+    }
+
+    const cells = await ctx.db
+      .query("priceProposalCells")
+      .withIndex("by_proposal", (q) => q.eq("proposalId", args.proposalId))
+      .collect();
+
+    const now = Date.now();
+    let applied = 0;
+
+    for (const cell of cells) {
+      const variant = await ctx.db.get(cell.variantId);
+      if (!variant) continue; // deleted since it was proposed
+
+      if (!cell.branchId) {
+        await ctx.db.patch(variant._id, {
+          priceCentavos: cell.newPriceCentavos,
+          updatedAt: now,
+        });
+      } else {
+        const own = await branchPriceRow(ctx, cell.branchId, cell.variantId);
+        if (cell.action === "reset") {
+          if (own) await ctx.db.delete(own._id);
+        } else if (own) {
+          await ctx.db.patch(own._id, {
+            priceCentavos: cell.newPriceCentavos,
+            updatedById: user._id,
+            updatedAt: now,
+          });
+        } else {
+          await ctx.db.insert("branchPrices", {
+            branchId: cell.branchId,
+            variantId: cell.variantId,
+            styleId: variant.styleId,
+            priceCentavos: cell.newPriceCentavos,
+            updatedById: user._id,
+            updatedAt: now,
+          });
+        }
+      }
+
+      await ctx.db.insert("priceChanges", {
+        variantId: cell.variantId,
+        ...(cell.branchId ? { branchId: cell.branchId } : {}),
+        action: cell.action,
+        oldPriceCentavos: cell.oldPriceCentavos,
+        newPriceCentavos: cell.newPriceCentavos,
+        changedById: user._id,
+        changedAt: now,
+      });
+      applied++;
+    }
+
+    await ctx.db.patch(args.proposalId, {
+      status: "approved" as const,
+      reviewedAt: now,
+      reviewedById: user._id,
+      appliedCount: applied,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "prices.approve",
+      userId: user._id,
+      entityType: "priceProposals",
+      entityId: args.proposalId,
+      before: { status: "pending" },
+      after: { status: "approved", applied, summary: proposal.summary },
+    });
+
+    return { applied };
+  },
+});
+
+export const rejectPriceProposal = mutation({
+  args: { proposalId: v.id("priceProposals"), reason: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireRole(ctx, ADMIN_ROLES);
+
+    const proposal = await ctx.db.get(args.proposalId);
+    if (!proposal) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "Proposal not found." });
+    }
+    if (proposal.status !== "pending") {
+      throw new ConvexError({
+        code: "INVALID_STATE",
+        message: `This proposal was already ${proposal.status}.`,
+      });
+    }
+    const reason = args.reason.trim();
+    if (reason === "") {
+      throw new ConvexError({
+        code: "INVALID_ARGUMENT",
+        message: "Give a reason, so it is clear why these prices were not taken.",
+      });
+    }
+
+    await ctx.db.patch(args.proposalId, {
+      status: "rejected" as const,
+      reviewedAt: Date.now(),
+      reviewedById: user._id,
+      rejectionReason: reason,
+    });
+
+    await _logAuditEntry(ctx, {
+      action: "prices.reject",
+      userId: user._id,
+      entityType: "priceProposals",
+      entityId: args.proposalId,
+      before: { status: "pending" },
+      after: { status: "rejected", reason },
+    });
   },
 });
