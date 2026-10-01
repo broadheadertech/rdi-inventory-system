@@ -78,11 +78,13 @@ export default function PosPage() {
 
 function PosPageContent() {
   const convex = useConvex();
-  const { addItem, items, discountType, restoreCart, fashionAssistantId } = usePOSCart();
-  // Nothing is punched until the sale has someone to credit. An attributed
-  // sale is an incentive paid, so it is declared up front rather than guessed
-  // at while the customer waits to pay.
-  const assistantDeclared = fashionAssistantId !== null;
+  const { addItem, items, discountType, restoreCart, fashionAssistantId, noFashionAssistant } =
+    usePOSCart();
+  // Nothing is punched until the sale has been settled one way or the other:
+  // an associate to credit, or a deliberate "nobody served this". An
+  // attributed sale is an incentive paid, so it is decided up front rather
+  // than guessed at while the customer waits to pay.
+  const assistantDeclared = fashionAssistantId !== null || noFashionAssistant;
   const connectionStatus = useConnectionStatus();
   const currentUser = useQuery(api.auth.users.getCurrentUser);
 

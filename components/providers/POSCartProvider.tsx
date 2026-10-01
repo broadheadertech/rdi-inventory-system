@@ -38,6 +38,8 @@ export type HeldTransaction = {
   /** The associate this sale is credited to, declared before anything is punched. */
   fashionAssistantId: string | null;
   fashionAssistantName: string | null;
+  /** Declared as having no associate — a walk-in nobody served. */
+  noFashionAssistant: boolean;
   /** The cart line given away under a gift-with-purchase, if one was picked. */
   giftVariantId: string | null;
   /** Set when that line stands in for a gift the branch had run out of. */
@@ -53,6 +55,8 @@ type CartState = {
   /** The associate this sale is credited to, declared before anything is punched. */
   fashionAssistantId: string | null;
   fashionAssistantName: string | null;
+  /** Declared as having no associate — a walk-in nobody served. */
+  noFashionAssistant: boolean;
   /** The cart line given away under a gift-with-purchase, if one was picked. */
   giftVariantId: string | null;
   /** Set when that line stands in for a gift the branch had run out of. */
@@ -75,6 +79,7 @@ type CartAction =
       type: "SET_FASHION_ASSISTANT";
       fashionAssistantId: string | null;
       fashionAssistantName: string | null;
+      noFashionAssistant: boolean;
     }
   | { type: "SET_GIFT"; variantId: string | null; substituted: boolean }
   | { type: "RESTORE_CART"; items: CartItem[]; discountType: DiscountType };
@@ -103,7 +108,9 @@ type POSCartContextValue = {
   setPromoIds: (promoIds: string[]) => void;
   fashionAssistantId: string | null;
   fashionAssistantName: string | null;
+  noFashionAssistant: boolean;
   setFashionAssistant: (id: string | null, name: string | null) => void;
+  setNoFashionAssistant: (none: boolean) => void;
   giftVariantId: string | null;
   giftSubstituted: boolean;
   setGift: (variantId: string | null, substituted?: boolean) => void;
@@ -167,6 +174,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         selectedPromoIds: [],
         fashionAssistantId: null,
         fashionAssistantName: null,
+        noFashionAssistant: false,
         giftVariantId: null,
         giftSubstituted: false,
       };
@@ -184,6 +192,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         selectedPromoIds: state.selectedPromoIds,
         fashionAssistantId: state.fashionAssistantId,
         fashionAssistantName: state.fashionAssistantName,
+        noFashionAssistant: state.noFashionAssistant,
         giftVariantId: state.giftVariantId,
         giftSubstituted: state.giftSubstituted,
       };
@@ -196,6 +205,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         selectedPromoIds: [],
         fashionAssistantId: null,
         fashionAssistantName: null,
+        noFashionAssistant: false,
         giftVariantId: null,
         giftSubstituted: false,
         holdCounter: nextCounter,
@@ -224,6 +234,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           selectedPromoIds: state.selectedPromoIds,
           fashionAssistantId: state.fashionAssistantId,
           fashionAssistantName: state.fashionAssistantName,
+          noFashionAssistant: state.noFashionAssistant,
           giftVariantId: state.giftVariantId,
           giftSubstituted: state.giftSubstituted,
         };
@@ -235,6 +246,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           selectedPromoIds: toResume.selectedPromoIds ?? [],
           fashionAssistantId: toResume.fashionAssistantId ?? null,
           fashionAssistantName: toResume.fashionAssistantName ?? null,
+          noFashionAssistant: toResume.noFashionAssistant ?? false,
           giftVariantId: toResume.giftVariantId ?? null,
           giftSubstituted: toResume.giftSubstituted ?? false,
           holdCounter: swapCounter,
@@ -250,6 +262,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         selectedPromoIds: toResume.selectedPromoIds ?? [],
         fashionAssistantId: toResume.fashionAssistantId ?? null,
         fashionAssistantName: toResume.fashionAssistantName ?? null,
+        noFashionAssistant: toResume.noFashionAssistant ?? false,
         giftVariantId: toResume.giftVariantId ?? null,
         giftSubstituted: toResume.giftSubstituted ?? false,
       };
@@ -270,6 +283,7 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         ...state,
         fashionAssistantId: action.fashionAssistantId,
         fashionAssistantName: action.fashionAssistantName,
+        noFashionAssistant: action.noFashionAssistant,
       };
 
     case "SET_PROMOS":
@@ -373,6 +387,7 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
       selectedPromoIds: [],
       fashionAssistantId: null,
       fashionAssistantName: null,
+      noFashionAssistant: false,
       giftVariantId: null,
       giftSubstituted: false,
       holdCounter: saved?.holdCounter ?? 0,
@@ -450,10 +465,25 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
 
   const setFashionAssistant = useCallback(
     (fashionAssistantId: string | null, fashionAssistantName: string | null) => {
-      dispatch({ type: "SET_FASHION_ASSISTANT", fashionAssistantId, fashionAssistantName });
+      // Naming someone settles it: the sale is no longer "nobody served it".
+      dispatch({
+        type: "SET_FASHION_ASSISTANT",
+        fashionAssistantId,
+        fashionAssistantName,
+        noFashionAssistant: false,
+      });
     },
     []
   );
+
+  const setNoFashionAssistant = useCallback((none: boolean) => {
+    dispatch({
+      type: "SET_FASHION_ASSISTANT",
+      fashionAssistantId: null,
+      fashionAssistantName: null,
+      noFashionAssistant: none,
+    });
+  }, []);
 
   const setGift = useCallback((variantId: string | null, substituted = false) => {
     dispatch({ type: "SET_GIFT", variantId, substituted });
@@ -500,7 +530,9 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
         setPromoIds,
         fashionAssistantId: state.fashionAssistantId,
         fashionAssistantName: state.fashionAssistantName,
+        noFashionAssistant: state.noFashionAssistant,
         setFashionAssistant,
+        setNoFashionAssistant,
         giftVariantId: state.giftVariantId,
         giftSubstituted: state.giftSubstituted,
         setGift,
