@@ -6,6 +6,7 @@ import { api as _api } from "@/convex/_generated/api";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const api = _api as any;
 import { POSProductGrid } from "@/components/pos/POSProductGrid";
+import { DeclareAssistant } from "@/components/pos/DeclareAssistant";
 import { POSCartPanel } from "@/components/pos/POSCartPanel";
 import { BarcodeScanner } from "@/components/shared/BarcodeScanner";
 import { ScanConfirmation, type ScanResult } from "@/components/pos/ScanConfirmation";
@@ -77,7 +78,11 @@ export default function PosPage() {
 
 function PosPageContent() {
   const convex = useConvex();
-  const { addItem, items, discountType, restoreCart } = usePOSCart();
+  const { addItem, items, discountType, restoreCart, fashionAssistantId } = usePOSCart();
+  // Nothing is punched until the sale has someone to credit. An attributed
+  // sale is an incentive paid, so it is declared up front rather than guessed
+  // at while the customer waits to pay.
+  const assistantDeclared = fashionAssistantId !== null;
   const connectionStatus = useConnectionStatus();
   const currentUser = useQuery(api.auth.users.getCurrentUser);
 
@@ -305,6 +310,7 @@ function PosPageContent() {
     async (code: string) => {
       const trimmed = code.trim();
       if (!trimmed) return;
+      if (!assistantDeclared) return;
 
       setScanResult({ type: "loading" });
       try {
@@ -338,7 +344,7 @@ function PosPageContent() {
         setScanResult({ type: "not-found" });
       }
     },
-    [convex, addItem]
+    [convex, addItem, assistantDeclared]
   );
 
   // Camera barcode scan
@@ -418,6 +424,10 @@ function PosPageContent() {
         {/* Left panel — scan area or browse grid */}
         <div className="flex-1 overflow-hidden lg:flex-[60] lg:border-r">
           <div className="flex h-full flex-col">
+            {/* Who this sale is credited to, before anything can be punched */}
+            <div className="border-b px-3 py-2">
+              <DeclareAssistant />
+            </div>
             {/* ── Top bar: mode toggle + cash balance + EOD ──────────── */}
             <div className="border-b px-3 py-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -646,7 +656,7 @@ function PosPageContent() {
 
             {/* ── Browse mode: product grid (existing) ─────────────── */}
             {/* The camera scanner lives in Barcode mode; Browse is all products. */}
-            {inputMode === "browse" && (
+            {inputMode === "browse" && assistantDeclared && (
               <>
                 <div className="flex-1 overflow-hidden">
                   <POSProductGrid

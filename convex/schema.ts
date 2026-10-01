@@ -1879,7 +1879,12 @@ export default defineSchema({
   fashionAssistants: defineTable({
     name: v.string(),
     branchId: v.id("branches"),
-    employeeCode: v.optional(v.string()), // optional internal ID / code
+    employeeCode: v.optional(v.string()), // the branch's own payroll/badge code, free text
+    // The identifier the till works to. Issued by RDI on approval, company-wide
+    // and never reused, so two stores can never clash and a sale is attributed
+    // to a person rather than to a name that two people might share. A pending
+    // or rejected associate has none, which is why the till cannot find them.
+    uid: v.optional(v.string()),
     status: v.union(
       v.literal("pending"),
       v.literal("approved"),
@@ -1893,7 +1898,8 @@ export default defineSchema({
     rejectionReason: v.optional(v.string()),
   })
     .index("by_branch", ["branchId", "isActive"])
-    .index("by_status", ["status", "createdAt"]),
+    .index("by_status", ["status", "createdAt"])
+    .index("by_uid", ["uid"]),
 
   // ─── Trading Calendar Reminder Dedup ────────────────────────────────────────
   tradingReminders: defineTable({

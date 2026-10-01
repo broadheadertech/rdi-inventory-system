@@ -1,5 +1,6 @@
 import { v, ConvexError } from "convex/values";
 import { query, mutation } from "../_generated/server";
+import type { MutationCtx } from "../_generated/server";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
@@ -260,6 +261,7 @@ export const listForReview = query({
         return {
           _id: fa._id,
           name: fa.name,
+          uid: fa.uid ?? null,
           employeeCode: fa.employeeCode ?? null,
           branchName: nameById.get(fa.branchId as string) ?? "Unknown",
           status: fa.status,
@@ -294,6 +296,22 @@ export const countPending = query({
   },
 });
 
+/** FA-0001, FA-0002 … company-wide, and never reused. */
+const UID_PREFIX = "FA-";
+
+async function nextUid(ctx: MutationCtx): Promise<string> {
+  const all = await ctx.db.query("fashionAssistants").collect();
+  let highest = 0;
+  for (const fa of all) {
+    if (!fa.uid?.startsWith(UID_PREFIX)) continue;
+    const n = Number(fa.uid.slice(UID_PREFIX.length));
+    if (Number.isFinite(n) && n > highest) highest = n;
+  }
+  // Counting past the highest ever issued, not past the current count, so a
+  // number is never handed to a second person.
+  return `${UID_PREFIX}${String(highest + 1).padStart(4, "0")}`;
+}
+
 export const approve = mutation({
   args: { id: v.id("fashionAssistants") },
   handler: async (ctx, args) => {
@@ -307,8 +325,14 @@ export const approve = mutation({
       throw new ConvexError({ code: "INVALID_STATE", message: "Already approved." });
     }
 
+    // Approval is what makes someone real to the till, so that is when they
+    // get the number the till works to. One they were given before — an
+    // approval that was later withdrawn — is theirs to keep.
+    const uid = fa.uid ?? (await nextUid(ctx));
+
     await ctx.db.patch(args.id, {
       status: "approved" as const,
+      uid,
       reviewedAt: Date.now(),
       reviewedById: user._id,
       // A refusal that is later approved should not keep explaining itself.
@@ -322,7 +346,7 @@ export const approve = mutation({
       entityType: "fashionAssistants",
       entityId: args.id,
       before: { status: fa.status },
-      after: { status: "approved", name: fa.name },
+      after: { status: "approved", name: fa.name, uid },
     });
   },
 });
@@ -360,5 +384,44 @@ export const reject = mutation({
       before: { status: fa.status },
       after: { status: "rejected", name: fa.name, reason },
     });
+  },
+});
+
+// ─── getByUid ────────────────────────────────────────────────────────────────
+// The till's lookup: a scanned or typed UID, resolved to an associate of this
+// branch. Only an approved, still-working associate resolves, so declaring one
+// cannot attribute a sale to someone awaiting approval or long gone.
+
+export const getByUid = query({
+  args: { uid: v.string() },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+    if (!scope.branchId) return null;
+
+    const code = args.uid.trim().toUpperCase();
+    if (code === "") return null;
+
+    const fa = await ctx.db
+      .query("fashionAssistants")
+      .withIndex("by_uid", (q) => q.eq("uid", code))
+      .first();
+
+    if (!fa) return { found: false as const, reason: "unknown" as const };
+    if ((fa.branchId as string) !== (scope.branchId as string)) {
+      return { found: false as const, reason: "otherBranch" as const };
+    }
+    if (fa.status !== "approved") {
+      return { found: false as const, reason: "notApproved" as const };
+    }
+    if (!fa.isActive) {
+      return { found: false as const, reason: "inactive" as const };
+    }
+
+    return {
+      found: true as const,
+      _id: fa._id,
+      name: fa.name,
+      uid: fa.uid!,
+    };
   },
 });

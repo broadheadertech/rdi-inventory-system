@@ -35,6 +35,9 @@ export type HeldTransaction = {
   heldAt: number;
   discountType: DiscountType;
   selectedPromoIds: string[];
+  /** The associate this sale is credited to, declared before anything is punched. */
+  fashionAssistantId: string | null;
+  fashionAssistantName: string | null;
   /** The cart line given away under a gift-with-purchase, if one was picked. */
   giftVariantId: string | null;
   /** Set when that line stands in for a gift the branch had run out of. */
@@ -47,6 +50,9 @@ type CartState = {
   activeTransactionId: string;
   discountType: DiscountType;
   selectedPromoIds: string[];
+  /** The associate this sale is credited to, declared before anything is punched. */
+  fashionAssistantId: string | null;
+  fashionAssistantName: string | null;
   /** The cart line given away under a gift-with-purchase, if one was picked. */
   giftVariantId: string | null;
   /** Set when that line stands in for a gift the branch had run out of. */
@@ -65,6 +71,11 @@ type CartAction =
   | { type: "RESTORE_HELD"; heldTransactions: HeldTransaction[]; holdCounter: number }
   | { type: "SET_DISCOUNT_TYPE"; discountType: DiscountType }
   | { type: "SET_PROMOS"; promoIds: string[] }
+  | {
+      type: "SET_FASHION_ASSISTANT";
+      fashionAssistantId: string | null;
+      fashionAssistantName: string | null;
+    }
   | { type: "SET_GIFT"; variantId: string | null; substituted: boolean }
   | { type: "RESTORE_CART"; items: CartItem[]; discountType: DiscountType };
 
@@ -90,6 +101,9 @@ type POSCartContextValue = {
   setDiscountType: (type: DiscountType) => void;
   selectedPromoIds: string[];
   setPromoIds: (promoIds: string[]) => void;
+  fashionAssistantId: string | null;
+  fashionAssistantName: string | null;
+  setFashionAssistant: (id: string | null, name: string | null) => void;
   giftVariantId: string | null;
   giftSubstituted: boolean;
   setGift: (variantId: string | null, substituted?: boolean) => void;
@@ -151,6 +165,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         items: [],
         discountType: "none",
         selectedPromoIds: [],
+        fashionAssistantId: null,
+        fashionAssistantName: null,
         giftVariantId: null,
         giftSubstituted: false,
       };
@@ -166,6 +182,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         heldAt: Date.now(),
         discountType: state.discountType,
         selectedPromoIds: state.selectedPromoIds,
+        fashionAssistantId: state.fashionAssistantId,
+        fashionAssistantName: state.fashionAssistantName,
         giftVariantId: state.giftVariantId,
         giftSubstituted: state.giftSubstituted,
       };
@@ -176,6 +194,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         activeTransactionId: generateTransactionId(),
         discountType: "none",
         selectedPromoIds: [],
+        fashionAssistantId: null,
+        fashionAssistantName: null,
         giftVariantId: null,
         giftSubstituted: false,
         holdCounter: nextCounter,
@@ -202,6 +222,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           heldAt: Date.now(),
           discountType: state.discountType,
           selectedPromoIds: state.selectedPromoIds,
+          fashionAssistantId: state.fashionAssistantId,
+          fashionAssistantName: state.fashionAssistantName,
           giftVariantId: state.giftVariantId,
           giftSubstituted: state.giftSubstituted,
         };
@@ -211,6 +233,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
           activeTransactionId: toResume.id,
           discountType: toResume.discountType,
           selectedPromoIds: toResume.selectedPromoIds ?? [],
+          fashionAssistantId: toResume.fashionAssistantId ?? null,
+          fashionAssistantName: toResume.fashionAssistantName ?? null,
           giftVariantId: toResume.giftVariantId ?? null,
           giftSubstituted: toResume.giftSubstituted ?? false,
           holdCounter: swapCounter,
@@ -224,6 +248,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         activeTransactionId: toResume.id,
         discountType: toResume.discountType,
         selectedPromoIds: toResume.selectedPromoIds ?? [],
+        fashionAssistantId: toResume.fashionAssistantId ?? null,
+        fashionAssistantName: toResume.fashionAssistantName ?? null,
         giftVariantId: toResume.giftVariantId ?? null,
         giftSubstituted: toResume.giftSubstituted ?? false,
       };
@@ -237,6 +263,13 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         selectedPromoIds: action.discountType !== "none" ? [] : state.selectedPromoIds,
         giftVariantId: action.discountType !== "none" ? null : state.giftVariantId,
         giftSubstituted: action.discountType !== "none" ? false : state.giftSubstituted,
+      };
+
+    case "SET_FASHION_ASSISTANT":
+      return {
+        ...state,
+        fashionAssistantId: action.fashionAssistantId,
+        fashionAssistantName: action.fashionAssistantName,
       };
 
     case "SET_PROMOS":
@@ -338,6 +371,8 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
       activeTransactionId: generateTransactionId(),
       discountType: "none" as DiscountType,
       selectedPromoIds: [],
+      fashionAssistantId: null,
+      fashionAssistantName: null,
       giftVariantId: null,
       giftSubstituted: false,
       holdCounter: saved?.holdCounter ?? 0,
@@ -413,6 +448,13 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "SET_PROMOS", promoIds });
   }, []);
 
+  const setFashionAssistant = useCallback(
+    (fashionAssistantId: string | null, fashionAssistantName: string | null) => {
+      dispatch({ type: "SET_FASHION_ASSISTANT", fashionAssistantId, fashionAssistantName });
+    },
+    []
+  );
+
   const setGift = useCallback((variantId: string | null, substituted = false) => {
     dispatch({ type: "SET_GIFT", variantId, substituted });
   }, []);
@@ -456,6 +498,9 @@ export function POSCartProvider({ children }: { children: ReactNode }) {
         setDiscountType,
         selectedPromoIds: state.selectedPromoIds,
         setPromoIds,
+        fashionAssistantId: state.fashionAssistantId,
+        fashionAssistantName: state.fashionAssistantName,
+        setFashionAssistant,
         giftVariantId: state.giftVariantId,
         giftSubstituted: state.giftSubstituted,
         setGift,

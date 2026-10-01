@@ -1318,9 +1318,8 @@ function PaymentPanel({
 }) {
   const createTransaction = useMutation(api.pos.transactions.createTransaction);
   const currentUser = useQuery(api.auth.users.getCurrentUser);
-  const fashionAssistants = useQuery(api.pos.fashionAssistants.listActive);
   const connectionStatus = useConnectionStatus();
-  const { clearCart } = usePOSCart();
+  const { clearCart, fashionAssistantId: cartFashionAssistantId } = usePOSCart();
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [amountTendered, setAmountTendered] = useState<number | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -1328,7 +1327,6 @@ function PaymentPanel({
     onProcessingChange?.(isProcessing);
   }, [isProcessing, onProcessingChange]);
   const [error, setError] = useState<string | null>(null);
-  const [selectedFaId, setSelectedFaId] = useState<string>("none");
 
   // BIR Sold-To + SC/PWD capture (optional)
   const [customerName, setCustomerName] = useState("");
@@ -1489,8 +1487,9 @@ function PaymentPanel({
         giftSubstituted: giftSubstituted || undefined,
         splitPayment: splitPaymentArg,
         paymentReference: needsReference ? paymentReference.trim() : undefined,
-        fashionAssistantId: selectedFaId !== "none"
-          ? (selectedFaId as Id<"fashionAssistants">)
+        // Declared before the first item was punched, not guessed at here.
+        fashionAssistantId: cartFashionAssistantId
+          ? (cartFashionAssistantId as Id<"fashionAssistants">)
           : undefined,
         customerName: customerName.trim() || undefined,
         customerTin: customerTin.trim() || undefined,
@@ -1776,27 +1775,6 @@ function PaymentPanel({
         </div>
       )}
 
-      {/* Fashion Assistant selector */}
-      {fashionAssistants && fashionAssistants.length > 0 && (
-        <div className="mb-4">
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">
-            Fashion Assistant <span className="text-muted-foreground/60">(optional)</span>
-          </label>
-          <select
-            value={selectedFaId}
-            onChange={(e) => setSelectedFaId(e.target.value)}
-            disabled={isProcessing}
-            className="h-11 w-full rounded-md border bg-background px-3 text-sm"
-          >
-            <option value="none">— No fashion assistant —</option>
-            {fashionAssistants.map((fa) => (
-              <option key={String(fa._id)} value={String(fa._id)}>
-                {fa.name}{fa.employeeCode ? ` (${fa.employeeCode})` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
 
       {/* Customer / BIR details (optional; SC/PWD required for discounted sales) */}
       <details className="mb-3 rounded-md border p-2">
