@@ -1,0 +1,10 @@
+# PDFs and other binaries must never have their line endings rewritten:
+# a checkout that "fixes" LF to CRLF inside a PDF corrupts it.
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.zip binary
+*.xlsx binary
