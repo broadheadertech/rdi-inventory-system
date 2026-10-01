@@ -1867,14 +1867,33 @@ export default defineSchema({
     .index("by_user_unread", ["userId", "isRead"]),
 
   // ─── Fashion Assistants ──────────────────────────────────────────────────────
+  // Sales associates on the shop floor, attributed on a sale for incentives.
+  //
+  // A branch adds its own and HQ approves them: the branch knows who works
+  // there, and an incentive paid against a name nobody signed off is how a
+  // store quietly pays itself. A pending or rejected associate is never
+  // offered at the till, so no sale can be attributed to one.
+  //
+  // isActive is separate from status: it retires an approved associate who has
+  // left, while keeping their past sales attributed to them.
   fashionAssistants: defineTable({
     name: v.string(),
     branchId: v.id("branches"),
     employeeCode: v.optional(v.string()), // optional internal ID / code
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("rejected")
+    ),
     isActive: v.boolean(),
     createdAt: v.number(),
     createdById: v.id("users"),
-  }).index("by_branch", ["branchId", "isActive"]),
+    reviewedAt: v.optional(v.number()),
+    reviewedById: v.optional(v.id("users")),
+    rejectionReason: v.optional(v.string()),
+  })
+    .index("by_branch", ["branchId", "isActive"])
+    .index("by_status", ["status", "createdAt"]),
 
   // ─── Trading Calendar Reminder Dedup ────────────────────────────────────────
   tradingReminders: defineTable({

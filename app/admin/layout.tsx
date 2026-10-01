@@ -22,6 +22,7 @@ import {
   Receipt,
   Settings,
   Tag,
+  UserCheck,
   Sparkles,
   Ruler,
   Clock,
@@ -77,6 +78,12 @@ const operationsNavItems: NavItem[] = [
 
 const marketingNavItems: NavItem[] = [
   { href: "/admin/promotions", label: "Promotions", icon: Tag, roles: ["admin"] },
+  {
+    href: "/admin/fashion-assistants",
+    label: "Fashion Assistants",
+    icon: UserCheck,
+    roles: ["admin"],
+  },
 ];
 
 const insightsNavItems: NavItem[] = [

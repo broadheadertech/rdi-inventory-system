@@ -22,6 +22,8 @@ type FA = {
   _id: Id<"fashionAssistants">;
   name: string;
   employeeCode?: string;
+  status: "pending" | "approved" | "rejected";
+  rejectionReason?: string;
   isActive: boolean;
   createdAt: number;
 };
@@ -258,7 +260,7 @@ export default function FashionAssistantsPage() {
         toast.success("Fashion assistant updated");
       } else {
         await createFA({ name: formName.trim(), employeeCode: formCode.trim() || undefined });
-        toast.success("Fashion assistant added");
+        toast.success("Sent to HQ for approval");
       }
       setShowForm(false);
     } catch (err) {
@@ -305,7 +307,8 @@ export default function FashionAssistantsPage() {
               <h2 className="text-lg font-semibold">Manage Assistants</h2>
             </div>
             <p className="text-sm text-muted-foreground mt-1">
-              Add, edit, or deactivate floor staff. Selected at POS for incentive tracking.
+              Add your floor staff here. HQ approves them before the till can attribute a
+              sale, so incentives are only earned against names head office has signed off.
             </p>
           </div>
           <Button onClick={openAdd} size="sm">
@@ -345,17 +348,37 @@ export default function FashionAssistantsPage() {
                       {fa.employeeCode ?? "—"}
                     </TableCell>
                     <TableCell>
+                      {/* HQ has to approve before the till will offer a name. */}
                       <Badge
                         variant="outline"
                         className={cn(
                           "text-xs",
-                          fa.isActive
+                          fa.status === "approved"
                             ? "text-green-600 border-green-500/30 bg-green-500/10"
-                            : "text-gray-400 border-gray-300"
+                            : fa.status === "rejected"
+                              ? "text-red-600 border-red-400/40 bg-red-500/10"
+                              : "text-amber-700 border-amber-400/50 bg-amber-500/10"
                         )}
                       >
-                        {fa.isActive ? "Active" : "Inactive"}
+                        {fa.status === "approved"
+                          ? "Approved"
+                          : fa.status === "rejected"
+                            ? "Rejected"
+                            : "Waiting for HQ"}
                       </Badge>
+                      {fa.status === "approved" && !fa.isActive && (
+                        <Badge
+                          variant="outline"
+                          className="ml-1 text-xs text-gray-400 border-gray-300"
+                        >
+                          Inactive
+                        </Badge>
+                      )}
+                      {fa.status === "rejected" && fa.rejectionReason && (
+                        <p className="mt-0.5 text-[11px] text-red-600">
+                          {fa.rejectionReason}
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {new Date(fa.createdAt).toLocaleDateString()}
