@@ -1114,25 +1114,77 @@ export const confirmTransferDelivery = mutation({
   },
 });
 
-// ─── Branch-scoped: list in-transit transfers to this branch ──────────────
+// ─── Branch-scoped: incoming transfers, by where each one has got to ──────
+// The page used to show in-transit deliveries only, which answered "what do I
+// scan next" and nothing else. A receiver also has to find the one that came
+// up short last week, and see that yesterday's went through — so the list now
+// carries four stages:
+//
+//   pending    handed over, nothing scanned yet
+//   receiving  part-scanned, still open
+//   dispute    an open receiving dispute — a difference someone owes an answer
+//   done       confirmed, with nothing outstanding
+//
+// A dispute is defined by an OPEN dispute row rather than by a flagged box,
+// because that is this system's own account of what still needs explaining.
+// Once it is settled the transfer reads by its own status again, so a
+// difference that was looked into and closed stops shouting.
+//
+// Delivered transfers would otherwise pile up forever, so the Done stage holds
+// a quarter — long enough to answer "did that arrive?" about anything a
+// receiver still remembers, short enough that the list stays cheap to build.
+// Anything still disputed is listed however old it is: a dispute does not age
+// out of being someone's problem.
+//
+// RECEIVING_HISTORY_DAYS is stated in the page's empty line too — keep the two
+// in step (app/branch/box-receiving/page.tsx).
 
-export const listBranchInTransitTransfers = query({
+const RECEIVING_HISTORY_DAYS = 90;
+const DELIVERED_WINDOW_MS = RECEIVING_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+
+export type ReceivingStage = "pending" | "receiving" | "dispute" | "done";
+
+export const listBranchIncomingTransfers = query({
   args: {},
   handler: async (ctx) => {
     const scope = await withBranchScope(ctx);
     if (!scope.branchId) return [];
+    const branchId = scope.branchId;
 
-    const transfers = await ctx.db
+    const all = await ctx.db
       .query("transfers")
-      .withIndex("by_to_branch", (q) => q.eq("toBranchId", scope.branchId!))
+      .withIndex("by_to_branch", (q) => q.eq("toBranchId", branchId))
       .collect();
 
-    const inTransit = transfers.filter((t) => t.status === "inTransit");
+    // Which transfers still have a difference outstanding. One indexed read:
+    // settled disputes are deliberately not fetched, since a settled
+    // difference no longer changes what stage a transfer is at.
+    const openDisputes = await ctx.db
+      .query("disputes")
+      .withIndex("by_branch_status", (q) =>
+        q.eq("branchId", branchId).eq("status", "open")
+      )
+      .collect();
+    const disputedTransferIds = new Set(
+      openDisputes
+        .filter((d) => d.kind === "transferReceiving" && d.transferId)
+        .map((d) => d.transferId as string)
+    );
+
+    const cutoff = Date.now() - DELIVERED_WINDOW_MS;
+    const relevant = all.filter((t) => {
+      if (disputedTransferIds.has(t._id as string)) return true;
+      if (t.status === "inTransit") return true;
+      if (t.status === "delivered") {
+        return (t.deliveredAt ?? t.updatedAt) >= cutoff;
+      }
+      return false;
+    });
 
     const getBranchName = makeBranchNameResolver((id) => ctx.db.get(id));
 
     const enriched = await Promise.all(
-      inTransit.map(async (transfer) => {
+      relevant.map(async (transfer) => {
         const fromBranchName = await getBranchName(transfer.fromBranchId);
         const toBranchName = await getBranchName(transfer.toBranchId);
         const items = await ctx.db
@@ -1143,20 +1195,72 @@ export const listBranchInTransitTransfers = query({
           .query("transferBoxes")
           .withIndex("by_transfer", (q) => q.eq("transferId", transfer._id))
           .collect();
+
+        // What should arrive: what was packed, or what was asked for on a
+        // transfer that never went through packing.
+        const expectedUnits = items.reduce(
+          (sum, item) => sum + (item.packedQuantity ?? item.requestedQuantity),
+          0
+        );
+        const confirmedUnits = items.reduce(
+          (sum, item) => sum + (item.receivedQuantity ?? 0),
+          0
+        );
+
+        // Progress before anything is confirmed lives in the scans, since
+        // receivedQuantity is only written when the receipt is closed. Scans
+        // are what tells a part-done delivery from an untouched one.
+        const scanned = await transferScanCounts(ctx, transfer._id);
+        let scannedUnits = 0;
+        for (const count of scanned.values()) scannedUnits += count;
+
+        const boxesReceived = boxes.filter((b) => b.status === "received").length;
+        const flaggedBoxes = boxes.filter((b) => b.status === "discrepancy").length;
+
+        const disputed = disputedTransferIds.has(transfer._id as string);
+        const started = scannedUnits > 0 || boxesReceived > 0 || confirmedUnits > 0;
+
+        const stage: ReceivingStage = disputed
+          ? "dispute"
+          : transfer.status === "delivered"
+            ? "done"
+            : started
+              ? "receiving"
+              : "pending";
+
         return {
           _id: transfer._id,
+          stage,
           fromBranchName,
           toBranchName,
           itemCount: items.length,
+          expectedUnits,
+          // What is counted so far: the confirmed figure once it exists,
+          // otherwise the scans standing against it.
+          receivedUnits: confirmedUnits > 0 ? confirmedUnits : scannedUnits,
           shippedAt: transfer.shippedAt ?? null,
+          deliveredAt: transfer.deliveredAt ?? null,
           createdAt: transfer.createdAt,
           deliveryMode: boxes.length > 0 ? ("box" as const) : ("piece" as const),
           boxCount: boxes.length,
+          boxesReceived,
+          flaggedBoxes,
+          // Whether this one can still be scanned, which is what decides
+          // between an action button and a read-only row.
+          isOpen: transfer.status === "inTransit",
         };
       })
     );
 
-    return enriched.sort((a, b) => a.createdAt - b.createdAt);
+    // Oldest first among the ones still to do — that is the order they should
+    // be dealt with. Anything finished reads newest first instead, because
+    // what someone looks for in a closed list is the most recent.
+    return enriched.sort((a, b) => {
+      const aDone = a.stage === "done";
+      const bDone = b.stage === "done";
+      if (aDone !== bDone) return aDone ? 1 : -1;
+      return aDone ? b.createdAt - a.createdAt : a.createdAt - b.createdAt;
+    });
   },
 });
 

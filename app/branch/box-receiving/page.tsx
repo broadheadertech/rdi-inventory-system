@@ -993,14 +993,62 @@ function PieceReceivingView({
   );
 }
 
+// ─── Stage filter ────────────────────────────────────────────────────────────
+// Four questions a receiver actually has: what is waiting, what am I part way
+// through, what went wrong, and what is finished. "All" is kept because the
+// stage of a particular delivery is not always known before looking for it.
+
+type StageTab = "all" | "pending" | "receiving" | "dispute" | "done";
+
+const STAGE_TABS: { value: StageTab; label: string }[] = [
+  { value: "pending", label: "Pending" },
+  { value: "receiving", label: "Receiving" },
+  { value: "dispute", label: "Dispute" },
+  { value: "done", label: "Done" },
+  { value: "all", label: "All" },
+];
+
+const STAGE_STYLE: Record<string, string> = {
+  pending: "bg-amber-100 text-amber-800",
+  receiving: "bg-blue-100 text-blue-800",
+  dispute: "bg-red-100 text-red-800",
+  done: "bg-green-100 text-green-800",
+};
+
+function StageBadge({ stage }: { stage: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize",
+        STAGE_STYLE[stage] ?? "bg-gray-100 text-gray-800"
+      )}
+    >
+      {stage}
+    </span>
+  );
+}
+
+const EMPTY_LINE: Record<StageTab, string> = {
+  pending: "Nothing waiting to be scanned.",
+  receiving: "Nothing part-received.",
+  dispute: "No open receiving disputes.",
+  // The 90 days is RECEIVING_HISTORY_DAYS in convex/transfers/fulfillment.ts.
+  done: "Nothing received in the last 90 days.",
+  all: "No incoming transfers.",
+};
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function BranchReceivingPage() {
   const [view, setView] = useState<"list" | "box" | "piece">("list");
   const [selectedPieceTransferId, setSelectedPieceTransferId] = useState<Id<"transfers"> | null>(null);
+  const [stage, setStage] = useState<StageTab>("pending");
 
-  const inTransitTransfers = useQuery(api.transfers.fulfillment.listBranchInTransitTransfers);
-  const pagination = usePagination(inTransitTransfers ?? [], 10);
+  const incoming = useQuery(api.transfers.fulfillment.listBranchIncomingTransfers);
+  const filtered = (incoming ?? []).filter(
+    (transfer) => stage === "all" || transfer.stage === stage
+  );
+  const pagination = usePagination(filtered, 10);
 
   // Box mode → scan QR codes
   if (view === "box") {
@@ -1017,7 +1065,6 @@ export default function BranchReceivingPage() {
     );
   }
 
-  // List of in-transit transfers
   return (
     <div className="space-y-6">
       <div>
@@ -1033,16 +1080,50 @@ export default function BranchReceivingPage() {
       {/* Deliveries handed over but not yet scanned in */}
       <StalledHandshakes />
 
-      {!inTransitTransfers ? (
+      {/* ── Stage tabs ─────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap gap-2">
+        {STAGE_TABS.map((tab) => {
+          const count =
+            incoming === undefined
+              ? null
+              : tab.value === "all"
+                ? incoming.length
+                : incoming.filter((t) => t.stage === tab.value).length;
+          return (
+            <button
+              key={tab.value}
+              type="button"
+              onClick={() => setStage(tab.value)}
+              className={cn(
+                "px-3 py-1.5 rounded-full text-sm font-medium transition-colors",
+                stage === tab.value
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/70"
+              )}
+            >
+              {tab.label}
+              {count !== null && (
+                <span className="ml-1.5 text-xs opacity-70">({count})</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {incoming === undefined ? (
         <div className="p-8 space-y-2">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="h-14 animate-pulse rounded bg-muted" />
           ))}
         </div>
-      ) : inTransitTransfers.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className="flex flex-col items-center gap-2 p-12 text-sm text-muted-foreground border rounded-lg">
-          <CheckCircle2 className="h-10 w-10" />
-          <p>No incoming transfers to receive.</p>
+          {stage === "dispute" ? (
+            <CheckCircle2 className="h-10 w-10" />
+          ) : (
+            <Package className="h-10 w-10" />
+          )}
+          <p>{EMPTY_LINE[stage]}</p>
         </div>
       ) : (
         <>
@@ -1051,6 +1132,7 @@ export default function BranchReceivingPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>From</TableHead>
+                  <TableHead>Stage</TableHead>
                   <TableHead>Items</TableHead>
                   <TableHead>Mode</TableHead>
                   <TableHead>Shipped</TableHead>
@@ -1061,11 +1143,39 @@ export default function BranchReceivingPage() {
                 {pagination.paginatedData.map((transfer) => (
                   <TableRow key={String(transfer._id)}>
                     <TableCell className="font-medium">{transfer.fromBranchName}</TableCell>
-                    <TableCell>{transfer.itemCount} lines</TableCell>
+                    <TableCell>
+                      <StageBadge stage={transfer.stage} />
+                      {transfer.flaggedBoxes > 0 && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {transfer.flaggedBoxes} box
+                          {transfer.flaggedBoxes === 1 ? "" : "es"} flagged
+                        </p>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {transfer.itemCount} lines
+                      {/* The count so far against what was packed, so a
+                          part-received delivery says how far it got. */}
+                      {transfer.stage !== "pending" && transfer.expectedUnits > 0 && (
+                        <p
+                          className={cn(
+                            "text-xs mt-0.5 tabular-nums",
+                            transfer.receivedUnits < transfer.expectedUnits
+                              ? "text-amber-700"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          {transfer.receivedUnits} of {transfer.expectedUnits} units
+                        </p>
+                      )}
+                    </TableCell>
                     <TableCell>
                       {transfer.deliveryMode === "box" ? (
                         <Badge variant="outline" className="text-xs">
-                          <QrCode className="h-3 w-3 mr-1" /> {transfer.boxCount} boxes
+                          <QrCode className="h-3 w-3 mr-1" />
+                          {transfer.boxesReceived > 0 && transfer.isOpen
+                            ? `${transfer.boxesReceived}/${transfer.boxCount} boxes`
+                            : `${transfer.boxCount} boxes`}
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="text-xs">
@@ -1077,16 +1187,29 @@ export default function BranchReceivingPage() {
                       {transfer.shippedAt ? new Date(transfer.shippedAt).toLocaleDateString() : "—"}
                     </TableCell>
                     <TableCell className="text-right">
-                      {transfer.deliveryMode === "box" ? (
+                      {/* Only a delivery still in transit can be scanned. A
+                          closed one, disputed or not, is settled elsewhere —
+                          offering a scan button here would be a dead end. */}
+                      {!transfer.isOpen ? (
+                        <span className="text-xs text-muted-foreground">
+                          {transfer.stage === "dispute"
+                            ? "Settle in Disputes"
+                            : transfer.deliveredAt
+                              ? new Date(transfer.deliveredAt).toLocaleDateString()
+                              : "—"}
+                        </span>
+                      ) : transfer.deliveryMode === "box" ? (
                         <Button size="sm" onClick={() => setView("box")}>
-                          <QrCode className="h-3.5 w-3.5 mr-1" /> Scan Boxes
+                          <QrCode className="h-3.5 w-3.5 mr-1" />
+                          {transfer.stage === "receiving" ? "Continue" : "Scan Boxes"}
                         </Button>
                       ) : (
                         <Button size="sm" onClick={() => {
                           setSelectedPieceTransferId(transfer._id);
                           setView("piece");
                         }}>
-                          <List className="h-3.5 w-3.5 mr-1" /> Receive Items
+                          <List className="h-3.5 w-3.5 mr-1" />
+                          {transfer.stage === "receiving" ? "Continue" : "Receive Items"}
                         </Button>
                       )}
                     </TableCell>
@@ -1095,7 +1218,7 @@ export default function BranchReceivingPage() {
               </TableBody>
             </Table>
           </div>
-          {(inTransitTransfers?.length ?? 0) > 10 && (
+          {filtered.length > 10 && (
             <TablePagination
               currentPage={pagination.currentPage}
               totalPages={pagination.totalPages}
