@@ -58,6 +58,7 @@ const operationsNavItems: NavItem[] = [
   { href: "/warehouse/surge-alerts", label: "Surge Alerts", icon: TrendingUp },
   { href: "/warehouse/inventory-aging", label: "Inventory Aging", icon: Clock },
   { href: "/warehouse/fulfillment-speed", label: "Fulfillment Speed", icon: Timer },
+  { href: "/warehouse/logistics-report", label: "Logistics Report", icon: BarChart3 },
 ];
 
 const floorNavItems: NavItem[] = [

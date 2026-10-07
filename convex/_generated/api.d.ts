@@ -48,6 +48,8 @@ import type * as analytics_crossSellAnalytics from "../analytics/crossSellAnalyt
 import type * as analytics_expansionIntel from "../analytics/expansionIntel.js";
 import type * as analytics_fulfillmentSpeed from "../analytics/fulfillmentSpeed.js";
 import type * as analytics_holidayForecast from "../analytics/holidayForecast.js";
+import type * as analytics_logisticsReport from "../analytics/logisticsReport.js";
+import type * as analytics_logisticsStats from "../analytics/logisticsStats.js";
 import type * as analytics_sellThrough from "../analytics/sellThrough.js";
 import type * as analytics_staffChampions from "../analytics/staffChampions.js";
 import type * as analytics_tradingCalendar from "../analytics/tradingCalendar.js";
@@ -226,6 +228,8 @@ declare const fullApi: ApiFromModules<{
   "analytics/expansionIntel": typeof analytics_expansionIntel;
   "analytics/fulfillmentSpeed": typeof analytics_fulfillmentSpeed;
   "analytics/holidayForecast": typeof analytics_holidayForecast;
+  "analytics/logisticsReport": typeof analytics_logisticsReport;
+  "analytics/logisticsStats": typeof analytics_logisticsStats;
   "analytics/sellThrough": typeof analytics_sellThrough;
   "analytics/staffChampions": typeof analytics_staffChampions;
   "analytics/tradingCalendar": typeof analytics_tradingCalendar;
