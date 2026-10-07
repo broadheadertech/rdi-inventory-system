@@ -71,6 +71,7 @@ import type * as catalog_categories from "../catalog/categories.js";
 import type * as catalog_drops from "../catalog/drops.js";
 import type * as catalog_images from "../catalog/images.js";
 import type * as catalog_productCodes from "../catalog/productCodes.js";
+import type * as catalog_productLabels from "../catalog/productLabels.js";
 import type * as catalog_publicBrowse from "../catalog/publicBrowse.js";
 import type * as catalog_smartSearch from "../catalog/smartSearch.js";
 import type * as catalog_styles from "../catalog/styles.js";
@@ -253,6 +254,7 @@ declare const fullApi: ApiFromModules<{
   "catalog/drops": typeof catalog_drops;
   "catalog/images": typeof catalog_images;
   "catalog/productCodes": typeof catalog_productCodes;
+  "catalog/productLabels": typeof catalog_productLabels;
   "catalog/publicBrowse": typeof catalog_publicBrowse;
   "catalog/smartSearch": typeof catalog_smartSearch;
   "catalog/styles": typeof catalog_styles;

@@ -32,6 +32,7 @@ import {
   Target,
   Scale,
   PhilippinePeso,
+  QrCode,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -57,6 +58,7 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/branch-goals", label: "Branch Goals", icon: Target, roles: ["admin"] },
   { href: "/admin/catalog", label: "Catalog", icon: Package, roles: ["admin"] },
   { href: "/admin/inventory", label: "Inventory", icon: PackageSearch, roles: ["admin"] },
+  { href: "/admin/product-labels", label: "Product QR Labels", icon: QrCode, roles: ["admin"] },
   { href: "/admin/prices", label: "Prices", icon: PhilippinePeso, roles: ["admin"] },
   {
     href: "/admin/price-approvals",
