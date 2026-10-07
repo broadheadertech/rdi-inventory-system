@@ -31,7 +31,7 @@ type CodeType =
   | "division"
   | "category"
   | "subCategory"
-  | "season"
+  | "month"
   | "year"
   | "production"
   | "outlier"
@@ -42,7 +42,7 @@ const CODE_TYPES: { value: CodeType; label: string; description: string; hasCode
   { value: "division", label: "Division", description: "Product division — description only, not used in style code", hasCode: false },
   { value: "category", label: "Category", description: "Product category classification", hasCode: true },
   { value: "subCategory", label: "Sub-Category", description: "Detailed sub-category", hasCode: true },
-  { value: "season", label: "Season", description: "Seasonal collection identifier", hasCode: true },
+  { value: "month", label: "Calendar Code", description: "Month of the range, 01 to 12 — the calendar slot in a style code", hasCode: true },
   { value: "year", label: "Year", description: "Production year", hasCode: true },
   { value: "production", label: "Production", description: "Production batch or run", hasCode: true },
   { value: "outlier", label: "Outlier", description: "Special classification codes", hasCode: true },

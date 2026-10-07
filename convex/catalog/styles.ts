@@ -107,7 +107,7 @@ async function generateStyleCode(
     departmentId: string;
     productCategoryId: string;
     subCategoryId: string;
-    seasonId: string;
+    monthId: string;
     yearId: string;
     productionId: string;
     outlierId: string;
@@ -123,7 +123,7 @@ async function generateStyleCode(
     ctx.db.get(codeIds.departmentId),
     ctx.db.get(codeIds.productCategoryId),
     ctx.db.get(codeIds.subCategoryId),
-    ctx.db.get(codeIds.seasonId),
+    ctx.db.get(codeIds.monthId),
     ctx.db.get(codeIds.yearId),
     ctx.db.get(codeIds.productionId),
     ctx.db.get(codeIds.outlierId),
@@ -162,7 +162,7 @@ export const createStyle = mutation({
     divisionId: v.id("productCodes"),
     productCategoryId: v.id("productCodes"),
     subCategoryId: v.id("productCodes"),
-    seasonId: v.id("productCodes"),
+    monthId: v.id("productCodes"),
     yearId: v.id("productCodes"),
     productionId: v.id("productCodes"),
     outlierId: v.optional(v.id("productCodes")),
@@ -201,7 +201,7 @@ export const createStyle = mutation({
       departmentId: args.departmentId,
       productCategoryId: args.productCategoryId,
       subCategoryId: args.subCategoryId,
-      seasonId: args.seasonId,
+      monthId: args.monthId,
       yearId: args.yearId,
       productionId: args.productionId,
       outlierId: args.outlierId ?? args.productionId, // fallback for prefix generation
@@ -213,7 +213,7 @@ export const createStyle = mutation({
       divisionId: args.divisionId,
       productCategoryId: args.productCategoryId,
       subCategoryId: args.subCategoryId,
-      seasonId: args.seasonId,
+      monthId: args.monthId,
       yearId: args.yearId,
       productionId: args.productionId,
       outlierId: args.outlierId,
@@ -265,7 +265,7 @@ export const updateStyle = mutation({
     productCategoryId: v.optional(v.id("productCodes")),
     subCategoryId: v.optional(v.id("productCodes")),
     departmentId: v.optional(v.id("productCodes")),
-    seasonId: v.optional(v.id("productCodes")),
+    monthId: v.optional(v.id("productCodes")),
     yearId: v.optional(v.id("productCodes")),
     productionId: v.optional(v.id("productCodes")),
     outlierId: v.optional(v.id("productCodes")),
@@ -316,7 +316,7 @@ export const updateStyle = mutation({
     if (args.productCategoryId !== undefined) track("productCategoryId", args.productCategoryId, existing.productCategoryId);
     if (args.subCategoryId !== undefined) track("subCategoryId", args.subCategoryId, existing.subCategoryId);
     if (args.departmentId !== undefined) track("departmentId", args.departmentId, existing.departmentId);
-    if (args.seasonId !== undefined) track("seasonId", args.seasonId, existing.seasonId);
+    if (args.monthId !== undefined) track("monthId", args.monthId, existing.monthId);
     if (args.yearId !== undefined) track("yearId", args.yearId, existing.yearId);
     if (args.productionId !== undefined) track("productionId", args.productionId, existing.productionId);
     if (args.outlierId !== undefined) track("outlierId", args.outlierId || undefined, existing.outlierId);

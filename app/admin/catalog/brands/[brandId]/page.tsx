@@ -50,7 +50,7 @@ type StyleDoc = {
   divisionId?: Id<"productCodes">;
   productCategoryId?: Id<"productCodes">;
   subCategoryId?: Id<"productCodes">;
-  seasonId?: Id<"productCodes">;
+  monthId?: Id<"productCodes">;
   yearId?: Id<"productCodes">;
   productionId?: Id<"productCodes">;
   outlierId?: Id<"productCodes">;
@@ -97,7 +97,7 @@ const EMPTY_FORM = {
   categoryId: "",
   subCategoryId: "",
   departmentId: "",
-  seasonId: "",
+  monthId: "",
   yearId: "",
   productionId: "",
   outlierId: "",
@@ -152,7 +152,7 @@ function ProductFormFields({
     (c) => c.type === "subCategory" && (form.categoryId ? c.parentId === form.categoryId : true)
   );
   const departments = allCodes.filter((c) => c.type === "department");
-  const seasons = allCodes.filter((c) => c.type === "season");
+  const calendarCodes = allCodes.filter((c) => c.type === "month");
   const years = allCodes.filter((c) => c.type === "year");
   const productions = allCodes.filter((c) => c.type === "production");
   const outliers = allCodes.filter((c) => c.type === "outlier");
@@ -161,7 +161,7 @@ function ProductFormFields({
   const previewCode = (() => {
     if (!brandCode) return "—";
     const parts = [brandCode];
-    const ids = [form.departmentId, form.categoryId, form.subCategoryId, form.seasonId, form.yearId, form.productionId];
+    const ids = [form.departmentId, form.categoryId, form.subCategoryId, form.monthId, form.yearId, form.productionId];
     for (const id of ids) {
       const pc = id ? allCodes.find((c) => c._id === id) : null;
       parts.push(pc?.code ?? "?");
@@ -222,11 +222,11 @@ function ProductFormFields({
           </Select>
         </div>
         <div className="space-y-1">
-          <Label>Season <span className="text-destructive">*</span></Label>
-          <Select value={form.seasonId} onValueChange={(v) => updateField("seasonId", v)}>
+          <Label>Calendar Code <span className="text-destructive">*</span></Label>
+          <Select value={form.monthId} onValueChange={(v) => updateField("monthId", v)}>
             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
             <SelectContent>
-              {seasons.map((s) => <SelectItem key={s._id} value={s._id}>{s.description} {s.code && `[${s.code}]`}</SelectItem>)}
+              {calendarCodes.map((c) => <SelectItem key={c._id} value={c._id}>{c.code ? `${c.code} — ` : ""}{c.description}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -441,7 +441,7 @@ export default function BrandProductsPage() {
 
   const handleAdd = async () => {
     const f = addForm;
-    if (!f.divisionId || !f.categoryId || !f.subCategoryId || !f.departmentId || !f.seasonId || !f.yearId || !f.productionId) {
+    if (!f.divisionId || !f.categoryId || !f.subCategoryId || !f.departmentId || !f.monthId || !f.yearId || !f.productionId) {
       return toast.error("All required code fields must be selected");
     }
     if (!f.name.trim()) return toast.error("Product name is required");
@@ -460,7 +460,7 @@ export default function BrandProductsPage() {
         divisionId: f.divisionId as Id<"productCodes">,
         productCategoryId: f.categoryId as Id<"productCodes">,
         subCategoryId: f.subCategoryId as Id<"productCodes">,
-        seasonId: f.seasonId as Id<"productCodes">,
+        monthId: f.monthId as Id<"productCodes">,
         yearId: f.yearId as Id<"productCodes">,
         productionId: f.productionId as Id<"productCodes">,
         outlierId: f.outlierId ? (f.outlierId as Id<"productCodes">) : undefined,
@@ -499,7 +499,7 @@ export default function BrandProductsPage() {
       categoryId: style.productCategoryId ?? "",
       subCategoryId: style.subCategoryId ?? "",
       departmentId: style.departmentId ?? "",
-      seasonId: style.seasonId ?? "",
+      monthId: style.monthId ?? "",
       yearId: style.yearId ?? "",
       productionId: style.productionId ?? "",
       outlierId: style.outlierId ?? "",
@@ -544,7 +544,7 @@ export default function BrandProductsPage() {
         productCategoryId: f.categoryId ? (f.categoryId as Id<"productCodes">) : undefined,
         subCategoryId: f.subCategoryId ? (f.subCategoryId as Id<"productCodes">) : undefined,
         departmentId: f.departmentId ? (f.departmentId as Id<"productCodes">) : undefined,
-        seasonId: f.seasonId ? (f.seasonId as Id<"productCodes">) : undefined,
+        monthId: f.monthId ? (f.monthId as Id<"productCodes">) : undefined,
         yearId: f.yearId ? (f.yearId as Id<"productCodes">) : undefined,
         productionId: f.productionId ? (f.productionId as Id<"productCodes">) : undefined,
         outlierId: f.outlierId ? (f.outlierId as Id<"productCodes">) : undefined,

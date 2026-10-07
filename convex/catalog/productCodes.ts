@@ -8,7 +8,7 @@ const productCodeType = v.union(
   v.literal("division"),
   v.literal("category"),
   v.literal("subCategory"),
-  v.literal("season"),
+  v.literal("month"),
   v.literal("year"),
   v.literal("production"),
   v.literal("outlier"),

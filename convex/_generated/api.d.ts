@@ -110,6 +110,7 @@ import type * as logistics_deliveries from "../logistics/deliveries.js";
 import type * as logistics_notificationRecords from "../logistics/notificationRecords.js";
 import type * as logistics_notifications from "../logistics/notifications.js";
 import type * as migrations_backfillBatches from "../migrations/backfillBatches.js";
+import type * as migrations_calendarCodes from "../migrations/calendarCodes.js";
 import type * as notifications_emailDigestHelpers from "../notifications/emailDigestHelpers.js";
 import type * as notifications_emailDigests from "../notifications/emailDigests.js";
 import type * as pos_birReading from "../pos/birReading.js";
@@ -285,6 +286,7 @@ declare const fullApi: ApiFromModules<{
   "logistics/notificationRecords": typeof logistics_notificationRecords;
   "logistics/notifications": typeof logistics_notifications;
   "migrations/backfillBatches": typeof migrations_backfillBatches;
+  "migrations/calendarCodes": typeof migrations_calendarCodes;
   "notifications/emailDigestHelpers": typeof notifications_emailDigestHelpers;
   "notifications/emailDigests": typeof notifications_emailDigests;
   "pos/birReading": typeof pos_birReading;

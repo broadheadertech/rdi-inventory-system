@@ -332,7 +332,7 @@ export default defineSchema({
       v.literal("division"),
       v.literal("category"),
       v.literal("subCategory"),
-      v.literal("season"),
+      v.literal("month"),
       v.literal("year"),
       v.literal("production"),
       v.literal("outlier"),
@@ -368,7 +368,8 @@ export default defineSchema({
     divisionId: v.optional(v.id("productCodes")),
     productCategoryId: v.optional(v.id("productCodes")),
     subCategoryId: v.optional(v.id("productCodes")),
-    seasonId: v.optional(v.id("productCodes")),
+    // The calendar code: which month of the year's range the style belongs to.
+    monthId: v.optional(v.id("productCodes")),
     yearId: v.optional(v.id("productCodes")),
     productionId: v.optional(v.id("productCodes")),
     outlierId: v.optional(v.id("productCodes")),
