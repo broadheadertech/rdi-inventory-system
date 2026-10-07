@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { cn, relativeTime } from "@/lib/utils";
 import { usePagination } from "@/lib/hooks/usePagination";
 import { TablePagination } from "@/components/shared/TablePagination";
+import { AllocationCsv } from "@/components/shared/AllocationCsv";
 
 function TransferStatusBadge({ status }: { status: string }) {
   return (
@@ -101,6 +102,10 @@ export default function HQTransfersPage() {
 
   const canApprove =
     currentUser?.role === "admin" || currentUser?.role === "hqStaff";
+  // Allocating is a planning act. Warehouse staff approve what arrives here;
+  // they do not decide the push.
+  const canAllocate =
+    currentUser?.role === "admin" || currentUser?.role === "hqStaff";
 
   // ── Filter state ──────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<FilterTab>("requested");
@@ -162,6 +167,13 @@ export default function HQTransfersPage() {
           Approve or reject stock transfers — typically from Central Warehouse to retail branches.
         </p>
       </div>
+
+      {/* ── Allocation upload ─────────────────────────────────────────────── */}
+      {/* A pre-allocated push arrives as requests in the queue below, not as
+          stock on a shelf: it is approved here like anything else. */}
+      {canAllocate && (
+        <AllocationCsv onUploaded={() => setActiveTab("requested")} />
+      )}
 
       {/* ── Filter tabs ───────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-2">
@@ -260,6 +272,14 @@ export default function HQTransfersPage() {
                   </td>
                   <td className="px-4 py-3">
                     <TransferTypeBadge type={transfer.type} />
+                    {transfer.allocationFileName && (
+                      <p
+                        className="text-xs text-muted-foreground mt-1 max-w-[160px] truncate"
+                        title={`Allocated by ${transfer.allocationFileName}`}
+                      >
+                        Allocation · {transfer.allocationFileName}
+                      </p>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     <TransferStatusBadge status={transfer.status} />

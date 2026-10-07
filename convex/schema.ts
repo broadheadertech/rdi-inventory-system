@@ -549,6 +549,11 @@ export default defineSchema({
     fromBranchId: v.id("branches"),
     toBranchId: v.id("branches"),
     requestedById: v.id("users"),
+    // The allocation file this request was cut from, when it came from one
+    // rather than from somebody filling in the form. An approver reading the
+    // queue needs to know a row is one branch's slice of a bigger push, and
+    // which push, because the sensible thing is to decide the file as a whole.
+    allocationFileName: v.optional(v.string()),
     type: v.optional(v.union(v.literal("stockRequest"), v.literal("return"), v.literal("interBranch"))),
     status: v.union(
       v.literal("requested"),

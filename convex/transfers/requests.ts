@@ -57,6 +57,8 @@ export async function createTransferForRequester(
     toBranchId: Id<"branches">;
     type?: "stockRequest" | "return" | "interBranch";
     notes?: string;
+    /** Set when this request is one branch's slice of an uploaded allocation. */
+    allocationFileName?: string;
     items: { sku: string; requestedQuantity: number }[];
   }
 ): Promise<Id<"transfers">> {
@@ -200,6 +202,9 @@ export async function createTransferForRequester(
       type: transferType,
       status: "requested",
       notes: args.notes,
+      ...(args.allocationFileName
+        ? { allocationFileName: args.allocationFileName }
+        : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -415,6 +420,7 @@ export const listTransfers = query({
           type: transfer.type ?? "stockRequest",
           status: transfer.status,
           notes: transfer.notes ?? null,
+          allocationFileName: transfer.allocationFileName ?? null,
           createdAt: transfer.createdAt,
           updatedAt: transfer.updatedAt,
           approvedById: transfer.approvedById ?? null,
