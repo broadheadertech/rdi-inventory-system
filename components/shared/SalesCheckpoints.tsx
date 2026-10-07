@@ -12,6 +12,13 @@
 // opens the screen to find out; it stays closed so it costs a glance, not a
 // scroll. The history only loads once it is opened.
 //
+// Above the figure sits "Time Report for", with a brand and a location. The two
+// are independent: one brand across every store, one store across every brand,
+// or one of each. Under a brand the figures are summed from the matching lines
+// rather than from receipt totals, because a receipt holding two brands cannot
+// be attributed by its total; a receipt with no matching line drops out of the
+// count rather than counting as a zero sale.
+//
 // Nothing is stored or reset here. The figures are the transactions themselves,
 // asked about a date, so at midnight the card starts from zero while every
 // earlier day stays exactly as it was. A register closing does not zero it
@@ -76,22 +83,23 @@ function phtTime(ms: number): string {
   });
 }
 
+/** What both queries are being asked about. */
+type Scope = {
+  brandId?: Id<"brands">;
+  branchId?: Id<"branches">;
+  channel?: Channel;
+};
+
+const SELECT_CLASS =
+  "max-w-[11rem] truncate rounded-md border bg-background px-2 py-1 text-xs font-medium";
+
 // ─── The days before ─────────────────────────────────────────────────────────
 // Its own component so the query only runs once the card is opened.
 
-function HistoryTable({
-  days,
-  branchId,
-  channel,
-}: {
-  days: number;
-  branchId?: Id<"branches">;
-  channel?: Channel;
-}) {
+function HistoryTable({ days, scope }: { days: number; scope: Scope }) {
   const history = useQuery(api.dashboards.reportsV2.getCheckpointHistory, {
     days,
-    ...(branchId ? { branchId } : {}),
-    ...(channel ? { channel } : {}),
+    ...scope,
   });
 
   if (history === undefined) {
@@ -152,31 +160,138 @@ function HistoryTable({
 // ─── The card ────────────────────────────────────────────────────────────────
 
 export function SalesCheckpoints({
+  brandId,
   branchId,
   channel,
   days = 30,
   className,
   title = "Time Report",
+  showFilters = true,
 }: {
+  /** Starting brand. A page filter, which the card's own dropdown can change. */
+  brandId?: Id<"brands">;
   branchId?: Id<"branches">;
   channel?: Channel;
   /** How many trading days of history to show once opened. */
   days?: number;
   className?: string;
   title?: string;
+  /** False where the page's own filters are the only ones wanted. */
+  showFilters?: boolean;
 }) {
   const [open, setOpen] = useState(false);
 
-  const now = useQuery(api.dashboards.reportsV2.getSalesAsOfNow, {
-    ...(branchId ? { branchId } : {}),
-    ...(channel ? { channel } : {}),
-  });
+  // The dropdowns start from whatever the page is filtered to and can then be
+  // moved independently. When the page's own filter changes the card follows
+  // it, so the two never sit silently disagreeing.
+  const propBrand = (brandId as string | undefined) ?? "all";
+  const propBranch = (branchId as string | undefined) ?? "all";
+
+  const [pickedBrand, setPickedBrand] = useState(propBrand);
+  const [pickedBranch, setPickedBranch] = useState(propBranch);
+  const [fromProps, setFromProps] = useState({ brand: propBrand, branch: propBranch });
+
+  if (fromProps.brand !== propBrand || fromProps.branch !== propBranch) {
+    setFromProps({ brand: propBrand, branch: propBranch });
+    if (fromProps.brand !== propBrand) setPickedBrand(propBrand);
+    if (fromProps.branch !== propBranch) setPickedBranch(propBranch);
+  }
+
+  const filters = useQuery(
+    api.dashboards.reportsV2.getTimeReportFilters,
+    showFilters ? {} : "skip"
+  );
+
+  // A named store overrides an inherited channel rather than stacking with it:
+  // "outlet stores" AND "this inline store in Manila" is nothing at all, and a
+  // card reading ₱0 for that reason looks broken rather than empty.
+  const scope: Scope = {
+    ...(pickedBrand !== "all" ? { brandId: pickedBrand as Id<"brands"> } : {}),
+    ...(pickedBranch !== "all"
+      ? { branchId: pickedBranch as Id<"branches"> }
+      : channel
+        ? { channel }
+        : {}),
+  };
+
+  const now = useQuery(api.dashboards.reportsV2.getSalesAsOfNow, scope);
 
   const up = (now?.changePercent ?? 0) >= 0;
   const allClosed = now ? now.registersOpen === 0 : false;
+  const showLocation = (filters?.canPickLocation ?? false) && (filters?.branches.length ?? 0) > 1;
+  const narrowed = pickedBrand !== "all" || pickedBranch !== "all";
+  const brandName =
+    pickedBrand === "all"
+      ? null
+      : (filters?.brands.find((b) => (b.id as string) === pickedBrand)?.name ?? null);
 
   return (
     <div className={cn("rounded-lg border", className)}>
+      {showFilters && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            {title} for
+          </span>
+
+          <label className="flex items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Brand</span>
+            <select
+              value={pickedBrand}
+              onChange={(e) => setPickedBrand(e.target.value)}
+              className={SELECT_CLASS}
+              aria-label="Brand"
+            >
+              <option value="all">All</option>
+              {(filters?.brands ?? []).map((b) => (
+                <option key={b.id as string} value={b.id as string}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {showLocation && (
+            <label className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Location</span>
+              <select
+                value={pickedBranch}
+                onChange={(e) => setPickedBranch(e.target.value)}
+                className={SELECT_CLASS}
+                aria-label="Location"
+              >
+                <option value="all">
+                  {channel ? `All ${channel} stores` : "All"}
+                </option>
+                {(filters?.branches ?? []).map((b) => (
+                  <option key={b.id as string} value={b.id as string}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {!showLocation && filters?.branches.length === 1 && (
+            <span className="text-xs text-muted-foreground">
+              Location {filters.branches[0].name}
+            </span>
+          )}
+
+          {narrowed && (
+            <button
+              type="button"
+              onClick={() => {
+                setPickedBrand("all");
+                setPickedBranch("all");
+              }}
+              className="ml-auto text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -186,7 +301,7 @@ export function SalesCheckpoints({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="text-xs font-medium text-muted-foreground">
-              {title} · As of Now
+              {showFilters ? "As of Now" : `${title} · As of Now`}
             </span>
             {now && (
               <span className="text-[11px] tabular-nums text-muted-foreground">
@@ -228,7 +343,15 @@ export function SalesCheckpoints({
                 {pesos(now.priorSalesCentavos)}
               </p>
 
-              {/* Whether the figure is still moving. */}
+              {brandName && (
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {brandName}&apos;s share of each sale it was part of · discounts
+                  included
+                </p>
+              )}
+
+              {/* Whether the figure is still moving. A brand filter does not
+                  change which registers are open — that belongs to the store. */}
               <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <Circle
                   className={cn(
@@ -271,7 +394,7 @@ export function SalesCheckpoints({
           <p className="text-xs text-muted-foreground">
             Running totals through each day · the last {days} days
           </p>
-          <HistoryTable days={days} branchId={branchId} channel={channel} />
+          <HistoryTable days={days} scope={scope} />
         </div>
       )}
     </div>

@@ -330,7 +330,11 @@ export const getReportsSummary = query({
       let lineSum = 0;
       let lineUnits = 0;
       let anyMatched = false;
+      // Every line's face value, brand or not — the denominator for a brand's
+      // share of what the receipt actually took.
+      let receiptLineSum = 0;
       for (const item of items) {
+        receiptLineSum += item.lineTotalCentavos;
         if (args.brandId) {
           const bId = await getVariantBrand(item.variantId);
           if (bId !== args.brandId) continue;
@@ -361,8 +365,14 @@ export const getReportsSummary = query({
         }
       }
       if (args.brandId) {
-        // When filtering by brand, sum only matched line items (txn totals include other brands)
-        salesCentavos += lineSum;
+        // The brand's share of what the receipt took, not of what its lines
+        // were marked at. A receipt-level discount belongs to no single line,
+        // so raw line sums would report every brand above its real takings and
+        // the brands would add up to more than the unfiltered figure.
+        salesCentavos +=
+          receiptLineSum !== 0
+            ? Math.round(t.totalCentavos * (lineSum / receiptLineSum))
+            : 0;
         unitsSold += lineUnits;
         void anyMatched;
       } else {
@@ -388,9 +398,17 @@ export const getReportsSummary = query({
         .query("transactionItems")
         .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
         .collect();
+      let matchedLines = 0;
+      let allLines = 0;
       for (const item of items) {
+        allLines += item.lineTotalCentavos;
         const bId = await getVariantBrand(item.variantId);
-        if (bId === args.brandId) lyRevenueCentavos += item.lineTotalCentavos;
+        if (bId === args.brandId) matchedLines += item.lineTotalCentavos;
+      }
+      // Prorated like this year's, or the comparison would measure a net
+      // figure against a gross one and read as a fall every time.
+      if (allLines !== 0) {
+        lyRevenueCentavos += Math.round(t.totalCentavos * (matchedLines / allLines));
       }
     }
     const lyPercent = lyRevenueCentavos > 0 ? (salesCentavos / lyRevenueCentavos) * 100 : 0;
@@ -1636,23 +1654,141 @@ function ymdMinusDays(ymd: string, days: number): string {
 }
 
 /**
- * Sales up to a cut-off. Returns are their own transactions with a negative
- * total, so summing totals nets them out exactly as the rest of the reports do,
- * while the count stays a count of sales.
+ * One transaction reduced to what this report should count of it: the whole
+ * sale normally, or only the lines belonging to the brand being asked about.
+ */
+type TxnAmount = { createdAt: number; centavos: number; isSale: boolean };
+
+/** A return is its own transaction, prefixed RET- and negative. */
+const asAmount = (t: Doc<"transactions">): TxnAmount => ({
+  createdAt: t.createdAt,
+  centavos: t.totalCentavos,
+  isSale: !t.receiptNumber.startsWith("RET-"),
+});
+
+/**
+ * The same transactions, counted only for one brand.
+ *
+ * A receipt mixing two brands cannot be attributed by its total, so the lines
+ * are read to find the brand's share of it. The share is then taken of what
+ * the receipt ACTUALLY took, not of the lines' face value: a senior discount
+ * or a promotion comes off the receipt, not off any one line, so summing raw
+ * line totals would hand every brand its pre-discount figure and make the
+ * brands add up to more than the day did. Prorating keeps "Aeropostale" plus
+ * "Hurley" equal to "All" to the centavo, which is the only way a reader can
+ * flip the dropdown and trust both numbers.
+ *
+ * A receipt with no matching line is dropped entirely rather than counted at
+ * zero, so the transaction count stays a count of sales that brand was really
+ * part of.
+ *
+ * This costs a read per line, which is why it only happens when a brand is
+ * named; the unfiltered card still reads transaction totals alone.
+ */
+async function brandAmounts(
+  ctx: QueryCtx,
+  txns: Doc<"transactions">[],
+  brandId: Id<"brands">
+): Promise<TxnAmount[]> {
+  const variantBrand = new Map<string, Id<"brands"> | null>();
+  const styleBrand = new Map<string, Id<"brands"> | null>();
+  const categoryBrand = new Map<string, Id<"brands"> | null>();
+
+  const out: TxnAmount[] = [];
+  for (const t of txns) {
+    const items = await ctx.db
+      .query("transactionItems")
+      .withIndex("by_transaction", (q) => q.eq("transactionId", t._id))
+      .collect();
+
+    let matchedLines = 0;
+    let allLines = 0;
+    let matched = false;
+    for (const item of items) {
+      allLines += item.lineTotalCentavos;
+      const itemBrand = await resolveVariantBrand(
+        ctx,
+        item.variantId,
+        variantBrand,
+        styleBrand,
+        categoryBrand
+      );
+      if (itemBrand !== brandId) continue;
+      matched = true;
+      matchedLines += item.lineTotalCentavos;
+    }
+    if (!matched) continue;
+
+    // allLines is zero on a receipt of nothing but giveaway lines, and on an
+    // exchange whose lines cancel out. There is no share to take of either.
+    const centavos =
+      allLines !== 0
+        ? Math.round(t.totalCentavos * (matchedLines / allLines))
+        : 0;
+    out.push({ ...asAmount(t), centavos });
+  }
+  return out;
+}
+
+/**
+ * Sales up to a cut-off. Returns carry a negative amount, so summing nets them
+ * out exactly as the rest of the reports do, while the count stays a count of
+ * sales.
  */
 function sumUpTo(
-  txns: Doc<"transactions">[],
+  amounts: TxnAmount[],
   cutoffMs: number
 ): { salesCentavos: number; transactionCount: number } {
   let salesCentavos = 0;
   let transactionCount = 0;
-  for (const t of txns) {
-    if (t.createdAt >= cutoffMs) continue;
-    salesCentavos += t.totalCentavos;
-    if (!t.receiptNumber.startsWith("RET-")) transactionCount += 1;
+  for (const a of amounts) {
+    if (a.createdAt >= cutoffMs) continue;
+    salesCentavos += a.centavos;
+    if (a.isSale) transactionCount += 1;
   }
   return { salesCentavos, transactionCount };
 }
+
+/** Transactions as amounts, narrowed to one brand when one is named. */
+async function toAmounts(
+  ctx: QueryCtx,
+  txns: Doc<"transactions">[],
+  brandId?: Id<"brands">
+): Promise<TxnAmount[]> {
+  return brandId ? await brandAmounts(ctx, txns, brandId) : txns.map(asAmount);
+}
+
+// ─── getTimeReportFilters ─────────────────────────────────────────────────────
+// What the card's two dropdowns may offer. It answers from the caller's own
+// report scope rather than the HQ-only catalogue queries, so the card works for
+// a manager too: HQ gets every active store, a branch-scoped caller gets their
+// own and nothing else, and canPickLocation says which — there is no point
+// drawing a dropdown over one fixed store.
+
+export const getTimeReportFilters = query({
+  args: {},
+  handler: async (ctx) => {
+    const scope = await resolveReportScope(ctx);
+    const { ids, byId } = await resolveAllowedBranches(ctx, { scope });
+
+    const brands = (await ctx.db.query("brands").collect())
+      .filter((b) => b.isActive)
+      .map((b) => ({ id: b._id, name: b.name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    const branches = ids
+      .map((id) => byId.get(id as string))
+      .filter((b): b is Doc<"branches"> => b !== undefined)
+      .map((b) => ({ id: b._id, name: b.name, channel: b.channel ?? null }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      brands,
+      branches,
+      canPickLocation: scope.canAccessAllBranches,
+    };
+  },
+});
 
 // ─── getSalesAsOfNow ──────────────────────────────────────────────────────────
 // The day so far, against the same weekday last week AT THE SAME TIME OF DAY —
@@ -1661,6 +1797,7 @@ function sumUpTo(
 
 export const getSalesAsOfNow = query({
   args: {
+    brandId: v.optional(v.id("brands")),
     branchId: v.optional(v.id("branches")),
     channel: channelArg,
   },
@@ -1701,8 +1838,11 @@ export const getSalesAsOfNow = query({
       fetchTxnsInRange(ctx, priorStart, priorStart + elapsedMs, allowedIds),
     ]);
 
-    const today = sumUpTo(todayTxns, nowMs);
-    const prior = sumUpTo(priorTxns, priorStart + elapsedMs);
+    const today = sumUpTo(await toAmounts(ctx, todayTxns, args.brandId), nowMs);
+    const prior = sumUpTo(
+      await toAmounts(ctx, priorTxns, args.brandId),
+      priorStart + elapsedMs
+    );
 
     // Whether the tills are still ringing. The trading day does not hang on
     // this — it only says whether the figure above is final.
@@ -1758,6 +1898,7 @@ export const getSalesAsOfNow = query({
 export const getCheckpointHistory = query({
   args: {
     days: v.optional(v.number()),
+    brandId: v.optional(v.id("brands")),
     branchId: v.optional(v.id("branches")),
     channel: channelArg,
   },
@@ -1787,19 +1928,20 @@ export const getCheckpointHistory = query({
     // cheaper than a query per date.
     const windowStart = ymdToMs(dates[dates.length - 1]);
     const txns = await fetchTxnsInRange(ctx, windowStart, nowMs, allowedIds);
-    const byDate = new Map<string, Doc<"transactions">[]>();
-    for (const t of txns) {
-      const key = ymdPht(t.createdAt);
+    const amounts = await toAmounts(ctx, txns, args.brandId);
+    const byDate = new Map<string, TxnAmount[]>();
+    for (const a of amounts) {
+      const key = ymdPht(a.createdAt);
       const bucket = byDate.get(key);
-      if (bucket) bucket.push(t);
-      else byDate.set(key, [t]);
+      if (bucket) bucket.push(a);
+      else byDate.set(key, [a]);
     }
 
     return {
       hours,
       days: dates.map((date) => {
         const dayStart = ymdToMs(date);
-        const dayTxns = byDate.get(date) ?? [];
+        const dayAmounts = byDate.get(date) ?? [];
         const isToday = date === today;
         return {
           date,
@@ -1807,7 +1949,7 @@ export const getCheckpointHistory = query({
           checkpoints: CHECKPOINT_HOURS.map((hour) => {
             const cutoff = dayStart + hour * 60 * 60 * 1000;
             const reached = !isToday || nowMs >= cutoff;
-            const totals = sumUpTo(dayTxns, cutoff);
+            const totals = sumUpTo(dayAmounts, cutoff);
             return {
               hour,
               reached,

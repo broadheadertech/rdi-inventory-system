@@ -497,9 +497,11 @@ export default function HqReportsPage() {
       </div>
 
       {/* ── Time Report ── */}
-      {/* Above the KPI cards: the day as it stands is read first, and the
-          branch and channel filters above drive it. */}
+      {/* Above the KPI cards: the day as it stands is read first. The page's
+          filters set where it starts; its own brand and location dropdowns can
+          then move it without disturbing the rest of the report. */}
       <SalesCheckpoints
+        brandId={brandId ? (brandId as Id<"brands">) : undefined}
         branchId={branchId as Id<"branches"> | undefined}
         channel={channel}
       />
