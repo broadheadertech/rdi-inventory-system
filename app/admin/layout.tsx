@@ -71,6 +71,12 @@ const overviewNavItems: NavItem[] = [
   { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin"] },
   { href: "/admin/reports", label: "Reports", icon: BarChart3, roles: ["admin"] },
   { href: "/admin/analytics", label: "Analytics", icon: LineChart, roles: ["admin"] },
+  {
+    href: "/admin/movement-report",
+    label: "Inventory Movement",
+    icon: ArrowLeftRight,
+    roles: ["admin"],
+  },
 ];
 
 const operationsNavItems: NavItem[] = [
