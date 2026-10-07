@@ -68,12 +68,26 @@ function ProposalDetail({
   const [reason, setReason] = useState("");
   const [rejectOpen, setRejectOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Lines ticked for a part approval. Empty means "the whole proposal".
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  function togglePicked(id: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   if (proposal === undefined) {
     return <div className="h-64 animate-pulse rounded-lg border bg-muted/40" />;
   }
 
   const waiting = proposal.status === "pending";
+  const pendingIds = proposal.cells
+    .filter((c) => c.status === "pending")
+    .map((c) => c._id as string);
 
   return (
     <div className="space-y-5">
@@ -95,6 +109,16 @@ function ProposalDetail({
           {proposal.status === "pending" ? "Waiting" : proposal.status}
         </Badge>
         <Badge variant="outline">{proposal.cells.length} to change</Badge>
+        {proposal.appliedCells > 0 && (
+          <Badge variant="outline" className="border-emerald-500 text-emerald-700">
+            {proposal.appliedCells} applied
+          </Badge>
+        )}
+        {proposal.rejectedCells > 0 && (
+          <Badge variant="outline" className="border-red-400 text-red-700">
+            {proposal.rejectedCells} rejected
+          </Badge>
+        )}
         {proposal.unchangedCount > 0 && (
           <Badge variant="outline" className="text-muted-foreground">
             {proposal.unchangedCount} untouched
@@ -122,18 +146,47 @@ function ProposalDetail({
         <Table>
           <TableHeader>
             <TableRow>
+              {waiting && (
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    aria-label="Select every line still waiting"
+                    className="h-4 w-4 rounded border-gray-300"
+                    checked={pendingIds.length > 0 && picked.size === pendingIds.length}
+                    onChange={(e) =>
+                      setPicked(e.target.checked ? new Set(pendingIds) : new Set())
+                    }
+                  />
+                </TableHead>
+              )}
               <TableHead>SKU</TableHead>
               <TableHead>Applies to</TableHead>
               <TableHead className="text-right">Now</TableHead>
               <TableHead className="text-right">After</TableHead>
               <TableHead className="text-right">Change</TableHead>
+              {proposal.appliedCells + proposal.rejectedCells > 0 && (
+                <TableHead>State</TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {proposal.cells.map((cell) => {
               const delta = cell.newPriceCentavos - cell.oldPriceCentavos;
+              const decided = cell.status !== "pending";
               return (
-                <TableRow key={cell._id}>
+                <TableRow key={cell._id} className={cn(decided && "opacity-60")}>
+                  {waiting && (
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${cell.sku}`}
+                        className="h-4 w-4 rounded border-gray-300"
+                        disabled={decided}
+                        checked={picked.has(cell._id as string)}
+                        onChange={() => togglePicked(cell._id as string)}
+                      />
+                    </TableCell>
+                  )}
                   <TableCell className="font-mono text-xs">
                     {cell.sku}
                     <span className="ml-2 font-sans text-muted-foreground">{cell.label}</span>
@@ -169,6 +222,21 @@ function ProposalDetail({
                     {delta > 0 ? "+" : ""}
                     {formatCurrency(delta)}
                   </TableCell>
+                  {proposal.appliedCells + proposal.rejectedCells > 0 && (
+                    <TableCell>
+                      {cell.status === "applied" ? (
+                        <Badge variant="outline" className="border-emerald-500 text-[10px] text-emerald-700">
+                          applied
+                        </Badge>
+                      ) : cell.status === "rejected" ? (
+                        <Badge variant="outline" className="border-red-400 text-[10px] text-red-700">
+                          rejected
+                        </Badge>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">waiting</span>
+                      )}
+                    </TableCell>
+                  )}
                 </TableRow>
               );
             })}
@@ -177,10 +245,15 @@ function ProposalDetail({
       </div>
 
       {waiting && (
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <span className="mr-auto text-xs text-muted-foreground">
+            {picked.size > 0
+              ? `${picked.size} of ${pendingIds.length} line${pendingIds.length === 1 ? "" : "s"} selected`
+              : `Tick lines to take only some, or approve all ${pendingIds.length}.`}
+          </span>
           <Button variant="outline" disabled={busy} onClick={() => setRejectOpen(true)}>
             <X className="mr-1.5 h-4 w-4" />
-            Reject
+            {picked.size > 0 ? `Reject ${picked.size}` : "Reject all"}
           </Button>
           <Button
             disabled={busy}
@@ -188,11 +261,18 @@ function ProposalDetail({
               void (async () => {
                 setBusy(true);
                 try {
-                  const r = await approve({ proposalId });
+                  const r = await approve({
+                    proposalId,
+                    ...(picked.size > 0
+                      ? { cellIds: [...picked] as Id<"priceProposalCells">[] }
+                      : {}),
+                  });
                   toast.success(
-                    `${r.applied} price${r.applied === 1 ? "" : "s"} are now live`
+                    `${r.appliedNow} price${r.appliedNow === 1 ? "" : "s"} are now live` +
+                      (r.waiting > 0 ? ` · ${r.waiting} still waiting` : "")
                   );
-                  onBack();
+                  setPicked(new Set());
+                  if (r.waiting === 0) onBack();
                 } catch (err) {
                   toast.error(getErrorMessage(err));
                 } finally {
@@ -202,7 +282,7 @@ function ProposalDetail({
             }
           >
             <Check className="mr-1.5 h-4 w-4" />
-            Approve and apply
+            {picked.size > 0 ? `Approve ${picked.size}` : "Approve all"}
           </Button>
         </div>
       )}
@@ -210,7 +290,9 @@ function ProposalDetail({
       <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Reject these prices</DialogTitle>
+            <DialogTitle>
+              {picked.size > 0 ? `Reject ${picked.size} line(s)` : "Reject all these prices"}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground">
@@ -235,10 +317,21 @@ function ProposalDetail({
                 void (async () => {
                   setBusy(true);
                   try {
-                    await reject({ proposalId, reason: reason.trim() });
-                    toast.success("Rejected");
+                    const r = await reject({
+                      proposalId,
+                      reason: reason.trim(),
+                      ...(picked.size > 0
+                        ? { cellIds: [...picked] as Id<"priceProposalCells">[] }
+                        : {}),
+                    });
+                    toast.success(
+                      `${r.rejectedNow} line${r.rejectedNow === 1 ? "" : "s"} rejected` +
+                        (r.waiting > 0 ? ` · ${r.waiting} still waiting` : "")
+                    );
+                    setPicked(new Set());
                     setRejectOpen(false);
-                    onBack();
+                    setReason("");
+                    if (r.waiting === 0) onBack();
                   } catch (err) {
                     toast.error(getErrorMessage(err));
                   } finally {
@@ -361,6 +454,11 @@ export default function PriceApprovalsPage() {
                           ? "Rejected"
                           : "Waiting"}
                     </Badge>
+                    {p.status === "pending" && p.pendingCount < p.changedCount && (
+                      <span className="mt-0.5 block text-[11px] text-amber-700">
+                        part reviewed · {p.pendingCount} left
+                      </span>
+                    )}
                     {p.reviewedAt && p.reviewedByName && (
                       <span className="mt-0.5 block text-[11px] text-muted-foreground">
                         {when(p.reviewedAt)} · {p.reviewedByName}

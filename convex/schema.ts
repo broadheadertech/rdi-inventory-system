@@ -1056,6 +1056,12 @@ export default defineSchema({
     oldPriceCentavos: v.number(),
     newPriceCentavos: v.number(),
     belowBase: v.boolean(),
+    // A proposal can be taken line by line: approve the prices that are right
+    // and refuse the rest, rather than sending a whole spreadsheet back over
+    // two bad rows. Absent means still waiting, for cells written before this.
+    status: v.optional(
+      v.union(v.literal("pending"), v.literal("applied"), v.literal("rejected"))
+    ),
   }).index("by_proposal", ["proposalId"]),
 
   priceChanges: defineTable({

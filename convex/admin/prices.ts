@@ -761,6 +761,13 @@ export const listPriceProposals = query({
       all
         .filter((p) => (args.status ? p.status === args.status : true))
         .map(async (p) => {
+          const cells = await ctx.db
+            .query("priceProposalCells")
+            .withIndex("by_proposal", (q) => q.eq("proposalId", p._id))
+            .collect();
+          const stillWaiting = cells.filter(
+            (c) => (c.status ?? "pending") === "pending"
+          ).length;
           const [submitted, reviewed] = await Promise.all([
             ctx.db.get(p.submittedById),
             p.reviewedById ? ctx.db.get(p.reviewedById) : Promise.resolve(null),
@@ -772,6 +779,7 @@ export const listPriceProposals = query({
             summary: p.summary,
             status: p.status,
             changedCount: p.changedCount,
+            pendingCount: stillWaiting,
             unchangedCount: p.unchangedCount,
             skippedCount: p.skippedCount,
             belowBaseCount: p.belowBaseCount,
@@ -818,6 +826,9 @@ export const getPriceProposal = query({
       unchangedCount: proposal.unchangedCount,
       skippedCount: proposal.skippedCount,
       rejectionReason: proposal.rejectionReason ?? null,
+      appliedCells: cells.filter((c) => (c.status ?? "pending") === "applied").length,
+      rejectedCells: cells.filter((c) => (c.status ?? "pending") === "rejected").length,
+      pendingCells: cells.filter((c) => (c.status ?? "pending") === "pending").length,
       cells: cells
         .map((c) => ({
           _id: c._id,
@@ -828,16 +839,148 @@ export const getPriceProposal = query({
           oldPriceCentavos: c.oldPriceCentavos,
           newPriceCentavos: c.newPriceCentavos,
           belowBase: c.belowBase,
+          status: c.status ?? "pending",
         }))
-        .sort((a, b) => a.sku.localeCompare(b.sku) || a.scope.localeCompare(b.scope)),
+        // Lines still waiting come first: on a part-reviewed file, what is
+        // left to decide is the only thing the reviewer is there for.
+        .sort(
+          (a, b) =>
+            Number(a.status !== "pending") - Number(b.status !== "pending") ||
+            a.sku.localeCompare(b.sku) ||
+            a.scope.localeCompare(b.scope)
+        ),
     };
   },
 });
 
-// ─── Approving ──────────────────────────────────────────────────────────────
+// ─── Approving, all at once or line by line ─────────────────────────────────
+// A spreadsheet of three hundred prices is rarely all right or all wrong. Two
+// bad rows used to mean rejecting the file and asking for it again; now the
+// good lines can be taken and the rest refused, and the proposal closes when
+// nothing is left waiting.
 
+type Cell = Doc<"priceProposalCells">;
+
+const cellStatus = (cell: Cell) => cell.status ?? "pending";
+
+/** Writes one price, and the history row that records it. */
+async function applyCell(
+  ctx: MutationCtx,
+  cell: Cell,
+  userId: Id<"users">,
+  now: number
+): Promise<boolean> {
+  const variant = await ctx.db.get(cell.variantId);
+  if (!variant) return false; // deleted since it was proposed
+
+  if (!cell.branchId) {
+    await ctx.db.patch(variant._id, {
+      priceCentavos: cell.newPriceCentavos,
+      updatedAt: now,
+    });
+  } else {
+    const own = await branchPriceRow(ctx, cell.branchId, cell.variantId);
+    if (cell.action === "reset") {
+      if (own) await ctx.db.delete(own._id);
+    } else if (own) {
+      await ctx.db.patch(own._id, {
+        priceCentavos: cell.newPriceCentavos,
+        updatedById: userId,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("branchPrices", {
+        branchId: cell.branchId,
+        variantId: cell.variantId,
+        styleId: variant.styleId,
+        priceCentavos: cell.newPriceCentavos,
+        updatedById: userId,
+        updatedAt: now,
+      });
+    }
+  }
+
+  await ctx.db.insert("priceChanges", {
+    variantId: cell.variantId,
+    ...(cell.branchId ? { branchId: cell.branchId } : {}),
+    action: cell.action,
+    oldPriceCentavos: cell.oldPriceCentavos,
+    newPriceCentavos: cell.newPriceCentavos,
+    changedById: userId,
+    changedAt: now,
+  });
+  return true;
+}
+
+/**
+ * Closes the proposal once no line is still waiting: approved if anything was
+ * taken, rejected if nothing was. A proposal with lines left open stays open,
+ * so a part-reviewed file is never mistaken for a finished one.
+ */
+async function settleProposal(
+  ctx: MutationCtx,
+  proposalId: Id<"priceProposals">,
+  userId: Id<"users">
+): Promise<{ applied: number; rejected: number; waiting: number }> {
+  const cells = await ctx.db
+    .query("priceProposalCells")
+    .withIndex("by_proposal", (q) => q.eq("proposalId", proposalId))
+    .collect();
+
+  const applied = cells.filter((c) => cellStatus(c) === "applied").length;
+  const rejected = cells.filter((c) => cellStatus(c) === "rejected").length;
+  const waiting = cells.length - applied - rejected;
+
+  if (waiting === 0) {
+    await ctx.db.patch(proposalId, {
+      status: (applied > 0 ? "approved" : "rejected") as "approved" | "rejected",
+      reviewedAt: Date.now(),
+      reviewedById: userId,
+      appliedCount: applied,
+    });
+  } else {
+    // Still open, but record what has been taken so far.
+    await ctx.db.patch(proposalId, { appliedCount: applied });
+  }
+
+  return { applied, rejected, waiting };
+}
+
+/** The lines named, or every line still waiting when none are named. */
+async function pendingCells(
+  ctx: MutationCtx,
+  proposalId: Id<"priceProposals">,
+  cellIds?: Id<"priceProposalCells">[]
+): Promise<Cell[]> {
+  const all = await ctx.db
+    .query("priceProposalCells")
+    .withIndex("by_proposal", (q) => q.eq("proposalId", proposalId))
+    .collect();
+  const waiting = all.filter((c) => cellStatus(c) === "pending");
+  if (!cellIds || cellIds.length === 0) return waiting;
+
+  const wanted = new Set(cellIds.map((id) => id as string));
+  const chosen = waiting.filter((c) => wanted.has(c._id as string));
+  if (chosen.length === 0) {
+    throw new ConvexError({
+      code: "NOTHING_TO_DO",
+      message: "Those lines have already been decided.",
+    });
+  }
+  return chosen;
+}
+
+/**
+ * Approve the whole proposal, or just the lines named.
+ *
+ * Called with no cellIds it takes everything still waiting, which is the
+ * "approve all" on the page.
+ */
 export const approvePriceProposal = mutation({
-  args: { proposalId: v.id("priceProposals") },
+  args: {
+    proposalId: v.id("priceProposals"),
+    cellIds: v.optional(v.array(v.id("priceProposalCells"))),
+  },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, ADMIN_ROLES);
 
@@ -852,79 +995,44 @@ export const approvePriceProposal = mutation({
       });
     }
 
-    const cells = await ctx.db
-      .query("priceProposalCells")
-      .withIndex("by_proposal", (q) => q.eq("proposalId", args.proposalId))
-      .collect();
-
+    const cells = await pendingCells(ctx, args.proposalId, args.cellIds);
     const now = Date.now();
     let applied = 0;
 
     for (const cell of cells) {
-      const variant = await ctx.db.get(cell.variantId);
-      if (!variant) continue; // deleted since it was proposed
-
-      if (!cell.branchId) {
-        await ctx.db.patch(variant._id, {
-          priceCentavos: cell.newPriceCentavos,
-          updatedAt: now,
-        });
-      } else {
-        const own = await branchPriceRow(ctx, cell.branchId, cell.variantId);
-        if (cell.action === "reset") {
-          if (own) await ctx.db.delete(own._id);
-        } else if (own) {
-          await ctx.db.patch(own._id, {
-            priceCentavos: cell.newPriceCentavos,
-            updatedById: user._id,
-            updatedAt: now,
-          });
-        } else {
-          await ctx.db.insert("branchPrices", {
-            branchId: cell.branchId,
-            variantId: cell.variantId,
-            styleId: variant.styleId,
-            priceCentavos: cell.newPriceCentavos,
-            updatedById: user._id,
-            updatedAt: now,
-          });
-        }
-      }
-
-      await ctx.db.insert("priceChanges", {
-        variantId: cell.variantId,
-        ...(cell.branchId ? { branchId: cell.branchId } : {}),
-        action: cell.action,
-        oldPriceCentavos: cell.oldPriceCentavos,
-        newPriceCentavos: cell.newPriceCentavos,
-        changedById: user._id,
-        changedAt: now,
+      const ok = await applyCell(ctx, cell, user._id, now);
+      await ctx.db.patch(cell._id, {
+        status: (ok ? "applied" : "rejected") as "applied" | "rejected",
       });
-      applied++;
+      if (ok) applied++;
     }
 
-    await ctx.db.patch(args.proposalId, {
-      status: "approved" as const,
-      reviewedAt: now,
-      reviewedById: user._id,
-      appliedCount: applied,
-    });
+    const totals = await settleProposal(ctx, args.proposalId, user._id);
 
     await _logAuditEntry(ctx, {
       action: "prices.approve",
       userId: user._id,
       entityType: "priceProposals",
       entityId: args.proposalId,
-      before: { status: "pending" },
-      after: { status: "approved", applied, summary: proposal.summary },
+      after: {
+        summary: proposal.summary,
+        appliedNow: applied,
+        partial: args.cellIds !== undefined && args.cellIds.length > 0,
+        stillWaiting: totals.waiting,
+      },
     });
 
-    return { applied };
+    return { appliedNow: applied, ...totals };
   },
 });
 
+/** Refuse the whole proposal, or just the lines named. */
 export const rejectPriceProposal = mutation({
-  args: { proposalId: v.id("priceProposals"), reason: v.string() },
+  args: {
+    proposalId: v.id("priceProposals"),
+    reason: v.string(),
+    cellIds: v.optional(v.array(v.id("priceProposalCells"))),
+  },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, ADMIN_ROLES);
 
@@ -946,20 +1054,33 @@ export const rejectPriceProposal = mutation({
       });
     }
 
+    const cells = await pendingCells(ctx, args.proposalId, args.cellIds);
+    for (const cell of cells) {
+      await ctx.db.patch(cell._id, { status: "rejected" as const });
+    }
+
+    // The reason belongs to the proposal; a part-refusal adds to what is there.
+    const existing = proposal.rejectionReason;
     await ctx.db.patch(args.proposalId, {
-      status: "rejected" as const,
-      reviewedAt: Date.now(),
-      reviewedById: user._id,
-      rejectionReason: reason,
+      rejectionReason: existing ? `${existing}; ${reason}` : reason,
     });
+
+    const totals = await settleProposal(ctx, args.proposalId, user._id);
 
     await _logAuditEntry(ctx, {
       action: "prices.reject",
       userId: user._id,
       entityType: "priceProposals",
       entityId: args.proposalId,
-      before: { status: "pending" },
-      after: { status: "rejected", reason },
+      after: {
+        summary: proposal.summary,
+        rejectedNow: cells.length,
+        reason,
+        partial: args.cellIds !== undefined && args.cellIds.length > 0,
+        stillWaiting: totals.waiting,
+      },
     });
+
+    return { rejectedNow: cells.length, ...totals };
   },
 });
