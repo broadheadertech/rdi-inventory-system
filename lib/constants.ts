@@ -10,6 +10,7 @@ export const ROLES = {
   VIEWER: "viewer",
   DRIVER: "driver",
   SUPPLIER: "supplier",
+  MERCHANDISER: "merchandiser",
 } as const;
 
 export type Role = (typeof ROLES)[keyof typeof ROLES];

@@ -13,6 +13,7 @@ export const ROLE_DEFAULT_ROUTES: Record<Role, string> = {
   viewer: "/branch/dashboard",
   driver: "/driver/deliveries",
   supplier: "/supplier/portal",
+  merchandiser: "/merchandising/replenishment",
 };
 
 /**
@@ -21,6 +22,10 @@ export const ROLE_DEFAULT_ROUTES: Record<Role, string> = {
  */
 export const ROLE_ROUTE_ACCESS: Record<string, readonly string[]> = {
   "/admin": ["admin"],
+  // Merchandising plans what goes where. It gets its own group rather than a
+  // key into /admin: opening the admin area to a non-admin role would also
+  // open users, prices and settings, which is not what planning needs.
+  "/merchandising": ["admin", "hqStaff", "merchandiser"],
   "/pos": ["admin", "manager", "cashier", "warehouseStaff", "hqStaff"],
   "/branch": ["admin", "manager", "viewer"],
   "/warehouse": ["admin", "hqStaff", "warehouseStaff"],

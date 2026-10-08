@@ -34,6 +34,7 @@ import {
   PhilippinePeso,
   QrCode,
   PackagePlus,
+  Inbox,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
@@ -80,11 +81,17 @@ const overviewNavItems: NavItem[] = [
     icon: ArrowLeftRight,
     roles: ["admin"],
   },
+  { href: "/admin/receiving-log", label: "Receiving Log", icon: Inbox, roles: ["admin"] },
 ];
 
 const operationsNavItems: NavItem[] = [
   { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
-  { href: "/admin/replenishment", label: "Replenishment", icon: PackagePlus, roles: ["admin"] },
+  {
+    href: "/merchandising/replenishment",
+    label: "Replenishment",
+    icon: PackagePlus,
+    roles: ["admin"],
+  },
   { href: "/admin/ordering-signoff", label: "Ordering Sign-off", icon: ClipboardCheck, roles: ["admin"] },
   { href: "/admin/disputes", label: "Disputes", icon: Scale, roles: ["admin"] },
   { href: "/admin/couriers", label: "Couriers", icon: Truck, roles: ["admin"] },
