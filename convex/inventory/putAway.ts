@@ -3,11 +3,15 @@ import { query } from "../_generated/server";
 import { requireRole } from "../_helpers/permissions";
 import { withBranchScope } from "../_helpers/withBranchScope";
 
+// These were warehouse_manager / warehouse_staff / branch_manager /
+// branch_staff — none of which exist in the schema's role union, and
+// requireRole matches on the string. Every caller was refused, so this query
+// has never once returned a suggestion.
 const PUT_AWAY_ROLES = [
-  "warehouse_manager",
-  "warehouse_staff",
-  "branch_manager",
-  "branch_staff",
+  "admin",
+  "hqStaff",
+  "warehouseStaff",
+  "manager",
 ] as const;
 
 export const getSuggestedLocations = query({

@@ -30,6 +30,13 @@ import { v, ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { HQ_ROLES } from "../_helpers/permissions";
+
+/**
+ * Who may plan a push. Merchandising decides what goes where; it does not
+ * approve it — the request still lands in the transfer queue for logistics,
+ * exactly as a typed one does.
+ */
+const PLANNING_ROLES = Array.from(new Set([...HQ_ROLES, "merchandiser"]));
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { createTransferForRequester } from "./requests";
 import {
@@ -50,7 +57,7 @@ export const getAllocationTemplate = query({
   args: {},
   handler: async (ctx) => {
     const scope = await withBranchScope(ctx);
-    if (!(HQ_ROLES as readonly string[]).includes(scope.user.role)) {
+    if (!PLANNING_ROLES.includes(scope.user.role)) {
       throw new ConvexError({ code: "UNAUTHORIZED" });
     }
 
@@ -94,10 +101,10 @@ export const uploadAllocation = mutation({
     const scope = await withBranchScope(ctx);
     // Allocation is a planning act, not a branch one. Branch users ask for
     // stock through the ordinary request form.
-    if (!(HQ_ROLES as readonly string[]).includes(scope.user.role)) {
+    if (!PLANNING_ROLES.includes(scope.user.role)) {
       throw new ConvexError({
         code: "UNAUTHORIZED",
-        message: "Only HQ can upload an allocation.",
+        message: "Only HQ or merchandising can upload an allocation.",
       });
     }
     if (args.rows.length === 0) {

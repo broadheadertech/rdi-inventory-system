@@ -160,3 +160,66 @@ export function planAllocation(
     problems,
   };
 }
+
+// ─── Scaling a plan to what actually turned up ───────────────────────────────
+
+/**
+ * Shares `received` units across lines that together asked for more.
+ *
+ * Used when a supplier short-ships a pre-allocated delivery. Every store's
+ * share comes down together rather than the first stores in the file taking
+ * their full allocation and the last ones getting nothing — which is what a
+ * simple walk down the list would do.
+ *
+ * Largest remainder, so the units handed out add up to the units received
+ * EXACTLY. Flooring each share and stopping would quietly strand a unit or two
+ * in the warehouse with no record of why.
+ *
+ * Lines are passed for one product at a time, since the shortfall is per
+ * product: a delivery can be complete on one SKU and short on the next.
+ *
+ * Largest remainder is NOT house-monotone — the Alabama paradox. With a plan
+ * of 13/7/5/3/2, going from 14 units received to 15 moves the fourth store
+ * from 2 units down to 1 while the first two gain. That is a property of the
+ * method, not a fault here: the split is worked out once per delivery, from a
+ * received count that is already final, so two different counts are never
+ * compared and nobody ever sees a share fall. Highest-averages would be
+ * monotone but systematically favours the larger stores, which is a real cost
+ * in exchange for a guarantee this code cannot use.
+ */
+export function scaleToReceived(
+  lines: { id: string; quantity: number }[],
+  received: number
+): Map<string, number> {
+  const out = new Map<string, number>();
+  const planned = lines.reduce((sum, line) => sum + line.quantity, 0);
+
+  if (planned <= 0 || received <= 0) {
+    for (const line of lines) out.set(line.id, 0);
+    return out;
+  }
+  // Nothing to scale: everything planned arrived, or more did.
+  if (received >= planned) {
+    for (const line of lines) out.set(line.id, line.quantity);
+    return out;
+  }
+
+  const shares = lines.map((line) => {
+    const exact = (line.quantity * received) / planned;
+    const base = Math.floor(exact);
+    return { id: line.id, base, remainder: exact - base };
+  });
+
+  let handed = shares.reduce((sum, s) => sum + s.base, 0);
+  // The leftovers go to the largest remainders first. A tie falls to whichever
+  // came first in the file, which is stable rather than arbitrary.
+  const queue = [...shares].sort((a, b) => b.remainder - a.remainder);
+  for (const share of queue) {
+    if (handed >= received) break;
+    share.base += 1;
+    handed++;
+  }
+
+  for (const share of shares) out.set(share.id, share.base);
+  return out;
+}

@@ -19,7 +19,8 @@ const roleValidator = v.union(
   v.literal("hqStaff"),
   v.literal("viewer"),
   v.literal("driver"),
-  v.literal("supplier")
+  v.literal("supplier"),
+  v.literal("merchandiser")
 );
 
 // ─── Internal Functions (webhook-only, not publicly accessible) ──────────────

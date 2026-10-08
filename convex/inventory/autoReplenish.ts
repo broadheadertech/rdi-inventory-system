@@ -5,11 +5,16 @@ import { requireRole } from "../_helpers/permissions";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import type { Id } from "../_generated/dataModel";
 
+// warehouse_manager and branch_manager were in this list and exist nowhere in
+// the schema's role union, so warehouse and HQ staff were locked out of
+// replenishment suggestions while admin and manager got through. Merchandising
+// is the account these suggestions are really for.
 const ALLOWED_ROLES = [
   "admin",
+  "hqStaff",
   "manager",
-  "warehouse_manager",
-  "branch_manager",
+  "warehouseStaff",
+  "merchandiser",
 ] as const;
 
 export const getReplenishmentSuggestions = query({

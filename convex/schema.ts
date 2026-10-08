@@ -120,7 +120,10 @@ export default defineSchema({
       v.literal("hqStaff"),
       v.literal("viewer"),
       v.literal("driver"),
-      v.literal("supplier")
+      v.literal("supplier"),
+      // Plans what goes where: uploads the allocations that pre-allocation and
+      // replenishment run on. Reads the chain, never operates a till or a bench.
+      v.literal("merchandiser")
     ),
     branchId: v.optional(v.id("branches")),
     assignedBrands: v.optional(v.array(v.string())),
@@ -916,6 +919,58 @@ export default defineSchema({
     scannedById: v.id("users"),
     scannedAt: v.number(),
   }).index("by_box", ["boxId", "scannedAt"]),
+
+  // A supplier delivery split across stores BEFORE it arrives.
+  //
+  // A PO is declared against the warehouse, and until now the store split was
+  // decided afterwards: receive, put away, then re-pick when a store asked.
+  // Pre-allocating lets the delivery cross-dock — the store transfers are
+  // already settled when the goods are scanned in, so they move out the same
+  // day instead of touching a shelf twice.
+  //
+  // The plan is approved before the goods land, which is the whole point: it
+  // is a plan, and there is nothing to move yet. What actually moves is scaled
+  // to what the supplier really sent. See convex/suppliers/preAllocation.ts.
+  preAllocations: defineTable({
+    receiptId: v.id("supplierReceipts"),
+    fileName: v.string(),
+    status: v.union(
+      v.literal("pending"),   // uploaded, waiting on logistics
+      v.literal("approved"),  // signed off, waiting for the goods
+      v.literal("rejected"),
+      v.literal("applied")    // the goods landed and the transfers were cut
+    ),
+    lineCount: v.number(),
+    unitsPlanned: v.number(),
+    branchCount: v.number(),
+    skippedCount: v.number(),
+    submittedById: v.id("users"),
+    submittedAt: v.number(),
+    reviewedById: v.optional(v.id("users")),
+    reviewedAt: v.optional(v.number()),
+    rejectionReason: v.optional(v.string()),
+    appliedAt: v.optional(v.number()),
+    // What was actually cut once the delivery landed, which is rarely exactly
+    // what was planned: a short shipment scales every store's share down.
+    unitsApplied: v.optional(v.number()),
+    transfersCreated: v.optional(v.number()),
+  })
+    .index("by_receipt", ["receiptId"])
+    .index("by_status", ["status"]),
+
+  preAllocationLines: defineTable({
+    allocationId: v.id("preAllocations"),
+    receiptId: v.id("supplierReceipts"),
+    branchId: v.id("branches"),
+    branchName: v.string(),      // as written, so a renamed store still reads
+    variantId: v.id("variants"),
+    sku: v.string(),
+    label: v.string(),           // style · size · colour
+    quantity: v.number(),
+    notes: v.optional(v.string()),
+  })
+    .index("by_allocation", ["allocationId"])
+    .index("by_receipt", ["receiptId"]),
 
   supplierReceiptItems: defineTable({
     receiptId: v.id("supplierReceipts"),

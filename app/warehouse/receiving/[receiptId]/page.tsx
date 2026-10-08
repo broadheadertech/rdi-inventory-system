@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { PreAllocationPanel } from "@/components/shared/PreAllocationPanel";
 import type { Id } from "@/convex/_generated/dataModel";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -42,6 +43,7 @@ export default function ReceiptDetailPage() {
   const receiptId = params.receiptId as Id<"supplierReceipts">;
 
   const receipt = useQuery(api.suppliers.receiving.getReceipt, { receiptId });
+  const currentUser = useQuery(api.auth.users.getCurrentUser);
   const scanItem = useMutation(api.suppliers.receiving.scanItem);
   // No typed quantity: a line's count is its scans. A mis-scan is undone.
   const undoLastScan = useMutation(api.suppliers.receiving.undoLastSupplierScan);
@@ -56,6 +58,12 @@ export default function ReceiptDetailPage() {
 
   const isOpen =
     receipt && (receipt.status === "pending" || receipt.status === "receiving");
+
+  // Merchandising and HQ plan the split; logistics signs it off. A warehouse
+  // hand receiving the goods should not also be deciding where they go.
+  const role = currentUser?.role;
+  const canPlan = role === "admin" || role === "hqStaff" || role === "merchandiser";
+  const canApprove = role === "admin" || role === "hqStaff" || role === "warehouseStaff";
 
   async function doScan(code: string) {
     const trimmed = code.trim();
@@ -160,8 +168,7 @@ export default function ReceiptDetailPage() {
           >
             {receipt.status}
           </span>
-        </div>
-        {receipt.notes && (
+        </div>        {receipt.notes && (
           <p className="mt-2 text-sm text-muted-foreground">{receipt.notes}</p>
         )}
         {receipt.photoUrl && (
@@ -181,6 +188,21 @@ export default function ReceiptDetailPage() {
           </a>
         )}
       </div>
+      {/* ── Pre-allocation ──────────────────────────────────────────────────
+          Splitting this delivery across stores before it lands. Approved
+          here, the transfers are cut automatically on completion. */}
+      {(canPlan || canApprove) && (
+        <PreAllocationPanel
+          receiptId={receiptId}
+          declaredLines={receipt.items.map((i) => ({
+            sku: i.sku,
+            declaredQuantity: i.declaredQuantity,
+          }))}
+          canPlan={canPlan}
+          canApprove={canApprove}
+          receiptOpen={!!isOpen}
+        />
+      )}
 
       {/* Scan box */}
       {isOpen && (

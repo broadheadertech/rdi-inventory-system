@@ -13,6 +13,7 @@ import type { QueryCtx, MutationCtx } from "../_generated/server";
 import { v, ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import { requireRole, WAREHOUSE_ROLES } from "../_helpers/permissions";
+import { applyApprovedPreAllocation } from "./preAllocation";
 import { latestStandingScan, resolveScanCode } from "../_helpers/receivingScans";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -485,6 +486,16 @@ export const completeReceipt = mutation({
       updatedAt: now,
     });
 
+    // If this delivery was pre-allocated and the plan was approved, cut the
+    // store transfers now — after the stock above is on the books, since those
+    // transfers hold it. Short shipments scale every store's share down
+    // together. Nothing happens when there is no approved plan.
+    const preAllocation = await applyApprovedPreAllocation(
+      ctx,
+      args.receiptId,
+      user._id
+    );
+
     // Report discrepancy to warehouse admins (admin + hqStaff)
     if (hasDiscrepancy) {
       const supplier = await ctx.db.get(receipt.supplierId);
@@ -519,6 +530,13 @@ export const completeReceipt = mutation({
       }
     }
 
-    return { hasDiscrepancy, discrepancyCount: discrepancies.length };
+    return {
+      hasDiscrepancy,
+      discrepancyCount: discrepancies.length,
+      // What the pre-allocated plan did, if there was one. scaled means the
+      // supplier sent less than the PO declared and every store's share came
+      // down with it.
+      preAllocation,
+    };
   },
 });
