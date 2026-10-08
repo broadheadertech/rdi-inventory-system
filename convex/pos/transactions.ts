@@ -7,7 +7,11 @@ import { withBranchScope } from "../_helpers/withBranchScope";
 import { requireTerminal } from "../_helpers/requireTerminal";
 import { POS_ROLES, requireRole } from "../_helpers/permissions";
 import { _logAuditEntry } from "../_helpers/auditLog";
-import { calculateTaxBreakdown } from "../_helpers/taxCalculations";
+import {
+  applyPromoDiscount,
+  breakdownFoots,
+  calculateTaxBreakdown,
+} from "../_helpers/taxCalculations";
 import { tenderValidator } from "../_helpers/tenders";
 import { stackPromos } from "../_helpers/promoStacking";
 import { readPromoRules } from "../_helpers/promoSettings";
@@ -252,8 +256,11 @@ export const createTransaction = mutation({
       });
     }
 
-    // 6. Server-side tax calculation using AUTHORITATIVE prices (not client values)
-    const taxBreakdown = calculateTaxBreakdown(validatedItems, args.discountType);
+    // 6. Server-side tax calculation using AUTHORITATIVE prices (not client
+    //    values). This is the GROSS reading: promotions are worked out from it
+    //    below, and the figures that reach the invoice come from
+    //    applyPromoDiscount once the promotion is known.
+    const grossBreakdown = calculateTaxBreakdown(validatedItems, args.discountType);
 
     // 6b. Promotions (only when discountType is "none" — promos don't stack
     //     with Senior/PWD). A sale may carry several, held in check by the
@@ -368,7 +375,7 @@ export const createTransaction = mutation({
           id: String(promo._id),
           exclusive: promo.exclusive ?? false,
         })),
-        taxBreakdown.totalCentavos,
+        grossBreakdown.totalCentavos,
         await readPromoRules(ctx),
         {
           giftVariantId: args.giftVariantId ? String(args.giftVariantId) : undefined,
@@ -388,7 +395,20 @@ export const createTransaction = mutation({
       }
     }
 
-    const finalTotalCentavos = taxBreakdown.totalCentavos - promoDiscountCentavos;
+    // A promotion granted at the point of sale reduces the gross selling
+    // price, so the VAT owed on the sale falls with it. Striking VAT on the
+    // pre-promotion figure over-remits, and leaves an invoice whose VATable
+    // plus VAT comes to more than the customer handed over.
+    const taxBreakdown = applyPromoDiscount(grossBreakdown, promoDiscountCentavos);
+    const finalTotalCentavos = taxBreakdown.totalCentavos;
+
+    // Nothing that fails to foot should ever reach a receipt or a Z-reading.
+    if (!breakdownFoots(taxBreakdown)) {
+      throw new ConvexError({
+        code: "INTERNAL",
+        message: "The sale's figures do not add up. Nothing was charged.",
+      });
+    }
 
     // 7. Validate cash sufficiency
     if (args.paymentMethod === "cash") {
@@ -445,8 +465,13 @@ export const createTransaction = mutation({
       giftVariantId: promoDiscountCentavos > 0 ? args.giftVariantId : undefined,
       giftSubstituted:
         promoDiscountCentavos > 0 && args.giftSubstituted ? true : undefined,
+      // The breakdown's figure, not the raw one: a promotion larger than the
+      // sale is capped at it, and the stored discount has to be the amount
+      // that actually came off or the invoice stops reconciling.
       promoDiscountAmountCentavos:
-        promoDiscountCentavos > 0 ? promoDiscountCentavos : undefined,
+        taxBreakdown.promoDiscountCentavos > 0
+          ? taxBreakdown.promoDiscountCentavos
+          : undefined,
       splitPayment: args.splitPayment,
       paymentReference,
       fashionAssistantId: args.fashionAssistantId,

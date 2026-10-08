@@ -556,11 +556,13 @@ export async function fileZReading(
     count++;
     gross += t.totalCentavos;
     const isDisc = t.discountType === "senior" || t.discountType === "pwd";
+    // gross above is the sum of totals, so these three have to add back to
+    // it: VATable + VAT + VAT-exempt === what was received.
     if (isDisc) {
-      vatExempt += t.subtotalCentavos - t.vatAmountCentavos;
+      vatExempt += t.totalCentavos;
       discount += t.discountAmountCentavos;
     } else {
-      vatable += t.subtotalCentavos;
+      vatable += t.totalCentavos - t.vatAmountCentavos;
       vat += t.vatAmountCentavos;
     }
     addTenders(tenders, t);

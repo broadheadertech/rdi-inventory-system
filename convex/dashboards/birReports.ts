@@ -364,9 +364,11 @@ export const getSalesJournal = query({
           branch: branchName.get(t.branchId as string) ?? "Unknown",
           cashier: cashierName.get(cKey) ?? "Unknown",
           status: t.status ?? "completed",
+          // Every row foots: vatable + vat + vatExempt === gross, where
+          // gross is what the customer actually paid.
           grossCentavos: t.totalCentavos,
-          vatableCentavos: isDisc ? 0 : t.subtotalCentavos,
-          vatExemptCentavos: isDisc ? t.subtotalCentavos - t.vatAmountCentavos : 0,
+          vatableCentavos: isDisc ? 0 : t.totalCentavos - t.vatAmountCentavos,
+          vatExemptCentavos: isDisc ? t.totalCentavos : 0,
           vatCentavos: isDisc ? 0 : t.vatAmountCentavos,
           discountCentavos: t.discountAmountCentavos,
           discountType: t.discountType ?? "none",

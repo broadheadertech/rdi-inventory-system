@@ -103,9 +103,22 @@ function ReceiptDocument({ receiptData, tab }: { receiptData: ReceiptData; tab: 
 
   // Mirror ReceiptPDF: accredited only when a PTU / Accreditation No. exists.
   const accredited = !!(bir.accreditationNumber || bir.ptuNumber);
-  const vatableSales = isDiscounted ? 0 : txn.subtotalCentavos;
-  const vatExemptSales = isDiscounted ? txn.subtotalCentavos - txn.vatAmountCentavos : 0;
+  // The VAT box has to foot against TOTAL AMOUNT DUE, so it splits what was
+  // received and not the shelf price. VATable Sales was the gross subtotal,
+  // which made VATable plus VAT come to more than the customer paid on every
+  // single sale, promoted or not.
+  const vatableSales = isDiscounted ? 0 : txn.totalCentavos - txn.vatAmountCentavos;
   const vatAmount = isDiscounted ? 0 : txn.vatAmountCentavos;
+  // On a Senior/PWD sale no VAT is charged, so vatAmountCentavos is zero and
+  // the exempt base has to come from the other figures. It is derived rather
+  // than recomputed with removeVat: the 20% is worked out per unit, so
+  // removeVat(subtotal) and the sum of the per-unit bases differ by a centavo
+  // on a multi-line sale, and the receipt would stop footing. Reading it back
+  // as total + discount is exact by construction.
+  const vatExemptSales = isDiscounted
+    ? txn.totalCentavos + txn.discountAmountCentavos
+    : 0;
+  const vatAdjustment = isDiscounted ? txn.subtotalCentavos - vatExemptSales : 0;
   const vatRegTin = bir.tin || business.tin;
   const fieldOrBlank = (v?: string) => (v && v.trim() ? v : "__________");
   // One line per promotion, so the amount due adds up on the printed receipt.
@@ -220,7 +233,7 @@ function ReceiptDocument({ receiptData, tab }: { receiptData: ReceiptData; tab: 
                 <>
                   <div className="flex justify-between">
                     <span>Less: VAT</span>
-                    <span>-{formatCurrency(txn.vatAmountCentavos)}</span>
+                    <span>-{formatCurrency(vatAdjustment)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span>

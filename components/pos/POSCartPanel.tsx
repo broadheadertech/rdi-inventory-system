@@ -30,7 +30,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatCurrency } from "@/lib/formatters";
 import { usePOSCart, type CartItem, type HeldTransaction } from "@/components/providers/POSCartProvider";
-import { calculateTaxBreakdown, type TaxBreakdown } from "@/convex/_helpers/taxCalculations";
+import {
+  applyPromoDiscount,
+  calculateTaxBreakdown,
+  type TaxBreakdown,
+} from "@/convex/_helpers/taxCalculations";
 import { useConnectionStatus } from "@/components/shared/ConnectionIndicator";
 import { encrypt } from "@/lib/encryption";
 import { enqueueTransaction, decrementStockItem } from "@/lib/offlineQueue";
@@ -970,6 +974,117 @@ function PromoSelector({
 
 // ─── Cart Actions ────────────────────────────────────────────────────────────
 
+// ─── SaleTotals ──────────────────────────────────────────────────────────────
+// The money, read in the order it actually happens: the gross, what comes off
+// it, then the VAT inside what is left, then the total.
+//
+// The VAT line used to sit above the promotion lines and showed the VAT on the
+// shelf price, so a promoted sale printed a VATable plus VAT that came to more
+// than the customer paid. VAT is struck on the net now, and sits below the
+// discounts to show that it follows them.
+//
+// Nothing here recomputes anything the server will not: applyPromoDiscount is
+// the same pure function the mutation uses, so the preview and the receipt
+// cannot drift apart.
+
+function SaleTotals({
+  taxBreakdown,
+  discountType,
+  promoStack,
+  compact,
+  showSavings,
+}: {
+  taxBreakdown: TaxBreakdown;
+  discountType: DiscountType;
+  promoStack: PromoStack | null;
+  /** The cart panel is tighter than the payment sheet. */
+  compact?: boolean;
+  showSavings?: boolean;
+}) {
+  const isDiscounted = discountType !== "none";
+  const net = applyPromoDiscount(taxBreakdown, promoStack?.discountCentavos ?? 0);
+  const row = compact
+    ? "flex items-center justify-between"
+    : "flex justify-between";
+
+  return (
+    <>
+      <div className={row}>
+        <span className="text-muted-foreground">Subtotal</span>
+        <span className="tabular-nums">{formatCurrency(net.subtotalCentavos)}</span>
+      </div>
+
+      {isDiscounted && (
+        <div className={cn(row, "text-destructive")}>
+          <span>Discount ({discountType === "senior" ? "SC" : "PWD"} 20%)</span>
+          <span className="tabular-nums">
+            -{formatCurrency(net.discountAmountCentavos)}
+          </span>
+        </div>
+      )}
+
+      {promoStack?.applied.map((a) => (
+        <div key={a.id} className={cn(row, "gap-2 text-orange-600")}>
+          <span className="truncate" title={a.description}>
+            Promo ({a.name})
+          </span>
+          <span className="shrink-0 tabular-nums">
+            -{formatCurrency(a.discountCentavos)}
+          </span>
+        </div>
+      ))}
+      {promoStack?.capped && (
+        <p className="text-[11px] text-amber-700">
+          Discount capped at the shop&apos;s maximum.
+        </p>
+      )}
+
+      {/* The VAT inside what is left, after everything above has come off. A
+          Senior/PWD sale charges none at all, so it shows the exempt line. */}
+      {isDiscounted ? (
+        <div className={cn(row, "text-xs text-muted-foreground")}>
+          <span>VAT-exempt sales</span>
+          <span className="tabular-nums">
+            {formatCurrency(net.vatExemptSalesCentavos)}
+          </span>
+        </div>
+      ) : (
+        <>
+          <div className={cn(row, "text-xs text-muted-foreground")}>
+            <span>VATable sales</span>
+            <span className="tabular-nums">
+              {formatCurrency(net.vatableSalesCentavos)}
+            </span>
+          </div>
+          <div className={cn(row, "text-xs text-muted-foreground")}>
+            <span>VAT (12%)</span>
+            <span className="tabular-nums">
+              {formatCurrency(net.vatAmountCentavos)}
+            </span>
+          </div>
+        </>
+      )}
+
+      <div
+        className={cn(
+          row,
+          compact ? "pt-0.5 text-base font-bold" : "pt-1 text-lg font-bold"
+        )}
+      >
+        <span>Total</span>
+        <span className="tabular-nums">{formatCurrency(net.totalCentavos)}</span>
+      </div>
+
+      {showSavings && net.savingsCentavos > 0 && (
+        <div className={cn(row, "text-xs font-medium text-green-600")}>
+          <span>You save</span>
+          <span className="tabular-nums">{formatCurrency(net.savingsCentavos)}</span>
+        </div>
+      )}
+    </>
+  );
+}
+
 function CartActions({
   items,
   taxBreakdown,
@@ -991,57 +1106,22 @@ function CartActions({
   handleClearCart: () => void;
   onCompleteSale: () => void;
 }) {
-  const isDiscounted = discountType !== "none";
-  const promoDiscount = promoStack?.discountCentavos ?? 0;
-  const displayTotal = taxBreakdown.totalCentavos - promoDiscount;
-  const savings = isDiscounted ? taxBreakdown.savingsCentavos : promoDiscount;
+  const displayTotal = applyPromoDiscount(
+    taxBreakdown,
+    promoStack?.discountCentavos ?? 0
+  ).totalCentavos;
 
   return (
     <div className="mt-2 border-t pt-2">
       {/* Price breakdown */}
       <div className="mb-2 space-y-0.5 text-sm">
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Subtotal</span>
-          <span className="tabular-nums">{formatCurrency(taxBreakdown.subtotalCentavos)}</span>
-        </div>
-
-        {isDiscounted ? (
-          <div className="flex items-center justify-between text-destructive">
-            <span>Discount ({discountType === "senior" ? "SC" : "PWD"} 20%)</span>
-            <span className="tabular-nums">-{formatCurrency(taxBreakdown.discountAmountCentavos)}</span>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <span className="text-muted-foreground">VAT (12%)</span>
-            <span className="tabular-nums">{formatCurrency(taxBreakdown.vatAmountCentavos)}</span>
-          </div>
-        )}
-
-        {promoStack?.applied.map((a) => (
-          <div key={a.id} className="flex items-center justify-between gap-2 text-orange-600">
-            <span className="truncate" title={a.description}>
-              Promo ({a.name})
-            </span>
-            <span className="shrink-0 tabular-nums">-{formatCurrency(a.discountCentavos)}</span>
-          </div>
-        ))}
-        {promoStack?.capped && (
-          <p className="text-[11px] text-amber-700">
-            Discount capped at the shop&apos;s maximum.
-          </p>
-        )}
-
-        <div className="flex items-center justify-between pt-0.5 text-base font-bold">
-          <span>Total</span>
-          <span className="tabular-nums">{formatCurrency(displayTotal)}</span>
-        </div>
-
-        {savings > 0 && (
-          <div className="flex items-center justify-between text-xs font-medium text-green-600">
-            <span>You save</span>
-            <span className="tabular-nums">{formatCurrency(savings)}</span>
-          </div>
-        )}
+        <SaleTotals
+          taxBreakdown={taxBreakdown}
+          discountType={discountType}
+          promoStack={promoStack}
+          compact
+          showSavings
+        />
       </div>
 
       {/* Hold · Clear · Complete Sale on one row */}
@@ -1890,9 +1970,6 @@ function PaymentModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onCancel]);
 
-  const isDiscounted = discountType !== "none";
-  const promoDiscount = promoStack?.discountCentavos ?? 0;
-  const total = taxBreakdown.totalCentavos - promoDiscount;
   const itemCount = items.reduce((sum, i) => sum + i.quantity, 0);
 
   return (
@@ -1941,33 +2018,11 @@ function PaymentModal({
               ))}
             </ul>
             <div className="space-y-0.5 border-t px-5 py-3 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Subtotal</span>
-                <span className="tabular-nums">{formatCurrency(taxBreakdown.subtotalCentavos)}</span>
-              </div>
-              {isDiscounted ? (
-                <div className="flex justify-between text-destructive">
-                  <span>Discount ({discountType === "senior" ? "SC" : "PWD"} 20%)</span>
-                  <span className="tabular-nums">-{formatCurrency(taxBreakdown.discountAmountCentavos)}</span>
-                </div>
-              ) : (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">VAT (12%)</span>
-                  <span className="tabular-nums">{formatCurrency(taxBreakdown.vatAmountCentavos)}</span>
-                </div>
-              )}
-              {promoStack?.applied.map((a) => (
-                <div key={a.id} className="flex justify-between gap-2 text-orange-600">
-                  <span className="truncate" title={a.description}>
-                    Promo ({a.name})
-                  </span>
-                  <span className="shrink-0 tabular-nums">-{formatCurrency(a.discountCentavos)}</span>
-                </div>
-              ))}
-              <div className="flex justify-between pt-1 text-lg font-bold">
-                <span>Total</span>
-                <span className="tabular-nums">{formatCurrency(total)}</span>
-              </div>
+              <SaleTotals
+                taxBreakdown={taxBreakdown}
+                discountType={discountType}
+                promoStack={promoStack}
+              />
               <button
                 onClick={onCancel}
                 disabled={busy}

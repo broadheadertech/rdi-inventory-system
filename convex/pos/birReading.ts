@@ -63,7 +63,11 @@ async function aggregate(ctx: QueryCtx, txns: Doc<"transactions">[]) {
       if (t.discountType === "senior") { scDiscount += t.discountAmountCentavos; scTxn++; }
       else { pwdDiscount += t.discountAmountCentavos; pwdTxn++; }
     } else {
-      vatable += t.subtotalCentavos - t.vatAmountCentavos;
+      // Split what was RECEIVED, not the shelf price. Gross above is the
+      // pre-discount subtotal and the promotion is listed under discounts, so
+      // taking VATable off the subtotal here would count the promoted money
+      // twice and over-state output VAT.
+      vatable += t.totalCentavos - t.vatAmountCentavos;
       vat += t.vatAmountCentavos;
       othersDiscount += t.promoDiscountAmountCentavos ?? 0;
     }

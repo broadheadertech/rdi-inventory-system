@@ -162,10 +162,23 @@ export function ReceiptPDF({ data }: { data: ReceiptData }) {
   const accredited =
     bir.accredited ?? !!(bir.accreditationNumber || bir.ptuNumber);
 
-  // VAT summary box values (BIR-required). Net-of-VAT VATable = subtotal; VAT = vatAmount.
-  const vatableSales = isDiscounted ? 0 : txn.subtotalCentavos;
-  const vatExemptSales = isDiscounted ? txn.subtotalCentavos - txn.vatAmountCentavos : 0;
+  // VAT summary box values (BIR-required).
+  // The VAT box has to foot against TOTAL AMOUNT DUE, so it splits what was
+  // received and not the shelf price. VATable Sales was the gross subtotal,
+  // which made VATable plus VAT come to more than the customer paid on every
+  // single sale, promoted or not.
+  const vatableSales = isDiscounted ? 0 : txn.totalCentavos - txn.vatAmountCentavos;
   const vatAmount = isDiscounted ? 0 : txn.vatAmountCentavos;
+  // On a Senior/PWD sale no VAT is charged, so vatAmountCentavos is zero and
+  // the exempt base has to come from the other figures. It is derived rather
+  // than recomputed with removeVat: the 20% is worked out per unit, so
+  // removeVat(subtotal) and the sum of the per-unit bases differ by a centavo
+  // on a multi-line sale, and the receipt would stop footing. Reading it back
+  // as total + discount is exact by construction.
+  const vatExemptSales = isDiscounted
+    ? txn.totalCentavos + txn.discountAmountCentavos
+    : 0;
+  const vatAdjustment = isDiscounted ? txn.subtotalCentavos - vatExemptSales : 0;
 
   // One line per promotion, so the amount due adds up on the invoice.
   const promoLines = receiptPromoLines(txn);
@@ -275,7 +288,7 @@ export function ReceiptPDF({ data }: { data: ReceiptData }) {
           <>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>Less: VAT</Text>
-              <Text style={styles.summaryValue}>-{formatPrice(txn.vatAmountCentavos)}</Text>
+              <Text style={styles.summaryValue}>-{formatPrice(vatAdjustment)}</Text>
             </View>
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>
