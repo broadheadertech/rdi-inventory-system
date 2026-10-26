@@ -323,12 +323,6 @@ export default function BrandProductsPage() {
   const allCodes = useQuery(api.catalog.productCodes.listAllActive) as ProductCode[] | undefined;
 
   const activeColors = useQuery(api.admin.colors.listActiveColors) as ColorOption[] | undefined;
-  // A style's SKUs live on its variants, so the list counts them instead of
-  // printing a style-level SKU that is blank for every real product.
-  const variantSummary = useQuery(api.catalog.variants.listStyleVariantSummary, { brandId });
-  const variantsByStyle = new Map(
-    (variantSummary ?? []).map((row) => [row.styleId as string, row])
-  );
   const createStyle = useMutation(api.catalog.styles.createStyle);
   const updateStyle = useMutation(api.catalog.styles.updateStyle);
   const deactivateStyle = useMutation(api.catalog.styles.deactivateStyle);
@@ -387,7 +381,6 @@ export default function BrandProductsPage() {
       switch (sortKey) {
         case "name": return a.name;
         case "styleCode": return a.styleCode ?? "";
-        case "variants": return variantsByStyle.get(a._id as string)?.variantCount ?? 0;
         case "costPrice": return a.costPrice ?? 0;
         case "srp": return a.srp ?? 0;
         case "status": return a.isActive ? "active" : "inactive";
@@ -398,7 +391,6 @@ export default function BrandProductsPage() {
       switch (sortKey) {
         case "name": return b.name;
         case "styleCode": return b.styleCode ?? "";
-        case "variants": return variantsByStyle.get(b._id as string)?.variantCount ?? 0;
         case "costPrice": return b.costPrice ?? 0;
         case "srp": return b.srp ?? 0;
         case "status": return b.isActive ? "active" : "inactive";
@@ -410,6 +402,16 @@ export default function BrandProductsPage() {
   });
 
   const pagination = usePagination(sortedStyles);
+
+  // A style's SKUs live on its variants, so the list counts them instead of
+  // printing a style-level SKU that is blank for every real product — for the
+  // page on screen only, since a brand runs to thousands of styles.
+  const variantSummary = useQuery(api.catalog.variants.listStyleVariantSummary, {
+    styleIds: pagination.paginatedData.map((style) => style._id),
+  });
+  const variantsByStyle = new Map(
+    (variantSummary ?? []).map((row) => [row.styleId as string, row])
+  );
 
   // ─── Add form helpers ─────────────────────────────────────────────────
 
@@ -630,7 +632,7 @@ export default function BrandProductsPage() {
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("name")}>Product Name<SortIcon col="name" /></TableHead>
               <TableHead>Description</TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("styleCode")}>Style Code<SortIcon col="styleCode" /></TableHead>
-              <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("variants")}>Variants<SortIcon col="variants" /></TableHead>
+              <TableHead>Variants</TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("srp")}>Base SRP<SortIcon col="srp" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("costPrice")}>Cost Price<SortIcon col="costPrice" /></TableHead>
               <TableHead className="cursor-pointer select-none" onClick={() => toggleSort("status")}>Status<SortIcon col="status" /></TableHead>

@@ -451,24 +451,24 @@ export const reactivateVariant = mutation({
  * printing a style-level SKU that can only ever be blank.
  */
 export const listStyleVariantSummary = query({
-  args: { brandId: v.id("brands") },
+  // The styles on screen, not the whole brand: a brand runs to thousands of
+  // styles, and one lookup per style would pass a query's read limit.
+  args: { styleIds: v.array(v.id("styles")) },
   handler: async (ctx, args) => {
     await requireRole(ctx, HQ_ROLES);
-
-    const styles = await ctx.db
-      .query("styles")
-      .withIndex("by_brand", (q) => q.eq("brandId", args.brandId))
-      .collect();
+    if (args.styleIds.length > 100) {
+      throw new ConvexError({ code: "TOO_MANY_STYLES", message: "Ask for at most 100 styles at a time" });
+    }
 
     return await Promise.all(
-      styles.map(async (style) => {
+      args.styleIds.map(async (styleId) => {
         const variants = await ctx.db
           .query("variants")
-          .withIndex("by_style", (q) => q.eq("styleId", style._id))
+          .withIndex("by_style", (q) => q.eq("styleId", styleId))
           .collect();
         const active = variants.filter((variant) => variant.isActive);
         return {
-          styleId: style._id,
+          styleId,
           variantCount: active.length,
           inactiveCount: variants.length - active.length,
           colorCount: new Set(active.map((variant) => colorKey(variant.color))).size,
