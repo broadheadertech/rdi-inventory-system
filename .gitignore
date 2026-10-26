@@ -34,6 +34,14 @@ yarn-error.log*
 .env*
 !.env.example
 
+# merchandising masterdata exports — sensitive (landed costs, suppliers, POs)
+/masterdata/
+Masterdata_batches/
+*[Mm]asterdata*.csv
+*[Mm]asterdata*.xlsx
+*[Mm]asterdata*.xls
+*[Mm]asterdata*.zip
+
 # vercel
 .vercel
 
