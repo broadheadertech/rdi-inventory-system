@@ -390,6 +390,14 @@ export default defineSchema({
     isExclusive: v.optional(v.boolean()),
     exclusiveBranchIds: v.optional(v.array(v.id("branches"))),
     dropDate: v.optional(v.number()),
+    // As the merchandising masterdata labels the style: CLASSIFICATON (BASELINE,
+    // MFO, GWP…), DESIGNS (LEVEL 1, LOGO…), SPECS (REGULAR FIT…), TRADING
+    // (REGULAR / MARKDOWN) and AGING (NEWNESS, CURRENT, AGED, TERMINAL).
+    classification: v.optional(v.string()),
+    designs: v.optional(v.string()),
+    specs: v.optional(v.string()),
+    trading: v.optional(v.string()),
+    aging: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

@@ -13,6 +13,7 @@ import type * as _helpers_branchPricing from "../_helpers/branchPricing.js";
 import type * as _helpers_constants from "../_helpers/constants.js";
 import type * as _helpers_custody from "../_helpers/custody.js";
 import type * as _helpers_internalInvoice from "../_helpers/internalInvoice.js";
+import type * as _helpers_masterdata from "../_helpers/masterdata.js";
 import type * as _helpers_packingScans from "../_helpers/packingScans.js";
 import type * as _helpers_passwordHash from "../_helpers/passwordHash.js";
 import type * as _helpers_permissions from "../_helpers/permissions.js";
@@ -71,6 +72,7 @@ import type * as catalog_bulkImport from "../catalog/bulkImport.js";
 import type * as catalog_categories from "../catalog/categories.js";
 import type * as catalog_drops from "../catalog/drops.js";
 import type * as catalog_images from "../catalog/images.js";
+import type * as catalog_masterdataImport from "../catalog/masterdataImport.js";
 import type * as catalog_productCodes from "../catalog/productCodes.js";
 import type * as catalog_productLabels from "../catalog/productLabels.js";
 import type * as catalog_publicBrowse from "../catalog/publicBrowse.js";
@@ -118,6 +120,7 @@ import type * as logistics_notificationRecords from "../logistics/notificationRe
 import type * as logistics_notifications from "../logistics/notifications.js";
 import type * as migrations_backfillBatches from "../migrations/backfillBatches.js";
 import type * as migrations_calendarCodes from "../migrations/calendarCodes.js";
+import type * as migrations_clearDummyData from "../migrations/clearDummyData.js";
 import type * as migrations_vatOnNet from "../migrations/vatOnNet.js";
 import type * as notifications_emailDigestHelpers from "../notifications/emailDigestHelpers.js";
 import type * as notifications_emailDigests from "../notifications/emailDigests.js";
@@ -200,6 +203,7 @@ declare const fullApi: ApiFromModules<{
   "_helpers/constants": typeof _helpers_constants;
   "_helpers/custody": typeof _helpers_custody;
   "_helpers/internalInvoice": typeof _helpers_internalInvoice;
+  "_helpers/masterdata": typeof _helpers_masterdata;
   "_helpers/packingScans": typeof _helpers_packingScans;
   "_helpers/passwordHash": typeof _helpers_passwordHash;
   "_helpers/permissions": typeof _helpers_permissions;
@@ -258,6 +262,7 @@ declare const fullApi: ApiFromModules<{
   "catalog/categories": typeof catalog_categories;
   "catalog/drops": typeof catalog_drops;
   "catalog/images": typeof catalog_images;
+  "catalog/masterdataImport": typeof catalog_masterdataImport;
   "catalog/productCodes": typeof catalog_productCodes;
   "catalog/productLabels": typeof catalog_productLabels;
   "catalog/publicBrowse": typeof catalog_publicBrowse;
@@ -305,6 +310,7 @@ declare const fullApi: ApiFromModules<{
   "logistics/notifications": typeof logistics_notifications;
   "migrations/backfillBatches": typeof migrations_backfillBatches;
   "migrations/calendarCodes": typeof migrations_calendarCodes;
+  "migrations/clearDummyData": typeof migrations_clearDummyData;
   "migrations/vatOnNet": typeof migrations_vatOnNet;
   "notifications/emailDigestHelpers": typeof notifications_emailDigestHelpers;
   "notifications/emailDigests": typeof notifications_emailDigests;

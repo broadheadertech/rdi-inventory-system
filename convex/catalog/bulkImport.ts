@@ -1,8 +1,9 @@
 import { v, ConvexError } from "convex/values";
-import { action, internalMutation, internalQuery } from "../_generated/server";
+import { action, internalMutation, internalQuery, type MutationCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { _logAuditEntry } from "../_helpers/auditLog";
 import type { Id } from "../_generated/dataModel";
+import { genderFromDepartment } from "../_helpers/masterdata";
 import { duplicateVariantMessage, variantWithColorSize } from "../_helpers/variantIdentity";
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -227,53 +228,115 @@ export const _findOrCreateStyle = internalMutation({
   },
 });
 
+const importedVariantArgs = {
+  styleId: v.id("styles"),
+  sku: v.string(),
+  barcode: v.optional(v.string()),
+  sizeGroup: v.optional(v.string()),
+  size: v.string(),
+  color: v.string(),
+  gender: v.optional(v.string()),
+  priceCentavos: v.number(),
+  costPriceCentavos: v.optional(v.number()),
+  userId: v.id("users"),
+};
+
 export const _createImportedVariant = internalMutation({
+  args: importedVariantArgs,
+  handler: (ctx, args) => createImportedVariant(ctx, args),
+});
+
+/**
+ * Adds an imported SKU to its style. An SKU or barcode already on file has its
+ * price and cost brought up to date instead; a color and size the style already
+ * has under another SKU is skipped.
+ */
+export async function createImportedVariant(
+  ctx: MutationCtx,
   args: {
-    styleId: v.id("styles"),
-    sku: v.string(),
-    barcode: v.optional(v.string()),
-    sizeGroup: v.optional(v.string()),
-    size: v.string(),
-    color: v.string(),
-    gender: v.optional(v.string()),
-    priceCentavos: v.number(),
-    costPriceCentavos: v.optional(v.number()),
-    userId: v.id("users"),
+    styleId: Id<"styles">;
+    sku: string;
+    barcode?: string;
+    sizeGroup?: string;
+    size: string;
+    color: string;
+    gender?: string;
+    priceCentavos: number;
+    costPriceCentavos?: number;
+    userId: Id<"users">;
   },
-  handler: async (ctx, args) => {
-    // Validate required fields
-    if (args.sku.trim() === "") {
-      throw new ConvexError({ code: "VALIDATION_ERROR", message: "SKU cannot be empty" });
-    }
-    if (args.size.trim() === "") {
-      throw new ConvexError({ code: "VALIDATION_ERROR", message: "Size cannot be empty" });
-    }
-    if (args.color.trim() === "") {
-      throw new ConvexError({ code: "VALIDATION_ERROR", message: "Color cannot be empty" });
-    }
-    if (!Number.isInteger(args.priceCentavos) || args.priceCentavos <= 0) {
-      throw new ConvexError({
-        code: "INVALID_PRICE",
-        message: "Price must be a positive integer in centavos",
-      });
-    }
+) {
+  // Validate required fields
+  if (args.sku.trim() === "") {
+    throw new ConvexError({ code: "VALIDATION_ERROR", message: "SKU cannot be empty" });
+  }
+  if (args.size.trim() === "") {
+    throw new ConvexError({ code: "VALIDATION_ERROR", message: "Size cannot be empty" });
+  }
+  if (args.color.trim() === "") {
+    throw new ConvexError({ code: "VALIDATION_ERROR", message: "Color cannot be empty" });
+  }
+  if (!Number.isInteger(args.priceCentavos) || args.priceCentavos <= 0) {
+    throw new ConvexError({
+      code: "INVALID_PRICE",
+      message: "Price must be a positive integer in centavos",
+    });
+  }
 
-    // Validate gender if provided
-    if (args.gender && !VALID_GENDERS.includes(args.gender)) {
-      throw new ConvexError({
-        code: "VALIDATION_ERROR",
-        message: `Invalid gender: "${args.gender}". Must be one of: ${VALID_GENDERS.join(", ")}`,
-      });
-    }
+  // Validate gender if provided
+  if (args.gender && !VALID_GENDERS.includes(args.gender)) {
+    throw new ConvexError({
+      code: "VALIDATION_ERROR",
+      message: `Invalid gender: "${args.gender}". Must be one of: ${VALID_GENDERS.join(", ")}`,
+    });
+  }
 
-    // SKU lookup — if it already exists, decide between price-update vs skip.
-    const existingSku = await ctx.db
+  // SKU lookup — if it already exists, decide between price-update vs skip.
+  const existingSku = await ctx.db
+    .query("variants")
+    .withIndex("by_sku", (q) => q.eq("sku", args.sku))
+    .first();
+  if (existingSku) {
+    const oldPrice = existingSku.priceCentavos;
+    const oldCost = existingSku.costPriceCentavos;
+    const priceChanged = args.priceCentavos !== oldPrice;
+    const costChanged =
+      args.costPriceCentavos !== undefined && args.costPriceCentavos !== oldCost;
+    if (priceChanged || costChanged) {
+      const patch: Record<string, unknown> = { updatedAt: Date.now() };
+      if (priceChanged) patch.priceCentavos = args.priceCentavos;
+      if (costChanged) patch.costPriceCentavos = args.costPriceCentavos;
+      await ctx.db.patch(existingSku._id, patch);
+      await _logAuditEntry(ctx, {
+        action: "variant.priceUpdate",
+        userId: args.userId,
+        entityType: "variants",
+        entityId: existingSku._id,
+        before: { priceCentavos: oldPrice, costPriceCentavos: oldCost },
+        after: {
+          priceCentavos: priceChanged ? args.priceCentavos : oldPrice,
+          costPriceCentavos: costChanged ? args.costPriceCentavos : oldCost,
+        },
+      });
+      return {
+        status: "priceUpdated" as const,
+        variantId: existingSku._id,
+        oldPriceCentavos: oldPrice,
+        newPriceCentavos: args.priceCentavos,
+      };
+    }
+    return { status: "skipped" as const, reason: `SKU "${args.sku}" already exists` };
+  }
+
+  // Barcode lookup — same logic when SKU was new but barcode collides
+  if (args.barcode && args.barcode.trim() !== "") {
+    const existingBarcode = await ctx.db
       .query("variants")
-      .withIndex("by_sku", (q) => q.eq("sku", args.sku))
+      .withIndex("by_barcode", (q) => q.eq("barcode", args.barcode!))
       .first();
-    if (existingSku) {
-      const oldPrice = existingSku.priceCentavos;
-      const oldCost = existingSku.costPriceCentavos;
+    if (existingBarcode) {
+      const oldPrice = existingBarcode.priceCentavos;
+      const oldCost = existingBarcode.costPriceCentavos;
       const priceChanged = args.priceCentavos !== oldPrice;
       const costChanged =
         args.costPriceCentavos !== undefined && args.costPriceCentavos !== oldCost;
@@ -281,12 +344,12 @@ export const _createImportedVariant = internalMutation({
         const patch: Record<string, unknown> = { updatedAt: Date.now() };
         if (priceChanged) patch.priceCentavos = args.priceCentavos;
         if (costChanged) patch.costPriceCentavos = args.costPriceCentavos;
-        await ctx.db.patch(existingSku._id, patch);
+        await ctx.db.patch(existingBarcode._id, patch);
         await _logAuditEntry(ctx, {
           action: "variant.priceUpdate",
           userId: args.userId,
           entityType: "variants",
-          entityId: existingSku._id,
+          entityId: existingBarcode._id,
           before: { priceCentavos: oldPrice, costPriceCentavos: oldCost },
           after: {
             priceCentavos: priceChanged ? args.priceCentavos : oldPrice,
@@ -295,114 +358,75 @@ export const _createImportedVariant = internalMutation({
         });
         return {
           status: "priceUpdated" as const,
-          variantId: existingSku._id,
+          variantId: existingBarcode._id,
           oldPriceCentavos: oldPrice,
           newPriceCentavos: args.priceCentavos,
         };
       }
-      return { status: "skipped" as const, reason: `SKU "${args.sku}" already exists` };
+      return { status: "skipped" as const, reason: `Barcode "${args.barcode}" already exists` };
     }
+  }
 
-    // Barcode lookup — same logic when SKU was new but barcode collides
-    if (args.barcode && args.barcode.trim() !== "") {
-      const existingBarcode = await ctx.db
-        .query("variants")
-        .withIndex("by_barcode", (q) => q.eq("barcode", args.barcode!))
-        .first();
-      if (existingBarcode) {
-        const oldPrice = existingBarcode.priceCentavos;
-        const oldCost = existingBarcode.costPriceCentavos;
-        const priceChanged = args.priceCentavos !== oldPrice;
-        const costChanged =
-          args.costPriceCentavos !== undefined && args.costPriceCentavos !== oldCost;
-        if (priceChanged || costChanged) {
-          const patch: Record<string, unknown> = { updatedAt: Date.now() };
-          if (priceChanged) patch.priceCentavos = args.priceCentavos;
-          if (costChanged) patch.costPriceCentavos = args.costPriceCentavos;
-          await ctx.db.patch(existingBarcode._id, patch);
-          await _logAuditEntry(ctx, {
-            action: "variant.priceUpdate",
-            userId: args.userId,
-            entityType: "variants",
-            entityId: existingBarcode._id,
-            before: { priceCentavos: oldPrice, costPriceCentavos: oldCost },
-            after: {
-              priceCentavos: priceChanged ? args.priceCentavos : oldPrice,
-              costPriceCentavos: costChanged ? args.costPriceCentavos : oldCost,
-            },
-          });
-          return {
-            status: "priceUpdated" as const,
-            variantId: existingBarcode._id,
-            oldPriceCentavos: oldPrice,
-            newPriceCentavos: args.priceCentavos,
-          };
-        }
-        return { status: "skipped" as const, reason: `Barcode "${args.barcode}" already exists` };
-      }
-    }
+  // One SKU per color and size within a style: a row for a combination the
+  // style already has under another SKU is skipped, not added beside it.
+  const sameColorSize = await variantWithColorSize(ctx, args.styleId, args.color, args.size);
+  if (sameColorSize) {
+    return { status: "skipped" as const, reason: duplicateVariantMessage(sameColorSize) };
+  }
 
-    // One SKU per color and size within a style: a row for a combination the
-    // style already has under another SKU is skipped, not added beside it.
-    const sameColorSize = await variantWithColorSize(ctx, args.styleId, args.color, args.size);
-    if (sameColorSize) {
-      return { status: "skipped" as const, reason: duplicateVariantMessage(sameColorSize) };
+  // Auto-assign color code letter per unique color within this style
+  const siblings = await ctx.db
+    .query("variants")
+    .withIndex("by_style", (q) => q.eq("styleId", args.styleId))
+    .collect();
+  const colorNorm = args.color.trim().toLowerCase();
+  const colorMap = new Map<string, string>();
+  for (const v of siblings) {
+    const cn = v.color.trim().toLowerCase();
+    if (!colorMap.has(cn) && v.colorCode) colorMap.set(cn, v.colorCode);
+  }
+  let colorCode = colorMap.get(colorNorm);
+  if (!colorCode) {
+    const usedLetters = new Set(colorMap.values());
+    for (let i = 0; i < 26; i++) {
+      const letter = String.fromCharCode(65 + i);
+      if (!usedLetters.has(letter)) { colorCode = letter; break; }
     }
+  }
 
-    // Auto-assign color code letter per unique color within this style
-    const siblings = await ctx.db
-      .query("variants")
-      .withIndex("by_style", (q) => q.eq("styleId", args.styleId))
-      .collect();
-    const colorNorm = args.color.trim().toLowerCase();
-    const colorMap = new Map<string, string>();
-    for (const v of siblings) {
-      const cn = v.color.trim().toLowerCase();
-      if (!colorMap.has(cn) && v.colorCode) colorMap.set(cn, v.colorCode);
-    }
-    let colorCode = colorMap.get(colorNorm);
-    if (!colorCode) {
-      const usedLetters = new Set(colorMap.values());
-      for (let i = 0; i < 26; i++) {
-        const letter = String.fromCharCode(65 + i);
-        if (!usedLetters.has(letter)) { colorCode = letter; break; }
-      }
-    }
+  const variantId = await ctx.db.insert("variants", {
+    styleId: args.styleId,
+    sku: args.sku,
+    barcode: args.barcode && args.barcode.trim() !== "" ? args.barcode : undefined,
+    sizeGroup: args.sizeGroup,
+    size: args.size,
+    color: args.color,
+    gender: args.gender as "mens" | "womens" | "unisex" | "kids" | undefined,
+    priceCentavos: args.priceCentavos,
+    costPriceCentavos: args.costPriceCentavos,
+    colorCode,
+    isActive: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  });
 
-    const variantId = await ctx.db.insert("variants", {
+  await _logAuditEntry(ctx, {
+    action: "variant.bulkCreate",
+    userId: args.userId,
+    entityType: "variants",
+    entityId: variantId,
+    after: {
       styleId: args.styleId,
       sku: args.sku,
-      barcode: args.barcode && args.barcode.trim() !== "" ? args.barcode : undefined,
-      sizeGroup: args.sizeGroup,
       size: args.size,
       color: args.color,
-      gender: args.gender as "mens" | "womens" | "unisex" | "kids" | undefined,
       priceCentavos: args.priceCentavos,
-      costPriceCentavos: args.costPriceCentavos,
-      colorCode,
       isActive: true,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
+    },
+  });
 
-    await _logAuditEntry(ctx, {
-      action: "variant.bulkCreate",
-      userId: args.userId,
-      entityType: "variants",
-      entityId: variantId,
-      after: {
-        styleId: args.styleId,
-        sku: args.sku,
-        size: args.size,
-        color: args.color,
-        priceCentavos: args.priceCentavos,
-        isActive: true,
-      },
-    });
-
-    return { status: "created" as const, variantId };
-  },
-});
+  return { status: "created" as const, variantId };
+}
 
 // ─── Action: Bulk Import Products ───────────────────────────────────────────
 
@@ -696,21 +720,6 @@ export const bulkImportProductsPos = action({
         (p) => p.type === type && p.description.toUpperCase() === target,
       );
       return hit?._id;
-    };
-
-    // Department label → variant.gender heuristic
-    const genderFromDepartment = (
-      dept: string | undefined,
-    ): "mens" | "womens" | "unisex" | "kids" | "boys" | "girls" | undefined => {
-      if (!dept) return undefined;
-      const d = dept.trim().toUpperCase();
-      if (d === "MENS" || d === "MEN" || d === "MALE") return "mens";
-      if (d === "LADIES" || d === "WOMENS" || d === "WOMEN" || d === "FEMALE") return "womens";
-      if (d === "UNISEX") return "unisex";
-      if (d === "KIDS") return "kids";
-      if (d === "BOYS") return "boys";
-      if (d === "GIRLS") return "girls";
-      return undefined;
     };
 
     const brandCache = new Map<string, Id<"brands">>();

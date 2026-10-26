@@ -456,6 +456,10 @@ export default function BulkImportPage() {
             Simple CSV format. Need the wide POS export columns?{" "}
             <Link href="/admin/catalog/import/pos" className="underline hover:text-foreground">
               Use POS-Format Import →
+            </Link>{" "}
+            Loading the merchandising masterdata?{" "}
+            <Link href="/admin/catalog/import/masterdata" className="underline hover:text-foreground">
+              Use Masterdata Import →
             </Link>
           </p>
         </div>
