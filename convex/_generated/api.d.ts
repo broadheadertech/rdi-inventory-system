@@ -121,6 +121,7 @@ import type * as logistics_notifications from "../logistics/notifications.js";
 import type * as migrations_backfillBatches from "../migrations/backfillBatches.js";
 import type * as migrations_calendarCodes from "../migrations/calendarCodes.js";
 import type * as migrations_clearDummyData from "../migrations/clearDummyData.js";
+import type * as migrations_loadBranchMasterdata from "../migrations/loadBranchMasterdata.js";
 import type * as migrations_vatOnNet from "../migrations/vatOnNet.js";
 import type * as notifications_emailDigestHelpers from "../notifications/emailDigestHelpers.js";
 import type * as notifications_emailDigests from "../notifications/emailDigests.js";
@@ -311,6 +312,7 @@ declare const fullApi: ApiFromModules<{
   "migrations/backfillBatches": typeof migrations_backfillBatches;
   "migrations/calendarCodes": typeof migrations_calendarCodes;
   "migrations/clearDummyData": typeof migrations_clearDummyData;
+  "migrations/loadBranchMasterdata": typeof migrations_loadBranchMasterdata;
   "migrations/vatOnNet": typeof migrations_vatOnNet;
   "notifications/emailDigestHelpers": typeof notifications_emailDigestHelpers;
   "notifications/emailDigests": typeof notifications_emailDigests;

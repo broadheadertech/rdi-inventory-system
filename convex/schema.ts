@@ -140,6 +140,11 @@ export default defineSchema({
   branches: defineTable({
     name: v.string(),
     address: v.string(),
+    // Department code from the finance branch list, e.g. "100-5021". The prefix
+    // is the company or brand (100 Aero, 101 Hurley, 600 DHI, 900 RDI).
+    code: v.optional(v.string()),
+    // What the location operates as: "Aero Store", "Hurley Store", "Head Office".
+    affiliateType: v.optional(v.string()),
     isActive: v.boolean(),
     channel: v.optional(
       v.union(
@@ -178,7 +183,7 @@ export default defineSchema({
     ),
     createdAt: v.number(),
     updatedAt: v.number(),
-  }),
+  }).index("by_code", ["code"]),
 
   // ─── Per-month sales goals per branch ─────────────────────────────────────
   // Retail is seasonal, so a single default rarely fits December and February

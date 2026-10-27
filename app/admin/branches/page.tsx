@@ -138,6 +138,8 @@ export default function BranchesPage() {
   const [createForm, setCreateForm] = useState({
     name: "",
     address: "",
+    code: "",
+    affiliateType: "",
     phone: "",
     classification: "none",
     region: "none",
@@ -155,6 +157,8 @@ export default function BranchesPage() {
   const [editForm, setEditForm] = useState({
     name: "",
     address: "",
+    code: "",
+    affiliateType: "",
     phone: "",
     classification: "none",
     region: "none",
@@ -172,7 +176,8 @@ export default function BranchesPage() {
     const matchesSearch =
       searchQuery === "" ||
       branch.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      branch.address.toLowerCase().includes(searchQuery.toLowerCase());
+      branch.address.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (branch.code ?? "").toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus =
       statusFilter === "all" ||
       (statusFilter === "active" && branch.isActive) ||
@@ -183,7 +188,7 @@ export default function BranchesPage() {
   const pagination = usePagination(filteredBranches);
 
   const resetCreateForm = () => {
-    setCreateForm({ name: "", address: "", phone: "", classification: "none", region: "none", channel: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
+    setCreateForm({ name: "", address: "", code: "", affiliateType: "", phone: "", classification: "none", region: "none", channel: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
     setCreateErrors({});
   };
 
@@ -223,6 +228,8 @@ export default function BranchesPage() {
       await createBranch({
         name: createForm.name.trim(),
         address: createForm.address.trim(),
+        code: createForm.code.trim() ? createForm.code.trim() : undefined,
+        affiliateType: createForm.affiliateType.trim() ? createForm.affiliateType.trim() : undefined,
         classification: createForm.classification !== "none"
           ? (createForm.classification as "premium" | "aclass" | "bnc" | "outlet")
           : undefined,
@@ -252,6 +259,8 @@ export default function BranchesPage() {
     setEditForm({
       name: branch.name,
       address: branch.address,
+      code: branch.code ?? "",
+      affiliateType: branch.affiliateType ?? "",
       phone: branch.phone ?? "",
       classification: branch.classification ?? "none",
       region: (branch as { region?: string }).region ?? "none",
@@ -302,6 +311,8 @@ export default function BranchesPage() {
         branchId: editingBranch._id,
         name: editForm.name.trim(),
         address: editForm.address.trim(),
+        code: editForm.code.trim(),
+        affiliateType: editForm.affiliateType.trim(),
         classification: editForm.classification !== "none"
           ? (editForm.classification as "premium" | "aclass" | "bnc" | "outlet")
           : undefined,
@@ -378,7 +389,7 @@ export default function BranchesPage() {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search by name or address..."
+            placeholder="Search by name, address or code..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-9"
@@ -401,7 +412,9 @@ export default function BranchesPage() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead>Code</TableHead>
               <TableHead>Name</TableHead>
+              <TableHead>Brand Affiliate</TableHead>
               <TableHead>Channel</TableHead>
               <TableHead>Class</TableHead>
               <TableHead>Address</TableHead>
@@ -415,11 +428,17 @@ export default function BranchesPage() {
             {pagination.paginatedData.length > 0 ? (
               pagination.paginatedData.map((branch) => (
                 <TableRow key={branch._id}>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {branch.code || "—"}
+                  </TableCell>
                   <TableCell className="font-medium">
                     <div className="flex items-center gap-2">
                       <Building2 className="h-4 w-4 text-muted-foreground" />
                       {branch.name}
                     </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {branch.affiliateType || "—"}
                   </TableCell>
                   <TableCell>
                     {branch.channel ? (
@@ -496,7 +515,7 @@ export default function BranchesPage() {
             ) : (
               <TableRow>
                 <TableCell
-                  colSpan={8}
+                  colSpan={10}
                   className="text-center text-muted-foreground py-8"
                 >
                   {searchQuery || statusFilter !== "all"
@@ -625,6 +644,26 @@ export default function BranchesPage() {
               <p className="text-xs text-muted-foreground">
                 Geographic group: Luzon, Visayas, or Mindanao
               </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="create-code">Code</Label>
+                <Input
+                  id="create-code"
+                  placeholder="100-5021"
+                  value={createForm.code}
+                  onChange={(e) => updateCreateField("code", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="create-affiliateType">Brand Affiliate</Label>
+                <Input
+                  id="create-affiliateType"
+                  placeholder="Aero Store"
+                  value={createForm.affiliateType}
+                  onChange={(e) => updateCreateField("affiliateType", e.target.value)}
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="create-phone">Phone</Label>
@@ -816,6 +855,26 @@ export default function BranchesPage() {
               <p className="text-xs text-muted-foreground">
                 Geographic group: Luzon, Visayas, or Mindanao
               </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="edit-code">Code</Label>
+                <Input
+                  id="edit-code"
+                  placeholder="100-5021"
+                  value={editForm.code}
+                  onChange={(e) => updateEditField("code", e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-affiliateType">Brand Affiliate</Label>
+                <Input
+                  id="edit-affiliateType"
+                  placeholder="Aero Store"
+                  value={editForm.affiliateType}
+                  onChange={(e) => updateEditField("affiliateType", e.target.value)}
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="edit-phone">Phone</Label>

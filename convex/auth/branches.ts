@@ -48,6 +48,8 @@ export const createBranch = mutation({
   args: {
     name: v.string(),
     address: v.string(),
+    code: v.optional(v.string()),
+    affiliateType: v.optional(v.string()),
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
@@ -88,6 +90,8 @@ export const createBranch = mutation({
       after: {
         name: args.name,
         address: args.address,
+        code: args.code,
+        affiliateType: args.affiliateType,
         isActive: true,
         phone: args.phone,
         latitude: args.latitude,
@@ -108,6 +112,8 @@ export const updateBranch = mutation({
     branchId: v.id("branches"),
     name: v.optional(v.string()),
     address: v.optional(v.string()),
+    code: v.optional(v.string()),
+    affiliateType: v.optional(v.string()),
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
