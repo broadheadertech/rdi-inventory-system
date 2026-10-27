@@ -33,7 +33,7 @@ export function ViewAsBranchPicker() {
         <select
           value={branchId}
           onChange={(e) => setBranchId(e.target.value)}
-          className="h-8 flex-1 rounded border border-input bg-transparent px-2 text-xs"
+          className="h-8 min-w-0 flex-1 truncate rounded border border-input bg-transparent px-2 text-xs"
         >
           <option value="">Select branch…</option>
           {branches?.map((b) => (
@@ -45,7 +45,7 @@ export function ViewAsBranchPicker() {
         <button
           onClick={handleGo}
           disabled={!branchId || busy}
-          className="rounded bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          className="shrink-0 rounded bg-primary px-2.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
         >
           {busy ? "…" : "Go"}
         </button>
