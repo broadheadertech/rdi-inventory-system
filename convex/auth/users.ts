@@ -630,9 +630,9 @@ export const _devSyncClerkUsers = action({
 });
 
 /**
- * DEV-ONLY: invites a new user to the current Clerk instance with optional role.
- * Sends them a Clerk invitation email. When they accept, the webhook syncs them
- * into Convex automatically. Run via:
+ * Invites a new user to the current Clerk instance with optional role — the
+ * Users page's "Invite User". Sends them a Clerk invitation email. When they
+ * accept, the webhook syncs them into Convex automatically. Also runnable via:
  *   npx convex run auth/users:inviteUser '{"email":"foo@bar.com","role":"viewer"}'
  */
 export const inviteUser = action({

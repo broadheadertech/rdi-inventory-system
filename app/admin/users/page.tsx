@@ -34,7 +34,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { Pencil, UserX, UserCheck, Search, RefreshCw } from "lucide-react";
+import { Pencil, UserX, UserCheck, Search, RefreshCw, UserPlus } from "lucide-react";
 
 const ROLE_OPTIONS = [
   { value: "admin", label: "Admin" },
@@ -45,7 +45,10 @@ const ROLE_OPTIONS = [
   { value: "viewer", label: "Viewer" },
   { value: "driver", label: "Driver" },
   { value: "supplier", label: "Supplier" },
+  { value: "merchandiser", label: "Merchandiser" },
 ] as const;
+
+type Role = (typeof ROLE_OPTIONS)[number]["value"];
 
 const ROLE_COLORS: Record<string, string> = {
   admin: "bg-red-100 text-red-800",
@@ -56,6 +59,7 @@ const ROLE_COLORS: Record<string, string> = {
   viewer: "bg-gray-100 text-gray-800",
   driver: "bg-cyan-100 text-cyan-800",
   supplier: "bg-orange-100 text-orange-800",
+  merchandiser: "bg-pink-100 text-pink-800",
 };
 
 export default function UsersPage() {
@@ -67,9 +71,16 @@ export default function UsersPage() {
   const reactivateUser = useMutation(api.auth.users.reactivateUser);
   const updateUser = useMutation(api.auth.users.updateUser);
   const syncClerkUsers = useAction(api.auth.users.syncClerkUsers);
+  const inviteUser = useAction(api.auth.users.inviteUser);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [inviteForm, setInviteForm] = useState<{ email: string; role: Role }>({
+    email: "",
+    role: "viewer",
+  });
+  const [isInviting, setIsInviting] = useState(false);
   const [roleFilter, setRoleFilter] = useState<string>("all");
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [editForm, setEditForm] = useState({
@@ -90,6 +101,28 @@ export default function UsersPage() {
   });
 
   const pagination = usePagination(filteredUsers);
+
+  // Clerk emails the invitation; when it's accepted the webhook adds the user
+  // here with the role carried on the invite. Branch is assigned afterwards.
+  const handleInvite = async () => {
+    const email = inviteForm.email.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      toast.error("Enter a valid email address");
+      return;
+    }
+    setIsInviting(true);
+    try {
+      await inviteUser({ email, role: inviteForm.role });
+      toast.success(`Invitation sent to ${email}`);
+      setShowInviteDialog(false);
+      setInviteForm({ email: "", role: "viewer" });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Invite failed: ${message}`);
+    } finally {
+      setIsInviting(false);
+    }
+  };
 
   const openEditDialog = (user: User) => {
     setEditingUser(user);
@@ -129,13 +162,7 @@ export default function UsersPage() {
       try {
         await setUserRole({
           userId: editingUser._id,
-          role: editForm.role as
-            | "admin"
-            | "manager"
-            | "cashier"
-            | "warehouseStaff"
-            | "hqStaff"
-            | "viewer",
+          role: editForm.role as Role,
         });
       } catch (error) {
         errors.push(
@@ -210,6 +237,7 @@ export default function UsersPage() {
             {(filteredUsers?.length ?? 0) !== 1 ? "s" : ""}
           </p>
         </div>
+        <div className="flex items-center gap-2">
         <Button
           variant="outline"
           size="sm"
@@ -232,6 +260,11 @@ export default function UsersPage() {
           <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? "animate-spin" : ""}`} />
           {isSyncing ? "Syncing..." : "Sync from Clerk"}
         </Button>
+        <Button size="sm" onClick={() => setShowInviteDialog(true)}>
+          <UserPlus className="h-4 w-4 mr-2" />
+          Invite User
+        </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -437,6 +470,68 @@ export default function UsersPage() {
               Cancel
             </Button>
             <Button onClick={handleSaveEdit}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invite Dialog */}
+      <Dialog
+        open={showInviteDialog}
+        onOpenChange={(open) => !isInviting && setShowInviteDialog(open)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invite User</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="invite-email">Email</Label>
+              <Input
+                id="invite-email"
+                type="email"
+                placeholder="name@rdi.com.ph"
+                value={inviteForm.email}
+                onChange={(e) =>
+                  setInviteForm({ ...inviteForm, email: e.target.value })
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="invite-role">Role</Label>
+              <Select
+                value={inviteForm.role}
+                onValueChange={(value) =>
+                  setInviteForm({ ...inviteForm, role: value as Role })
+                }
+              >
+                <SelectTrigger id="invite-role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.map((role) => (
+                    <SelectItem key={role.value} value={role.value}>
+                      {role.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              They&apos;ll get an email to set up their account and will appear
+              here once they accept. Assign their branch then with Edit.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={isInviting}
+              onClick={() => setShowInviteDialog(false)}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleInvite} disabled={isInviting}>
+              {isInviting ? "Sending..." : "Send Invite"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
