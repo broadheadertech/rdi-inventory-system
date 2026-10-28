@@ -185,25 +185,34 @@ export function AllocationCsv({ onUploaded }: { onUploaded?: () => void }) {
     );
   }
 
-  async function handleFile(file: File) {
+  // Several files go up as one upload — a replenishment split into one file
+  // per store comes back the way it went out. A file that cannot be read stops
+  // the lot rather than sending some stores and not others.
+  async function handleFiles(files: File[]) {
     setBusy(true);
     try {
-      const rows = readAllocationFile(await file.text());
-      if (typeof rows === "string") {
-        toast.error(rows);
-        return;
+      const rows: { sku: string; branchName: string; quantity: number; notes?: string }[] = [];
+      for (const file of files) {
+        const read = readAllocationFile(await file.text());
+        if (typeof read === "string") {
+          toast.error(files.length > 1 ? `${file.name}: ${read}` : read);
+          return;
+        }
+        rows.push(...read);
       }
       if (rows.length === 0) {
         toast.error("Every row has a quantity of 0 — nothing to send.");
         return;
       }
 
-      const fileName = file.name;
+      const fileName = files.length === 1 ? files[0].name : `${files.length} files`;
       const outcome = (await upload({ fileName, rows })) as Result;
       setResult(outcome);
 
       if (outcome.created.length === 0) {
-        toast.error("No request could be created from that file.");
+        toast.error(
+          `No request could be created from ${files.length === 1 ? "that file" : "those files"}.`
+        );
       } else {
         toast.success(
           `${outcome.created.length} request${outcome.created.length === 1 ? "" : "s"} awaiting approval · ` +
@@ -227,7 +236,8 @@ export function AllocationCsv({ onUploaded }: { onUploaded?: () => void }) {
           <h2 className="text-sm font-semibold">Upload a pre-allocated push</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             One row per SKU per branch. Rows are grouped into one request per
-            branch and wait here for approval — nothing moves on upload.
+            branch and wait here for approval — nothing moves on upload. You
+            can select several files at once.
             {template?.sourceName
               ? ` Allocated from ${template.sourceName}.`
               : ""}
@@ -268,10 +278,11 @@ export function AllocationCsv({ onUploaded }: { onUploaded?: () => void }) {
           ref={fileInput}
           type="file"
           accept=".csv,text/csv"
+          multiple
           className="hidden"
           onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) void handleFile(file);
+            const files = Array.from(e.target.files ?? []);
+            if (files.length > 0) void handleFiles(files);
           }}
         />
       </div>

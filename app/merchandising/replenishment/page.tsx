@@ -86,6 +86,27 @@ export default function ReplenishmentPage() {
     );
   }
 
+  // One file per store, for whoever works a store at a time. Same columns as
+  // the single sheet; upload them back together by selecting them all.
+  function exportPerStore() {
+    const byStore = new Map<string, typeof rows>();
+    for (const r of rows) {
+      const key = r.branchCode ?? r.branchName;
+      byStore.set(key, [...(byStore.get(key) ?? []), r]);
+    }
+    // Spaced out: browsers drop or block a burst of downloads fired at once.
+    [...byStore].forEach(([key, storeRows], i) => {
+      const name = `${key}-${storeRows[0].branchName}`.replace(/[^\w-]+/g, "_");
+      setTimeout(
+        () => downloadCsv(`replenishment-${name}.csv`, [SHEET_HEADER, ...storeRows.map(sheetRow)]),
+        i * 300
+      );
+    });
+    toast.message(
+      `${byStore.size} files, one per store. If your browser asks, allow multiple downloads. Upload them back together.`
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -171,6 +192,15 @@ export default function ReplenishmentPage() {
         >
           <Download className="mr-1.5 h-4 w-4" />
           Download sheet
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={rows.length === 0}
+          onClick={exportPerStore}
+        >
+          <Download className="mr-1.5 h-4 w-4" />
+          Per store
         </Button>
       </div>
 
