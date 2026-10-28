@@ -9,6 +9,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
+  BookOpen,
   Users,
   Building2,
   Package,
@@ -52,6 +53,7 @@ type NavItem = {
 };
 
 const adminNavItems: NavItem[] = [
+  { href: "/admin/getting-started", label: "Getting Started", icon: BookOpen, roles: ["admin"] },
   { href: "/admin/users", label: "Users", icon: Users, roles: ["admin"] },
   { href: "/admin/branches", label: "Branches", icon: Building2, roles: ["admin"] },
   { href: "/admin/branch-goals", label: "Branch Goals", icon: Target, roles: ["admin"] },

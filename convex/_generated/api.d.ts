@@ -38,6 +38,7 @@ import type * as admin_cashierAccounts from "../admin/cashierAccounts.js";
 import type * as admin_cashierAccountsActions from "../admin/cashierAccountsActions.js";
 import type * as admin_cashierReports from "../admin/cashierReports.js";
 import type * as admin_colors from "../admin/colors.js";
+import type * as admin_gettingStarted from "../admin/gettingStarted.js";
 import type * as admin_hotDeals from "../admin/hotDeals.js";
 import type * as admin_prices from "../admin/prices.js";
 import type * as admin_promotions from "../admin/promotions.js";
@@ -230,6 +231,7 @@ declare const fullApi: ApiFromModules<{
   "admin/cashierAccountsActions": typeof admin_cashierAccountsActions;
   "admin/cashierReports": typeof admin_cashierReports;
   "admin/colors": typeof admin_colors;
+  "admin/gettingStarted": typeof admin_gettingStarted;
   "admin/hotDeals": typeof admin_hotDeals;
   "admin/prices": typeof admin_prices;
   "admin/promotions": typeof admin_promotions;
