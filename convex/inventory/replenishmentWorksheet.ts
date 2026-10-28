@@ -74,13 +74,13 @@ export const buildReplenishmentWorksheet = query({
       });
     }
 
-    const wanted = new Set((args.branchIds ?? []).map((id) => id as string));
-    const targets = branches.filter(
-      (b) =>
-        b.isActive &&
-        b.channel !== "warehouse" &&
-        (wanted.size === 0 || wanted.has(b._id as string))
+    // Head-office departments are branches for accounting, not stores: they
+    // hold no selling stock, so there is nothing to top up.
+    const stores = branches.filter(
+      (b) => b.isActive && b.channel !== "warehouse" && b.affiliateType !== "Head Office"
     );
+    const wanted = new Set((args.branchIds ?? []).map((id) => id as string));
+    const targets = stores.filter((b) => wanted.size === 0 || wanted.has(b._id as string));
 
     // What the warehouse can give. A proposal above this is a promise the
     // warehouse cannot keep, and the upload would refuse the row anyway.
@@ -289,9 +289,8 @@ export const buildReplenishmentWorksheet = query({
         cappedRows: rows.filter((r) => r.capped).length,
         unsuppliableRows: rows.filter((r) => r.suggestedQuantity === 0).length,
       },
-      branches: branches
-        .filter((b) => b.isActive && b.channel !== "warehouse")
-        .map((b) => ({ _id: b._id, name: b.name }))
+      branches: stores
+        .map((b) => ({ _id: b._id, name: b.name, affiliateType: b.affiliateType ?? null }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
   },

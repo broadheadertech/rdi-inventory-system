@@ -26,6 +26,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { AllocationCsv } from "@/components/shared/AllocationCsv";
+import { StoreMultiPicker } from "@/components/shared/StoreMultiPicker";
 import { Download, PackagePlus, AlertTriangle } from "lucide-react";
 
 function num(value: number): string {
@@ -151,6 +152,13 @@ export default function ReplenishmentPage() {
           />
           Hide what the warehouse cannot supply
         </label>
+        {sheet && sheet.branches.length > 0 && (
+          <StoreMultiPicker
+            stores={sheet.branches.map((b) => ({ ...b, _id: b._id as string }))}
+            picked={picked}
+            onChange={setPicked}
+          />
+        )}
         <Button
           variant="outline"
           size="sm"
@@ -162,51 +170,6 @@ export default function ReplenishmentPage() {
           Download sheet
         </Button>
       </div>
-
-      {/* ── Store picker ────────────────────────────────────────────────────── */}
-      {sheet && sheet.branches.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-card p-3">
-          <span className="mr-1 text-xs text-muted-foreground">Stores</span>
-          <button
-            type="button"
-            onClick={() => setPicked(new Set())}
-            className={cn(
-              "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
-              picked.size === 0
-                ? "border-primary bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:border-primary/50"
-            )}
-          >
-            All
-          </button>
-          {sheet.branches.map((b) => {
-            const id = b._id as string;
-            const on = picked.has(id);
-            return (
-              <button
-                key={id}
-                type="button"
-                onClick={() =>
-                  setPicked((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(id)) next.delete(id);
-                    else next.add(id);
-                    return next;
-                  })
-                }
-                className={cn(
-                  "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
-                  on
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:border-primary/50"
-                )}
-              >
-                {b.name}
-              </button>
-            );
-          })}
-        </div>
-      )}
 
       {sheet === undefined ? (
         <div className="h-64 animate-pulse rounded-lg border bg-muted/40" />
