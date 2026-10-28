@@ -7,7 +7,7 @@
 // delivery cross-docks instead of being put away and re-picked.
 //
 // The file is the SAME one the warehouse-to-store allocation takes
-// (SKU,Branch,Quantity,Notes), on purpose: one template for both uploads, and
+// (SKU,Branch Code,Quantity,Notes), on purpose: one template for both uploads, and
 // nobody has to remember which one wants which columns. The only difference is
 // what the quantities are checked against — here it is what the PO declared,
 // because the stock does not exist yet.
@@ -29,7 +29,7 @@ import {
   Download, Upload, Check, X, Split, AlertTriangle, Clock,
 } from "lucide-react";
 
-const COLUMNS = ["SKU", "Branch", "Quantity", "Notes"];
+const COLUMNS = ["SKU", "Branch Code", "Quantity", "Notes"];
 
 type Problem = { row: number; sku: string; branchName: string; reason: string };
 
@@ -98,7 +98,7 @@ export function PreAllocationPanel({
       "pre-allocation-template.csv",
       [
         COLUMNS,
-        ...declaredLines.map((line) => [line.sku, "Branch name", 0, ""]),
+        ...declaredLines.map((line) => [line.sku, "Branch code", 0, ""]),
       ]
     );
     toast.message(
@@ -118,13 +118,17 @@ export function PreAllocationPanel({
       }
       const header = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
       const skuAt = header.findIndex((h) => h === "sku");
-      const branchAt = header.findIndex((h) => h === "branch");
+      // "Branch Code" is the template's; "Branch" is what older sheets carry.
+      // Either holds a code or a name — the upload resolves both.
+      const branchAt = header.findIndex(
+        (h) => h === "branch code" || h === "code" || h === "branch"
+      );
       const qtyAt = header.findIndex((h) => h === "quantity" || h === "qty");
       const notesAt = header.findIndex((h) => h === "notes");
 
       const missing = [
         skuAt === -1 ? "SKU" : null,
-        branchAt === -1 ? "Branch" : null,
+        branchAt === -1 ? "Branch Code" : null,
         qtyAt === -1 ? "Quantity" : null,
       ].filter((c): c is string => c !== null);
       if (missing.length > 0) {

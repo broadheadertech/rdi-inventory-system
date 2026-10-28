@@ -41,19 +41,30 @@ export type AllocationPlan = {
   problems: AllocationProblem[];
 };
 
-export type BranchMatch = { key: string; name: string };
+export type BranchMatch = {
+  key: string;
+  name: string;
+  /** Brands the branch may receive; absent or empty means all brands. */
+  brandKeys?: string[];
+};
 
 export type AllocationLookup = {
   sourceKey: string;
   sourceName: string;
   /**
-   * Normalised branch name → every active branch answering to it. More than
-   * one is refused rather than guessed: an allocation sent to the wrong store
-   * is not recoverable by the time anyone notices.
+   * Normalised branch code or name → every active branch answering to it
+   * (see indexBranches). More than one is refused rather than guessed: an
+   * allocation sent to the wrong store is not recoverable by the time anyone
+   * notices.
    */
   branchesByName: Map<string, BranchMatch[]>;
-  /** SKU as written → the variant, or null when there is no active one. */
-  variantBySku: Map<string, { key: string; sku: string } | null>;
+  /**
+   * SKU as written → the variant, or null when there is no active one.
+   * brandKey is the style's brand, checked against the branch's brands.
+   */
+  variantBySku: Map<string, { key: string; sku: string; brandKey?: string | null } | null>;
+  /** Brand key → name, for saying which brands a branch carries. */
+  brandNames?: Map<string, string>;
   /** Variant key → units the source holds before this sheet is applied. */
   availableByVariant: Map<string, number>;
 };
@@ -61,6 +72,33 @@ export type AllocationLookup = {
 /** A branch name as the sheet might write it, flattened for matching. */
 export function normaliseBranchName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Every active branch under its code ("100-5021") and its name. The code is
+ * what a sheet should carry — names break on a missing period — but names
+ * still resolve so older sheets keep working. Codes and store names never
+ * look alike, so the two cannot answer for each other.
+ */
+export function indexBranches(
+  branches: { _id: string; name: string; code?: string; brandIds?: string[] }[]
+): Map<string, BranchMatch[]> {
+  const index = new Map<string, BranchMatch[]>();
+  for (const branch of branches) {
+    const match: BranchMatch = {
+      key: branch._id,
+      name: branch.name,
+      brandKeys: branch.brandIds,
+    };
+    const keys = new Set([normaliseBranchName(branch.name)]);
+    if (branch.code?.trim()) keys.add(normaliseBranchName(branch.code));
+    for (const key of keys) {
+      const bucket = index.get(key);
+      if (bucket) bucket.push(match);
+      else index.set(key, [match]);
+    }
+  }
+  return index;
 }
 
 export function planAllocation(
@@ -106,11 +144,11 @@ export function planAllocation(
 
     const matches = lookup.branchesByName.get(normaliseBranchName(branchName)) ?? [];
     if (matches.length === 0) {
-      fail(`No active branch named "${branchName}".`);
+      fail(`No active branch with the code or name "${branchName}".`);
       continue;
     }
     if (matches.length > 1) {
-      fail(`More than one active branch is named "${branchName}".`);
+      fail(`More than one active branch answers to "${branchName}" — use its code.`);
       continue;
     }
     const destination = matches[0];
@@ -122,6 +160,17 @@ export function planAllocation(
     const variant = lookup.variantBySku.get(sku);
     if (!variant) {
       fail(`No active SKU "${sku}".`);
+      continue;
+    }
+
+    // A store only takes its own brands; a SKU with no brand is let through,
+    // since there is nothing to hold it against.
+    const allowed = destination.brandKeys ?? [];
+    if (allowed.length > 0 && variant.brandKey && !allowed.includes(variant.brandKey)) {
+      const name = (k: string) => lookup.brandNames?.get(k) ?? "another brand";
+      fail(
+        `${destination.name} carries ${allowed.map(name).join(" and ")} only; ${variant.sku} is ${name(variant.brandKey)}.`
+      );
       continue;
     }
 

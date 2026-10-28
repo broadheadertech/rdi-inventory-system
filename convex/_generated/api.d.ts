@@ -9,6 +9,7 @@
  */
 
 import type * as _helpers_auditLog from "../_helpers/auditLog.js";
+import type * as _helpers_branchBrands from "../_helpers/branchBrands.js";
 import type * as _helpers_branchPricing from "../_helpers/branchPricing.js";
 import type * as _helpers_constants from "../_helpers/constants.js";
 import type * as _helpers_custody from "../_helpers/custody.js";
@@ -200,6 +201,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   "_helpers/auditLog": typeof _helpers_auditLog;
+  "_helpers/branchBrands": typeof _helpers_branchBrands;
   "_helpers/branchPricing": typeof _helpers_branchPricing;
   "_helpers/constants": typeof _helpers_constants;
   "_helpers/custody": typeof _helpers_custody;

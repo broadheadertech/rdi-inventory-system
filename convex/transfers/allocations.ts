@@ -7,9 +7,9 @@
 //
 // So the sheet is uploaded. One row is one SKU going to one branch:
 //
-//     SKU,Branch,Quantity,Notes
-//     AER-TEE-BLK-M,Manila,10,FW25 drop 1
-//     AER-TEE-BLK-M,Cebu,6,FW25 drop 1
+//     SKU,Branch Code,Quantity,Notes
+//     AER-TEE-BLK-M,100-5021,10,FW25 drop 1
+//     AER-TEE-BLK-M,100-5008,6,FW25 drop 1
 //
 // Rows are grouped by destination and become ordinary transfer requests, one
 // per branch, each sitting at "requested". NOTHING MOVES ON UPLOAD. Logistics
@@ -25,7 +25,8 @@
 // How a row is read lives in ./allocationPlan, apart from the database, so it
 // can be tested directly.
 
-import { mutation, query } from "../_generated/server";
+import { action, internalQuery, mutation, query } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v, ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
@@ -39,11 +40,11 @@ import { HQ_ROLES } from "../_helpers/permissions";
 const PLANNING_ROLES = Array.from(new Set([...HQ_ROLES, "merchandiser"]));
 import { _logAuditEntry } from "../_helpers/auditLog";
 import { createTransferForRequester } from "./requests";
+import { brandLabel, brandNameMap, branchCarries } from "../_helpers/branchBrands";
 import {
   planAllocation,
-  normaliseBranchName,
+  indexBranches,
   type AllocationLookup,
-  type BranchMatch,
 } from "./allocationPlan";
 
 /** Enough for a full seasonal push; past this the file is a mistake. */
@@ -67,17 +68,116 @@ export const getAllocationTemplate = query({
 
     return {
       sourceName: warehouse?.name ?? null,
-      // Destinations only: the warehouse cannot allocate to itself.
-      branchNames: active
+      // Destinations only: the warehouse cannot allocate to itself. The code
+      // is what a sheet should carry; the name is there to read it by.
+      branches: active
         .filter((b) => b.channel !== "warehouse")
-        .map((b) => b.name)
-        .sort((a, b) => a.localeCompare(b)),
-      // Real SKUs, so the template is a worked example rather than a legend.
-      sampleSkus: (await ctx.db.query("variants").withIndex("by_sku").take(3))
-        .filter((variant) => variant.isActive)
-        .map((variant) => variant.sku),
+        .map((b) => ({ _id: b._id, code: b.code ?? null, name: b.name }))
+        .sort((a, b) => (a.code ?? a.name).localeCompare(b.code ?? b.name)),
       maxRows: MAX_ALLOCATION_ROWS,
     };
+  },
+});
+
+// ─── Per-branch template ──────────────────────────────────────────────────────
+// One branch's sheet: every SKU the warehouse holds that the branch may carry,
+// quantity left at 0 to fill in. The warehouse can run to tens of thousands of
+// SKUs, past what one query may read, so it is read a page at a time.
+
+const TEMPLATE_PAGE = 500;
+
+type TemplateLine = {
+  sku: string;
+  styleCode: string | null;
+  product: string;
+  size: string;
+  color: string;
+  brand: string;
+  onHand: number;
+};
+
+export const _branchTemplatePage = internalQuery({
+  args: { branchId: v.id("branches"), cursor: v.union(v.string(), v.null()) },
+  handler: async (ctx, args) => {
+    const scope = await withBranchScope(ctx);
+    if (!PLANNING_ROLES.includes(scope.user.role)) {
+      throw new ConvexError({ code: "UNAUTHORIZED" });
+    }
+    const branch = await ctx.db.get(args.branchId);
+    if (!branch || !branch.isActive) {
+      throw new ConvexError({ code: "NOT_FOUND", message: "That branch is not active." });
+    }
+    const warehouse = (await ctx.db.query("branches").collect()).find(
+      (b) => b.isActive && b.channel === "warehouse"
+    );
+    if (!warehouse) {
+      throw new ConvexError({
+        code: "NOT_FOUND",
+        message: "No active central warehouse to allocate from.",
+      });
+    }
+
+    const page = await ctx.db
+      .query("inventory")
+      .withIndex("by_branch", (q) => q.eq("branchId", warehouse._id))
+      .paginate({ cursor: args.cursor, numItems: TEMPLATE_PAGE });
+
+    const brandNames = await brandNameMap(ctx);
+    const styles = new Map<string, Doc<"styles"> | null>();
+    const lines: TemplateLine[] = [];
+    for (const inv of page.page) {
+      if (inv.quantity <= 0) continue;
+      const variant = await ctx.db.get(inv.variantId);
+      if (!variant || !variant.isActive) continue;
+      const styleKey = variant.styleId as string;
+      if (!styles.has(styleKey)) styles.set(styleKey, await ctx.db.get(variant.styleId));
+      const style = styles.get(styleKey);
+      if (!style || !style.isActive || !branchCarries(branch, style.brandId)) continue;
+      lines.push({
+        sku: variant.sku,
+        styleCode: style.styleCode ?? null,
+        product: style.name,
+        size: variant.size,
+        color: variant.color,
+        brand: style.brandId ? brandNames.get(style.brandId as string) ?? "" : "",
+        onHand: inv.quantity,
+      });
+    }
+
+    return {
+      branch: { code: branch.code ?? null, name: branch.name, brands: brandLabel(branch, brandNames) },
+      warehouseName: warehouse.name,
+      lines,
+      cursor: page.isDone ? null : page.continueCursor,
+    };
+  },
+});
+
+export const buildBranchTemplate = action({
+  args: { branchId: v.id("branches") },
+  handler: async (ctx, args) => {
+    const lines: TemplateLine[] = [];
+    let cursor: string | null = null;
+    let head: { code: string | null; name: string; brands: string } | null = null;
+    let warehouseName = "";
+    do {
+      const page: {
+        branch: { code: string | null; name: string; brands: string };
+        warehouseName: string;
+        lines: TemplateLine[];
+        cursor: string | null;
+      } = await ctx.runQuery(internal.transfers.allocations._branchTemplatePage, {
+        branchId: args.branchId,
+        cursor,
+      });
+      head = page.branch;
+      warehouseName = page.warehouseName;
+      lines.push(...page.lines);
+      cursor = page.cursor;
+    } while (cursor !== null);
+
+    lines.sort((a, b) => a.product.localeCompare(b.product) || a.sku.localeCompare(b.sku));
+    return { branch: head!, warehouseName, lines };
   },
 });
 
@@ -135,18 +235,14 @@ export const uploadAllocation = mutation({
       });
     }
 
-    // Matched on name, because the name is what a buy sheet carries.
-    const branchesByName = new Map<string, BranchMatch[]>();
-    for (const branch of active) {
-      const key = normaliseBranchName(branch.name);
-      const match: BranchMatch = { key: branch._id as string, name: branch.name };
-      const bucket = branchesByName.get(key);
-      if (bucket) bucket.push(match);
-      else branchesByName.set(key, [match]);
-    }
+    // Matched on code, or on name for sheets that still carry one.
+    const branchesByName = indexBranches(active);
 
     // Every distinct SKU resolved once, with what the source holds of it.
-    const variantBySku = new Map<string, { key: string; sku: string } | null>();
+    const variantBySku = new Map<
+      string,
+      { key: string; sku: string; brandKey: string | null } | null
+    >();
     const availableByVariant = new Map<string, number>();
     const variantById = new Map<string, Doc<"variants">>();
 
@@ -164,7 +260,12 @@ export const uploadAllocation = mutation({
       }
 
       const key = variant._id as string;
-      variantBySku.set(sku, { key, sku: variant.sku });
+      const style = await ctx.db.get(variant.styleId);
+      variantBySku.set(sku, {
+        key,
+        sku: variant.sku,
+        brandKey: (style?.brandId as string | undefined) ?? null,
+      });
       variantById.set(key, variant);
 
       const inventory = await ctx.db
@@ -182,6 +283,7 @@ export const uploadAllocation = mutation({
       branchesByName,
       variantBySku,
       availableByVariant,
+      brandNames: await brandNameMap(ctx),
     };
     const plan = planAllocation(args.rows, lookup);
 

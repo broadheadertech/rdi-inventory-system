@@ -56,28 +56,31 @@ export default function ReplenishmentPage() {
   const rows = useMemo(() => sheet?.rows ?? [], [sheet]);
   const selectClass = "rounded-md border bg-background px-2 py-1 text-xs";
 
+  // Exactly the columns the allocation upload reads, so a file can be edited
+  // and sent straight back with nothing renamed. The working figures ride
+  // along after Notes, where the upload ignores them.
+  const SHEET_HEADER = [
+    "SKU", "Branch Code", "Quantity", "Notes", "Store",
+    "Sold", "Per day", "On hand", "Incoming", "Cover target", "Shortfall", "Warehouse",
+  ];
+  const sheetRow = (r: (typeof rows)[number]) => [
+    r.sku,
+    r.branchCode ?? r.branchName,
+    r.suggestedQuantity,
+    `cover ${sheet?.coverDays}d`,
+    r.branchName,
+    r.unitsSold,
+    r.dailyVelocity,
+    r.onHand,
+    r.incoming,
+    r.coverTarget,
+    r.shortfall,
+    r.warehouseStock,
+  ];
+
   function exportSheet() {
     if (rows.length === 0) return;
-    // Exactly the columns the allocation upload reads, so this file can be
-    // edited and sent straight back with nothing renamed. The working figures
-    // ride along after Notes, where the upload ignores them.
-    downloadCsv("replenishment-allocation.csv", [
-      ["SKU", "Branch", "Quantity", "Notes",
-       "Sold", "Per day", "On hand", "Incoming", "Cover target", "Shortfall", "Warehouse"],
-      ...rows.map((r) => [
-        r.sku,
-        r.branchName,
-        r.suggestedQuantity,
-        `cover ${sheet?.coverDays}d`,
-        r.unitsSold,
-        r.dailyVelocity,
-        r.onHand,
-        r.incoming,
-        r.coverTarget,
-        r.shortfall,
-        r.warehouseStock,
-      ]),
-    ]);
+    downloadCsv("replenishment-allocation.csv", [SHEET_HEADER, ...rows.map(sheetRow)]);
     toast.message(
       "Edit the Quantity column, then upload it below. Everything after Notes is ignored on upload."
     );

@@ -30,6 +30,7 @@ import { v, ConvexError } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 import { withBranchScope } from "../_helpers/withBranchScope";
 import { HQ_ROLES } from "../_helpers/permissions";
+import { brandLabel, brandNameMap } from "../_helpers/branchBrands";
 
 const WORKSHEET_ROLES = Array.from(new Set([...HQ_ROLES, "merchandiser", "warehouseStaff"]));
 
@@ -77,7 +78,7 @@ export const buildReplenishmentWorksheet = query({
     // Head-office departments are branches for accounting, not stores: they
     // hold no selling stock, so there is nothing to top up.
     const stores = branches.filter(
-      (b) => b.isActive && b.channel !== "warehouse" && b.affiliateType !== "Head Office"
+      (b) => b.isActive && b.channel !== "warehouse" && b.branchType !== "headOffice"
     );
     const wanted = new Set((args.branchIds ?? []).map((id) => id as string));
     const targets = stores.filter((b) => wanted.size === 0 || wanted.has(b._id as string));
@@ -123,6 +124,7 @@ export const buildReplenishmentWorksheet = query({
     type Row = {
       branchId: Id<"branches">;
       branchName: string;
+      branchCode: string | null;
       variantId: Id<"variants">;
       sku: string;
       productName: string;
@@ -242,6 +244,7 @@ export const buildReplenishmentWorksheet = query({
         rows.push({
           branchId: branch._id,
           branchName: branch.name,
+          branchCode: branch.code ?? null,
           variantId: variant._id,
           sku: variant.sku,
           productName: style?.name ?? "Unknown",
@@ -273,6 +276,7 @@ export const buildReplenishmentWorksheet = query({
     const suggestedUnits = rows.reduce((sum, r) => sum + r.suggestedQuantity, 0);
     const shortfallUnits = rows.reduce((sum, r) => sum + r.shortfall, 0);
 
+    const brandNames = await brandNameMap(ctx);
     return {
       warehouseName: warehouse._id === undefined ? null : warehouse.name,
       coverDays,
@@ -290,7 +294,7 @@ export const buildReplenishmentWorksheet = query({
         unsuppliableRows: rows.filter((r) => r.suggestedQuantity === 0).length,
       },
       branches: stores
-        .map((b) => ({ _id: b._id, name: b.name, affiliateType: b.affiliateType ?? null }))
+        .map((b) => ({ _id: b._id, name: b.name, brandLabel: brandLabel(b, brandNames) }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
   },

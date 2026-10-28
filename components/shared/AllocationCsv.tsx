@@ -7,21 +7,23 @@
 // "requested" for logistics to approve. Nothing moves on upload.
 //
 // Two things the format has to get right. The template carries this chain's
-// real branch names, because the upload matches on the name and guessing the
-// spelling is how a season lands in the wrong store. And the rows that could
+// real branch codes, because the upload matches on the branch and guessing a
+// name's spelling is how a season lands in the wrong store. (Names still
+// resolve, so older sheets keep working.) And the rows that could
 // not be used come back as a file of their own: a five-hundred-row push with
 // eleven short lines is fixed by editing those eleven, not by hunting them
 // through the original.
 
 import { useRef, useState } from "react";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
+import type { Id } from "@/convex/_generated/dataModel";
 import { api } from "@/convex/_generated/api";
 import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Download, Upload, X } from "lucide-react";
 
-const COLUMNS = ["SKU", "Branch", "Quantity", "Notes"];
+const COLUMNS = ["SKU", "Branch Code", "Quantity", "Notes"];
 
 type Problem = { row: number; sku: string; branchName: string; reason: string };
 type Result = {
@@ -87,32 +89,90 @@ function saveFile(name: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
+type AllocationRowIn = { sku: string; branchName: string; quantity: number; notes?: string };
+
+/** One file's rows, or why it cannot be read. */
+function readAllocationFile(text: string): AllocationRowIn[] | string {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (lines.length < 2) return "That file has no rows under its header.";
+
+  const header = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
+  const skuAt = header.findIndex((h) => h === "sku");
+  // "Branch Code" is the template's; "Branch" is what older sheets carry.
+  // Either holds a code or a name — the upload resolves both.
+  const branchAt = header.findIndex(
+    (h) => h === "branch code" || h === "code" || h === "branch"
+  );
+  const qtyAt = header.findIndex((h) => h === "quantity" || h === "qty");
+  const notesAt = header.findIndex((h) => h === "notes");
+
+  const missing = [
+    skuAt === -1 ? "SKU" : null,
+    branchAt === -1 ? "Branch Code" : null,
+    qtyAt === -1 ? "Quantity" : null,
+  ].filter((c): c is string => c !== null);
+  if (missing.length > 0) {
+    return `Missing column${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}. Download the template and edit that copy.`;
+  }
+
+  return lines
+    .slice(1)
+    .map(splitCsvLine)
+    // A template row left at 0 or blank is a SKU not being sent, not a
+    // mistake to report — a branch's sheet is mostly those.
+    .filter((cells) => {
+      const qty = (cells[qtyAt] ?? "").trim();
+      return qty !== "" && parseQuantity(qty) !== 0;
+    })
+    .map((cells) => ({
+      sku: cells[skuAt] ?? "",
+      branchName: cells[branchAt] ?? "",
+      quantity: parseQuantity(cells[qtyAt] ?? ""),
+      ...(notesAt !== -1 && cells[notesAt] ? { notes: cells[notesAt] } : {}),
+    }));
+}
+
 export function AllocationCsv({ onUploaded }: { onUploaded?: () => void }) {
   const template = useQuery(api.transfers.allocations.getAllocationTemplate);
   const upload = useMutation(api.transfers.allocations.uploadAllocation);
+  const buildTemplate = useAction(api.transfers.allocations.buildBranchTemplate);
+  const [templateBranch, setTemplateBranch] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
 
-  function downloadTemplate() {
-    if (!template) return;
-    const skus = template.sampleSkus.length > 0 ? template.sampleSkus : ["SKU-HERE"];
-    const branches =
-      template.branchNames.length > 0 ? template.branchNames : ["Branch name"];
-
-    // A worked example: the first two branches against the first SKUs, so the
-    // shape is obvious without reading any instructions.
-    const rows: (string | number)[][] = [COLUMNS];
-    for (const branch of branches.slice(0, 2)) {
-      for (const sku of skus) {
-        rows.push([sku, branch, 0, ""]);
+  // One branch's sheet: everything the warehouse holds that the branch may
+  // carry, at 0. The columns after Notes are there to read by; the upload
+  // ignores them.
+  async function downloadTemplate() {
+    if (!templateBranch) return;
+    setBusy(true);
+    try {
+      const t = await buildTemplate({ branchId: templateBranch as Id<"branches"> });
+      if (t.lines.length === 0) {
+        toast.error(
+          `${t.warehouseName} has nothing in stock that ${t.branch.name} carries (${t.branch.brands}).`
+        );
+        return;
       }
+      const branchCell = t.branch.code ?? t.branch.name;
+      saveFile(
+        `allocation-${(t.branch.code ?? t.branch.name).replace(/[^\w-]+/g, "_")}.csv`,
+        toCsv([
+          [...COLUMNS, "Style Code", "Product", "Size", "Color", "Brand", "Warehouse on hand"],
+          ...t.lines.map((l) => [
+            l.sku, branchCell, 0, "", l.styleCode ?? "", l.product, l.size, l.color, l.brand, l.onHand,
+          ]),
+        ])
+      );
+      toast.message(
+        `${t.lines.length.toLocaleString("en-PH")} SKUs for ${t.branch.name}. Set the quantities you want to send; rows left at 0 are skipped.`
+      );
+    } catch (err) {
+      toast.error(getErrorMessage(err));
+    } finally {
+      setBusy(false);
     }
-
-    saveFile("allocation-template.csv", toCsv(rows));
-    toast.message(
-      "Set the quantities and add your own rows. One row is one SKU going to one branch."
-    );
   }
 
   function downloadSkipped(problems: Problem[]) {
@@ -128,42 +188,18 @@ export function AllocationCsv({ onUploaded }: { onUploaded?: () => void }) {
   async function handleFile(file: File) {
     setBusy(true);
     try {
-      const text = await file.text();
-      const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
-      if (lines.length < 2) {
-        toast.error("That file has no rows under its header.");
+      const rows = readAllocationFile(await file.text());
+      if (typeof rows === "string") {
+        toast.error(rows);
+        return;
+      }
+      if (rows.length === 0) {
+        toast.error("Every row has a quantity of 0 — nothing to send.");
         return;
       }
 
-      const header = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
-      const skuAt = header.findIndex((h) => h === "sku");
-      const branchAt = header.findIndex((h) => h === "branch");
-      const qtyAt = header.findIndex((h) => h === "quantity" || h === "qty");
-      const notesAt = header.findIndex((h) => h === "notes");
-
-      const missing = [
-        skuAt === -1 ? "SKU" : null,
-        branchAt === -1 ? "Branch" : null,
-        qtyAt === -1 ? "Quantity" : null,
-      ].filter((c): c is string => c !== null);
-      if (missing.length > 0) {
-        toast.error(
-          `Missing column${missing.length === 1 ? "" : "s"}: ${missing.join(", ")}. Download the template and edit that copy.`
-        );
-        return;
-      }
-
-      const rows = lines.slice(1).map((line) => {
-        const cells = splitCsvLine(line);
-        return {
-          sku: cells[skuAt] ?? "",
-          branchName: cells[branchAt] ?? "",
-          quantity: parseQuantity(cells[qtyAt] ?? ""),
-          ...(notesAt !== -1 && cells[notesAt] ? { notes: cells[notesAt] } : {}),
-        };
-      });
-
-      const outcome = (await upload({ fileName: file.name, rows })) as Result;
+      const fileName = file.name;
+      const outcome = (await upload({ fileName, rows })) as Result;
       setResult(outcome);
 
       if (outcome.created.length === 0) {
@@ -197,11 +233,25 @@ export function AllocationCsv({ onUploaded }: { onUploaded?: () => void }) {
               : ""}
           </p>
         </div>
+        <select
+          value={templateBranch}
+          onChange={(e) => setTemplateBranch(e.target.value)}
+          disabled={busy || template === undefined}
+          className="h-8 max-w-[14rem] truncate rounded-md border bg-background px-2 text-xs"
+          aria-label="Branch for the template"
+        >
+          <option value="">Template for branch…</option>
+          {template?.branches.map((b) => (
+            <option key={b._id} value={b._id}>
+              {b.code ? `${b.code} · ${b.name}` : b.name}
+            </option>
+          ))}
+        </select>
         <Button
           variant="outline"
           size="sm"
-          disabled={busy || template === undefined}
-          onClick={downloadTemplate}
+          disabled={busy || !templateBranch}
+          onClick={() => void downloadTemplate()}
         >
           <Download className="mr-1.5 h-4 w-4" />
           Template

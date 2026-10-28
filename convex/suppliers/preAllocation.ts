@@ -38,12 +38,12 @@ import {
   createTransferForRequester,
   approveTransferRecord,
 } from "../transfers/requests";
+import { brandNameMap } from "../_helpers/branchBrands";
 import {
   planAllocation,
-  normaliseBranchName,
+  indexBranches,
   scaleToReceived,
   type AllocationLookup,
-  type BranchMatch,
 } from "../transfers/allocationPlan";
 
 /** Who may plan a push: HQ, or the merchandising account. */
@@ -133,7 +133,10 @@ export const uploadPreAllocation = mutation({
       });
     }
 
-    const variantBySku = new Map<string, { key: string; sku: string } | null>();
+    const variantBySku = new Map<
+      string,
+      { key: string; sku: string; brandKey: string | null } | null
+    >();
     const availableByVariant = new Map<string, number>();
     const variantById = new Map<string, Doc<"variants">>();
     for (const item of declaredItems) {
@@ -141,7 +144,12 @@ export const uploadPreAllocation = mutation({
       if (!variant) continue;
       const key = variant._id as string;
       variantById.set(key, variant);
-      variantBySku.set(variant.sku, { key, sku: variant.sku });
+      const style = await ctx.db.get(variant.styleId);
+      variantBySku.set(variant.sku, {
+        key,
+        sku: variant.sku,
+        brandKey: (style?.brandId as string | undefined) ?? null,
+      });
       availableByVariant.set(
         key,
         (availableByVariant.get(key) ?? 0) + item.declaredQuantity
@@ -158,14 +166,7 @@ export const uploadPreAllocation = mutation({
     const branches = (await ctx.db.query("branches").collect()).filter(
       (b) => b.isActive
     );
-    const branchesByName = new Map<string, BranchMatch[]>();
-    for (const branch of branches) {
-      const key = normaliseBranchName(branch.name);
-      const match: BranchMatch = { key: branch._id as string, name: branch.name };
-      const bucket = branchesByName.get(key);
-      if (bucket) bucket.push(match);
-      else branchesByName.set(key, [match]);
-    }
+    const branchesByName = indexBranches(branches);
 
     const source = await ctx.db.get(receipt.branchId);
     const lookup: AllocationLookup = {
@@ -174,6 +175,7 @@ export const uploadPreAllocation = mutation({
       branchesByName,
       variantBySku,
       availableByVariant,
+      brandNames: await brandNameMap(ctx),
     };
     const plan = planAllocation(args.rows, lookup);
 

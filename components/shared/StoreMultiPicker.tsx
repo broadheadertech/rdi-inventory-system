@@ -1,7 +1,8 @@
 "use client";
 
 // A compact "which stores" filter: one button that opens a searchable
-// checklist grouped by brand affiliate. An empty selection means all stores.
+// checklist grouped by the brands each store carries. An empty selection
+// means all stores.
 // Built for lists of 40+ branches, where a row of chips takes over the page.
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -9,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 
-export type PickerStore = { _id: string; name: string; affiliateType: string | null };
+export type PickerStore = { _id: string; name: string; brandLabel: string };
 
 export function StoreMultiPicker({
   stores,
@@ -43,7 +44,7 @@ export function StoreMultiPicker({
     const byType = new Map<string, PickerStore[]>();
     for (const s of stores) {
       if (needle && !s.name.toLowerCase().includes(needle)) continue;
-      const key = s.affiliateType ?? "Other";
+      const key = s.brandLabel;
       byType.set(key, [...(byType.get(key) ?? []), s]);
     }
     return [...byType].sort(([a], [b]) => a.localeCompare(b));

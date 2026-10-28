@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import type { Id } from "@/convex/_generated/dataModel";
 import type { Branch } from "@/lib/types";
 import { getErrorMessage } from "@/lib/utils";
 import { toast } from "sonner";
@@ -122,8 +123,66 @@ const CHANNEL_COLORS: Record<string, string> = {
   outright: "bg-orange-100 text-orange-800",
 };
 
+// Which brands a branch may receive. No boxes ticked is "All brands" — saved as
+// no list, so a brand added later is included without editing the branch.
+function BrandChecklist({
+  brands,
+  selected,
+  onChange,
+}: {
+  brands: { _id: string; name: string }[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const all = selected.length === 0;
+  return (
+    <div className="space-y-2">
+      <Label>Brands</Label>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-md border p-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={all}
+            onChange={() => onChange([])}
+            className="h-4 w-4 rounded border-gray-300"
+          />
+          All brands
+        </label>
+        {brands.map((b) => (
+          <label key={b._id} className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={selected.includes(b._id)}
+              onChange={(e) =>
+                onChange(
+                  e.target.checked
+                    ? [...selected, b._id]
+                    : selected.filter((id) => id !== b._id)
+                )
+              }
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            {b.name}
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Allocation uploads refuse products of brands this branch doesn&apos;t carry.
+        All brands includes any brand added later.
+      </p>
+    </div>
+  );
+}
+
 export default function BranchesPage() {
   const branches = useQuery(api.auth.branches.listBranches);
+  const brands = useQuery(api.catalog.brands.listBrands) as
+    | { _id: string; name: string; isActive: boolean }[]
+    | undefined;
+  const activeBrands = (brands ?? [])
+    .filter((b) => b.isActive)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const brandName = new Map((brands ?? []).map((b) => [b._id, b.name]));
   const createBranch = useMutation(api.auth.branches.createBranch);
   const updateBranch = useMutation(api.auth.branches.updateBranch);
   const deactivateBranch = useMutation(api.auth.branches.deactivateBranch);
@@ -139,7 +198,7 @@ export default function BranchesPage() {
     name: "",
     address: "",
     code: "",
-    affiliateType: "",
+    branchType: "store",
     phone: "",
     classification: "none",
     region: "none",
@@ -150,6 +209,7 @@ export default function BranchesPage() {
     openTime: "",
     closeTime: "",
   });
+  const [createBrandIds, setCreateBrandIds] = useState<string[]>([]);
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
 
   // Edit dialog state
@@ -158,7 +218,7 @@ export default function BranchesPage() {
     name: "",
     address: "",
     code: "",
-    affiliateType: "",
+    branchType: "store",
     phone: "",
     classification: "none",
     region: "none",
@@ -169,6 +229,7 @@ export default function BranchesPage() {
     openTime: "",
     closeTime: "",
   });
+  const [editBrandIds, setEditBrandIds] = useState<string[]>([]);
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
 
   // Filter branches
@@ -188,7 +249,8 @@ export default function BranchesPage() {
   const pagination = usePagination(filteredBranches);
 
   const resetCreateForm = () => {
-    setCreateForm({ name: "", address: "", code: "", affiliateType: "", phone: "", classification: "none", region: "none", channel: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
+    setCreateForm({ name: "", address: "", code: "", branchType: "store", phone: "", classification: "none", region: "none", channel: "none", latitude: "", longitude: "", timezone: "none", openTime: "", closeTime: "" });
+    setCreateBrandIds([]);
     setCreateErrors({});
   };
 
@@ -229,7 +291,8 @@ export default function BranchesPage() {
         name: createForm.name.trim(),
         address: createForm.address.trim(),
         code: createForm.code.trim() ? createForm.code.trim() : undefined,
-        affiliateType: createForm.affiliateType.trim() ? createForm.affiliateType.trim() : undefined,
+        branchType: createForm.branchType as "store" | "headOffice",
+        brandIds: createBrandIds as Id<"brands">[],
         classification: createForm.classification !== "none"
           ? (createForm.classification as "premium" | "aclass" | "bnc" | "outlet")
           : undefined,
@@ -260,7 +323,7 @@ export default function BranchesPage() {
       name: branch.name,
       address: branch.address,
       code: branch.code ?? "",
-      affiliateType: branch.affiliateType ?? "",
+      branchType: branch.branchType ?? "store",
       phone: branch.phone ?? "",
       classification: branch.classification ?? "none",
       region: (branch as { region?: string }).region ?? "none",
@@ -271,6 +334,7 @@ export default function BranchesPage() {
       openTime: branch.configuration?.businessHours?.openTime ?? "",
       closeTime: branch.configuration?.businessHours?.closeTime ?? "",
     });
+    setEditBrandIds((branch.brandIds as string[] | undefined) ?? []);
     setEditErrors({});
   };
 
@@ -312,7 +376,8 @@ export default function BranchesPage() {
         name: editForm.name.trim(),
         address: editForm.address.trim(),
         code: editForm.code.trim(),
-        affiliateType: editForm.affiliateType.trim(),
+        branchType: editForm.branchType as "store" | "headOffice",
+        brandIds: editBrandIds as Id<"brands">[],
         classification: editForm.classification !== "none"
           ? (editForm.classification as "premium" | "aclass" | "bnc" | "outlet")
           : undefined,
@@ -414,7 +479,7 @@ export default function BranchesPage() {
             <TableRow>
               <TableHead>Code</TableHead>
               <TableHead>Name</TableHead>
-              <TableHead>Brand Affiliate</TableHead>
+              <TableHead>Type / Brands</TableHead>
               <TableHead>Channel</TableHead>
               <TableHead>Class</TableHead>
               <TableHead>Address</TableHead>
@@ -438,7 +503,12 @@ export default function BranchesPage() {
                     </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {branch.affiliateType || "—"}
+                    <div>{branch.branchType === "headOffice" ? "Head Office" : "Store"}</div>
+                    <div className="text-xs">
+                      {branch.brandIds?.length
+                        ? branch.brandIds.map((id) => brandName.get(id) ?? "Unknown").join(" + ")
+                        : "All brands"}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {branch.channel ? (
@@ -656,15 +726,26 @@ export default function BranchesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="create-affiliateType">Brand Affiliate</Label>
-                <Input
-                  id="create-affiliateType"
-                  placeholder="Aero Store"
-                  value={createForm.affiliateType}
-                  onChange={(e) => updateCreateField("affiliateType", e.target.value)}
-                />
+                <Label htmlFor="create-branchType">Branch Type</Label>
+                <Select
+                  value={createForm.branchType}
+                  onValueChange={(value) => updateCreateField("branchType", value)}
+                >
+                  <SelectTrigger id="create-branchType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="store">Store</SelectItem>
+                    <SelectItem value="headOffice">Head Office</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
+            <BrandChecklist
+              brands={activeBrands}
+              selected={createBrandIds}
+              onChange={setCreateBrandIds}
+            />
             <div className="space-y-2">
               <Label htmlFor="create-phone">Phone</Label>
               <Input
@@ -867,15 +948,26 @@ export default function BranchesPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-affiliateType">Brand Affiliate</Label>
-                <Input
-                  id="edit-affiliateType"
-                  placeholder="Aero Store"
-                  value={editForm.affiliateType}
-                  onChange={(e) => updateEditField("affiliateType", e.target.value)}
-                />
+                <Label htmlFor="edit-branchType">Branch Type</Label>
+                <Select
+                  value={editForm.branchType}
+                  onValueChange={(value) => updateEditField("branchType", value)}
+                >
+                  <SelectTrigger id="edit-branchType">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="store">Store</SelectItem>
+                    <SelectItem value="headOffice">Head Office</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
+            <BrandChecklist
+              brands={activeBrands}
+              selected={editBrandIds}
+              onChange={setEditBrandIds}
+            />
             <div className="space-y-2">
               <Label htmlFor="edit-phone">Phone</Label>
               <Input

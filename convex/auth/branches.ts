@@ -15,6 +15,10 @@ const channelValidator = v.optional(
   )
 );
 
+const branchTypeValidator = v.optional(
+  v.union(v.literal("store"), v.literal("headOffice"))
+);
+
 // ─── Queries ────────────────────────────────────────────────────────────────
 
 export const listBranches = query({
@@ -49,7 +53,9 @@ export const createBranch = mutation({
     name: v.string(),
     address: v.string(),
     code: v.optional(v.string()),
-    affiliateType: v.optional(v.string()),
+    branchType: branchTypeValidator,
+    // Empty or absent means all brands.
+    brandIds: v.optional(v.array(v.id("brands"))),
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
@@ -76,6 +82,7 @@ export const createBranch = mutation({
     const user = await requireRole(ctx, ADMIN_ROLES);
     const branchId = await ctx.db.insert("branches", {
       ...args,
+      brandIds: args.brandIds?.length ? args.brandIds : undefined,
       channel: args.channel ?? "inline",
       isActive: true,
       createdAt: Date.now(),
@@ -91,7 +98,8 @@ export const createBranch = mutation({
         name: args.name,
         address: args.address,
         code: args.code,
-        affiliateType: args.affiliateType,
+        branchType: args.branchType,
+        brandIds: args.brandIds,
         isActive: true,
         phone: args.phone,
         latitude: args.latitude,
@@ -113,7 +121,9 @@ export const updateBranch = mutation({
     name: v.optional(v.string()),
     address: v.optional(v.string()),
     code: v.optional(v.string()),
-    affiliateType: v.optional(v.string()),
+    branchType: branchTypeValidator,
+    // Empty or absent means all brands.
+    brandIds: v.optional(v.array(v.id("brands"))),
     phone: v.optional(v.string()),
     latitude: v.optional(v.number()),
     longitude: v.optional(v.number()),
@@ -157,6 +167,10 @@ export const updateBranch = mutation({
 
     await ctx.db.patch(branchId, {
       ...updates,
+      // An empty list is "all brands", which is stored as no list at all.
+      ...(updates.brandIds !== undefined && updates.brandIds.length === 0
+        ? { brandIds: undefined }
+        : {}),
       updatedAt: Date.now(),
     });
 

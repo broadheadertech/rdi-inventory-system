@@ -143,8 +143,14 @@ export default defineSchema({
     // Department code from the finance branch list, e.g. "100-5021". The prefix
     // is the company or brand (100 Aero, 101 Hurley, 600 DHI, 900 RDI).
     code: v.optional(v.string()),
-    // What the location operates as: "Aero Store", "Hurley Store", "Head Office".
-    affiliateType: v.optional(v.string()),
+    // Whether it sells. Head-office departments are branches for accounting
+    // and receive stock (samples, e-commerce, creatives) but are never topped
+    // up by replenishment. Absent reads as a store.
+    branchType: v.optional(v.union(v.literal("store"), v.literal("headOffice"))),
+    // The brands this branch may receive. Absent or empty means all brands —
+    // stored that way, not as every id ticked, so a brand added later is
+    // included rather than silently left out.
+    brandIds: v.optional(v.array(v.id("brands"))),
     isActive: v.boolean(),
     channel: v.optional(
       v.union(
