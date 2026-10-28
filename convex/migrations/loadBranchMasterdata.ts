@@ -9,7 +9,8 @@ import { internal } from "../_generated/api";
  * counters, scores and snapshots — removes every user except the admin that
  * runs the system, then loads the real list. Address is the branch name until
  * real addresses are collected; phone and hours stay blank; every branch
- * starts as an inline store.
+ * starts as an inline store except RDI WAREHOUSE, the central warehouse that
+ * replenishment, pre-allocation and ordering draw from.
  *
  * Run: npx convex run migrations/loadBranchMasterdata:run
  */
@@ -60,6 +61,8 @@ const BRANCHES: { affiliateType: string; name: string; code: string }[] = [
   { affiliateType: "Head Office", name: "RDI EXECUTIVE", code: "900-9001" },
   { affiliateType: "Head Office", name: "DHI EXECUTIVE", code: "600-9001" },
 ];
+
+const WAREHOUSE_CODE = "900-9015";
 
 // Rows keyed to a seeded branch; none of them outlive it.
 const BRANCH_TABLES = [
@@ -139,7 +142,7 @@ export const _insertBranches = internalMutation({
         address: b.name,
         code: b.code,
         affiliateType: b.affiliateType,
-        channel: "inline",
+        channel: b.code === WAREHOUSE_CODE ? "warehouse" : "inline",
         isActive: true,
         configuration: { timezone: "Asia/Manila" },
         createdAt: now,
@@ -147,6 +150,21 @@ export const _insertBranches = internalMutation({
       });
     }
     return BRANCHES.length;
+  },
+});
+
+// For a deployment that ran this before the warehouse was marked.
+// Run: npx convex run migrations/loadBranchMasterdata:_markWarehouse
+export const _markWarehouse = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const branch = await ctx.db
+      .query("branches")
+      .withIndex("by_code", (q) => q.eq("code", WAREHOUSE_CODE))
+      .unique();
+    if (!branch) throw new Error(`No branch with code ${WAREHOUSE_CODE}`);
+    await ctx.db.patch(branch._id, { channel: "warehouse", updatedAt: Date.now() });
+    return branch.name;
   },
 });
 
