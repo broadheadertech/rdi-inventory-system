@@ -1,0 +1,247 @@
+"use client";
+
+// The admin panel's left sidebar. Shared so pages that live outside /admin but
+// that admins reach from it (Merchandising → Replenishment) keep the same nav.
+
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import Link from "next/link";
+import Image from "next/image";
+import { usePathname } from "next/navigation";
+import {
+  Users,
+  Building2,
+  Package,
+  PackageSearch,
+  LayoutDashboard,
+  BarChart3,
+  LineChart,
+  ArrowLeftRight,
+  ClipboardList,
+  ClipboardCheck,
+  Truck,
+  Receipt,
+  Settings,
+  Tag,
+  UserCheck,
+  Sparkles,
+  Ruler,
+  Clock,
+  Timer,
+  CalendarDays,
+  ChevronDown,
+  Target,
+  Scale,
+  PhilippinePeso,
+  QrCode,
+  PackagePlus,
+  Inbox,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Separator } from "@/components/ui/separator";
+import { useState } from "react";
+import { StaffNotificationBell } from "@/components/shared/StaffNotificationBell";
+import { SignOutButton } from "@/components/shared/SignOutButton";
+import { ViewAsBranchPicker } from "@/components/shared/ViewAsBranchPicker";
+
+type NavItem = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  roles: string[];
+};
+
+const adminNavItems: NavItem[] = [
+  { href: "/admin/users", label: "Users", icon: Users, roles: ["admin"] },
+  { href: "/admin/branches", label: "Branches", icon: Building2, roles: ["admin"] },
+  { href: "/admin/branch-goals", label: "Branch Goals", icon: Target, roles: ["admin"] },
+  { href: "/admin/catalog", label: "Catalog", icon: Package, roles: ["admin"] },
+  { href: "/admin/inventory", label: "Inventory", icon: PackageSearch, roles: ["admin"] },
+  { href: "/admin/product-labels", label: "Product QR Labels", icon: QrCode, roles: ["admin"] },
+  { href: "/admin/prices", label: "Prices", icon: PhilippinePeso, roles: ["admin"] },
+  {
+    href: "/admin/price-approvals",
+    label: "Price Approvals",
+    icon: ClipboardCheck,
+    roles: ["admin"],
+  },
+  { href: "/admin/settings", label: "Settings", icon: Settings, roles: ["admin"] },
+];
+
+const overviewNavItems: NavItem[] = [
+  { href: "/admin/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin"] },
+  { href: "/admin/reports", label: "Reports", icon: BarChart3, roles: ["admin"] },
+  { href: "/admin/analytics", label: "Analytics", icon: LineChart, roles: ["admin"] },
+  {
+    href: "/admin/movement-report",
+    label: "Inventory Movement",
+    icon: ArrowLeftRight,
+    roles: ["admin"],
+  },
+  { href: "/admin/receiving-log", label: "Receiving Log", icon: Inbox, roles: ["admin"] },
+];
+
+const operationsNavItems: NavItem[] = [
+  { href: "/admin/transfers", label: "Transfers", icon: ArrowLeftRight, roles: ["admin"] },
+  {
+    href: "/merchandising/replenishment",
+    label: "Replenishment",
+    icon: PackagePlus,
+    roles: ["admin"],
+  },
+  { href: "/admin/ordering-signoff", label: "Ordering Sign-off", icon: ClipboardCheck, roles: ["admin"] },
+  { href: "/admin/disputes", label: "Disputes", icon: Scale, roles: ["admin"] },
+  { href: "/admin/couriers", label: "Couriers", icon: Truck, roles: ["admin"] },
+  { href: "/admin/bir-registration", label: "BIR Approvals", icon: Receipt, roles: ["admin"] },
+  { href: "/admin/audit", label: "Audit Log", icon: ClipboardList, roles: ["admin"] },
+];
+
+const marketingNavItems: NavItem[] = [
+  { href: "/admin/promotions", label: "Promotions", icon: Tag, roles: ["admin"] },
+  {
+    href: "/admin/fashion-assistants",
+    label: "Fashion Assistants",
+    icon: UserCheck,
+    roles: ["admin"],
+  },
+];
+
+const insightsNavItems: NavItem[] = [
+  { href: "/admin/sell-through", label: "Sell-Through", icon: BarChart3, roles: ["admin"] },
+  { href: "/admin/inventory-aging", label: "Inventory Aging", icon: Clock, roles: ["admin"] },
+  { href: "/admin/fulfillment-speed", label: "Fulfillment Speed", icon: Timer, roles: ["admin"] },
+  { href: "/admin/cross-sell-analytics", label: "Cross-Sell", icon: Sparkles, roles: ["admin"] },
+  { href: "/admin/trading-calendar", label: "Trading Calendar", icon: CalendarDays, roles: ["admin"] },
+  { href: "/admin/size-curves", label: "Size Curves", icon: Ruler, roles: ["admin"] },
+];
+
+function NavSection({
+  items,
+  pathname,
+  userRole,
+  label,
+}: {
+  items: NavItem[];
+  pathname: string;
+  userRole: string;
+  label?: string;
+}) {
+  const visible = items.filter((item) => item.roles.includes(userRole));
+  const hasActive = visible.some((item) => pathname.startsWith(item.href));
+  const [open, setOpen] = useState(hasActive);
+
+  if (visible.length === 0) return null;
+
+  return (
+    <div>
+      {label && (
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-3 pt-3 pb-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider hover:text-foreground transition-colors"
+        >
+          {label}
+          <ChevronDown
+            className={cn(
+              "h-3 w-3 transition-transform duration-200",
+              open ? "rotate-0" : "-rotate-90"
+            )}
+          />
+        </button>
+      )}
+      {open && visible.map((item) => {
+        const isActive = pathname.startsWith(item.href);
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            className={cn(
+              "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              isActive
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-gray-100 hover:text-foreground"
+            )}
+          >
+            <item.icon className="h-4 w-4" />
+            {item.label}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+export function AdminSidebar({
+  userName,
+  userRole,
+}: {
+  userName: string;
+  userRole: string;
+}) {
+  const siteAssets = useQuery(api.admin.settings.getSiteAssets);
+  const pathname = usePathname();
+
+  return (
+    <aside className="w-60 border-r bg-gray-50/50 print:hidden">
+      <div className="p-4">
+        {siteAssets?.siteLogoUrl ? (
+          <Image
+            src={siteAssets.siteLogoUrl}
+            alt="Logo"
+            width={160}
+            height={40}
+            className="h-8 w-auto object-contain mb-1"
+          />
+        ) : (
+          <h2 className="text-lg font-semibold">Admin Panel</h2>
+        )}
+        <div className="flex items-center justify-between mt-1">
+          <p className="text-sm text-muted-foreground">{userName}</p>
+          <StaffNotificationBell />
+        </div>
+        <div className="mt-3">
+          <ViewAsBranchPicker />
+        </div>
+        <div className="mt-2">
+          <SignOutButton />
+        </div>
+      </div>
+      <Separator />
+      <nav className="p-2 space-y-1">
+        <NavSection
+          items={adminNavItems}
+          pathname={pathname}
+          userRole={userRole}
+          label="Administration"
+        />
+        <Separator className="my-2" />
+        <NavSection
+          items={overviewNavItems}
+          pathname={pathname}
+          userRole={userRole}
+          label="Overview"
+        />
+        <Separator className="my-2" />
+        <NavSection
+          items={operationsNavItems}
+          pathname={pathname}
+          userRole={userRole}
+          label="Operations"
+        />
+        <Separator className="my-2" />
+        <NavSection
+          items={marketingNavItems}
+          pathname={pathname}
+          userRole={userRole}
+          label="Marketing"
+        />
+        <Separator className="my-2" />
+        <NavSection
+          items={insightsNavItems}
+          pathname={pathname}
+          userRole={userRole}
+          label="Insights"
+        />
+      </nav>
+    </aside>
+  );
+}

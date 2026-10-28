@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { ROLE_DEFAULT_ROUTES } from "@/lib/routes";
 import { ErrorBoundary } from "@/components/shared/ErrorBoundary";
 import { SignOutButton } from "@/components/shared/SignOutButton";
+import { AdminSidebar } from "@/components/shared/AdminSidebar";
 import { PackagePlus, Sparkles } from "lucide-react";
 
 const ALLOWED_ROLES = ["admin", "hqStaff", "merchandiser"] as const;
@@ -70,6 +71,19 @@ export default function MerchandisingLayout({
     !(ALLOWED_ROLES as readonly string[]).includes(currentUser.role)
   ) {
     return null;
+  }
+
+  // Admins arrive here from the admin sidebar (Operations → Replenishment), so
+  // they keep it instead of being dropped into a different shell.
+  if (currentUser.role === "admin") {
+    return (
+      <ErrorBoundary>
+        <div className="theme-dashboard flex min-h-screen">
+          <AdminSidebar userName={currentUser.name} userRole={currentUser.role} />
+          <main className="flex-1 p-6">{children}</main>
+        </div>
+      </ErrorBoundary>
+    );
   }
 
   return (
