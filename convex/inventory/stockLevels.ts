@@ -260,6 +260,62 @@ export const getAllInventory = query({
   },
 });
 
+// ─── Admin: Overall Inventory (all branches) ─────────────────────────────────
+// One row per SKU with its quantity summed across every branch — the default
+// view before a branch is picked. Price is the catalog price, since branch
+// prices differ; the low-stock line is the sum of the branches' thresholds.
+
+export const getInventoryTotals = query({
+  args: { searchText: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, ADMIN_ROLES);
+
+    const byVariant = new Map<Id<"variants">, { quantity: number; lowStockThreshold: number; branches: number }>();
+    for (const inv of await ctx.db.query("inventory").collect()) {
+      const t = byVariant.get(inv.variantId) ?? { quantity: 0, lowStockThreshold: 0, branches: 0 };
+      t.quantity += inv.quantity;
+      t.lowStockThreshold += inv.lowStockThreshold ?? 5;
+      if (inv.quantity > 0) t.branches += 1;
+      byVariant.set(inv.variantId, t);
+    }
+
+    const needle = args.searchText?.slice(0, 200).toLowerCase();
+    const results = await Promise.all(
+      [...byVariant].map(async ([variantId, totals]) => {
+        const variant = await ctx.db.get(variantId);
+        if (!variant || !variant.isActive) return null;
+        const style = await ctx.db.get(variant.styleId);
+        if (!style || !style.isActive) return null;
+
+        if (needle) {
+          const matches =
+            style.name.toLowerCase().includes(needle) ||
+            variant.sku.toLowerCase().includes(needle) ||
+            (style.styleCode?.toLowerCase().includes(needle) ?? false);
+          if (!matches) return null;
+        }
+
+        return {
+          variantId,
+          styleName: style.name,
+          styleCode: style.styleCode ?? null,
+          sku: variant.sku,
+          size: variant.size,
+          color: variant.color,
+          priceCentavos: variant.priceCentavos,
+          quantity: totals.quantity,
+          lowStockThreshold: totals.lowStockThreshold,
+          branchesStocked: totals.branches,
+        };
+      })
+    );
+
+    return results
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+      .sort((a, b) => a.styleName.localeCompare(b.styleName) || a.sku.localeCompare(b.sku));
+  },
+});
+
 // ─── Admin: Variant Search (for restock) ─────────────────────────────────────
 
 export const searchVariants = query({

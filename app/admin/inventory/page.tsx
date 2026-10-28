@@ -73,6 +73,24 @@ type InventoryRow = {
   updatedAt: number;
 };
 
+const ALL_BRANCHES = "all";
+
+// A row of either view: per-branch rows carry the inventory record so they can
+// be adjusted; overall rows are totals and are adjusted per branch instead.
+type StockRow = {
+  key: string;
+  styleCode: string | null;
+  styleName: string;
+  sku: string;
+  size: string;
+  color: string;
+  priceCentavos: number;
+  quantity: number;
+  lowStockThreshold: number;
+  branchesStocked: number | null;
+  inventory: InventoryRow | null;
+};
+
 type RestockItem = {
   variantId: Id<"variants">;
   sku: string;
@@ -89,7 +107,9 @@ function StockLevelsTab() {
   const branches = useQuery(api.auth.branches.listBranches);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [branchFilter, setBranchFilter] = useState<string>("");
+  // "all" is the overall view: one row per SKU, summed across branches.
+  const [branchFilter, setBranchFilter] = useState<string>(ALL_BRANCHES);
+  const isOverall = branchFilter === ALL_BRANCHES;
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   useEffect(() => {
@@ -97,15 +117,22 @@ function StockLevelsTab() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const inventory = useQuery(
+  const branchInventory = useQuery(
     api.inventory.stockLevels.getAllInventory,
-    branchFilter
-      ? {
+    isOverall
+      ? "skip"
+      : {
           searchText: debouncedSearch || undefined,
           branchId: branchFilter as Id<"branches">,
         }
-      : "skip"
   );
+  const totals = useQuery(
+    api.inventory.stockLevels.getInventoryTotals,
+    isOverall ? { searchText: debouncedSearch || undefined } : "skip"
+  );
+  const inventory: StockRow[] | undefined = isOverall
+    ? totals?.map((t) => ({ ...t, key: t.variantId, inventory: null }))
+    : branchInventory?.map((i) => ({ ...i, key: i.inventoryId, branchesStocked: null, inventory: i }));
   const adjustStock = useMutation(api.inventory.stockLevels.adjustStock);
 
   const [adjusting, setAdjusting] = useState<InventoryRow | null>(null);
@@ -190,6 +217,7 @@ function StockLevelsTab() {
             <SelectValue placeholder="Select a branch..." />
           </SelectTrigger>
           <SelectContent>
+            <SelectItem value={ALL_BRANCHES}>All branches</SelectItem>
             {branches
               ?.filter((b) => b.isActive)
               .map((branch) => (
@@ -199,31 +227,27 @@ function StockLevelsTab() {
               ))}
           </SelectContent>
         </Select>
-        {branchFilter && (
-          <>
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search by style code, name or SKU..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40">
-                <SelectValue placeholder="All Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="in">In Stock</SelectItem>
-                <SelectItem value="low">Low Stock</SelectItem>
-                <SelectItem value="out">Out of Stock</SelectItem>
-              </SelectContent>
-            </Select>
-          </>
-        )}
-        {branchFilter && filteredInventory && filteredInventory.length > 0 && (
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search by style code, name or SKU..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-40">
+            <SelectValue placeholder="All Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="in">In Stock</SelectItem>
+            <SelectItem value="low">Low Stock</SelectItem>
+            <SelectItem value="out">Out of Stock</SelectItem>
+          </SelectContent>
+        </Select>
+        {filteredInventory && filteredInventory.length > 0 && (
           <p className="text-sm text-muted-foreground ml-auto">
             {filteredInventory.length} item
             {filteredInventory.length !== 1 ? "s" : ""}
@@ -231,11 +255,7 @@ function StockLevelsTab() {
         )}
       </div>
 
-      {!branchFilter ? (
-        <div className="rounded-md border py-16 text-center text-muted-foreground">
-          Select a branch above to view its inventory.
-        </div>
-      ) : inventory === undefined ? (
+      {inventory === undefined ? (
         <div className="text-muted-foreground">Loading inventory...</div>
       ) : (
         <>
@@ -248,16 +268,25 @@ function StockLevelsTab() {
                   <TableHead>SKU</TableHead>
                   <TableHead>Size</TableHead>
                   <TableHead>Color</TableHead>
-                  <TableHead className="text-right">Branch Price</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">
+                    {isOverall ? "Price" : "Branch Price"}
+                  </TableHead>
+                  <TableHead className="text-right">
+                    {isOverall ? "Total Qty" : "Qty"}
+                  </TableHead>
+                  {isOverall && (
+                    <TableHead className="text-right">Branches</TableHead>
+                  )}
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  {!isOverall && (
+                    <TableHead className="text-right">Actions</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pagination.paginatedData.length > 0 ? (
                   pagination.paginatedData.map((item) => (
-                    <TableRow key={item.inventoryId}>
+                    <TableRow key={item.key}>
                       <TableCell className="font-mono text-xs">
                         {item.styleCode ?? "—"}
                       </TableCell>
@@ -275,21 +304,28 @@ function StockLevelsTab() {
                       <TableCell className="text-right font-medium">
                         {item.quantity}
                       </TableCell>
+                      {isOverall && (
+                        <TableCell className="text-right tabular-nums text-muted-foreground">
+                          {item.branchesStocked}
+                        </TableCell>
+                      )}
                       <TableCell>
                         <StatusPill
                           quantity={item.quantity}
                           lowStockThreshold={item.lowStockThreshold}
                         />
                       </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => openAdjustDialog(item)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
+                      {item.inventory && (
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openAdjustDialog(item.inventory!)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))
                 ) : (
@@ -300,7 +336,9 @@ function StockLevelsTab() {
                     >
                       {searchQuery || statusFilter !== "all"
                         ? "No inventory matches the current filters"
-                        : "No inventory found for this branch."}
+                        : isOverall
+                          ? "No stock recorded at any branch yet."
+                          : "No inventory found for this branch."}
                     </TableCell>
                   </TableRow>
                 )}
