@@ -141,32 +141,36 @@ export function AllocationCsv({ onUploaded }: { onUploaded?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<Result | null>(null);
 
-  // One branch's sheet: everything the warehouse holds that the branch may
-  // carry, at 0. The columns after Notes are there to read by; the upload
-  // ignores them.
+  // One branch's sheet: every active product of the brands it carries, stock
+  // or not, with what the branch holds now and what the warehouse could send.
+  // The upload finds its columns by name and ignores the rest.
   async function downloadTemplate() {
     if (!templateBranch) return;
     setBusy(true);
     try {
       const t = await buildTemplate({ branchId: templateBranch as Id<"branches"> });
       if (t.lines.length === 0) {
-        toast.error(
-          `${t.warehouseName} has nothing in stock that ${t.branch.name} carries (${t.branch.brands}).`
-        );
+        toast.error(`There are no active products for ${t.branch.name} (${t.branch.brands}).`);
         return;
       }
       const branchCell = t.branch.code ?? t.branch.name;
       saveFile(
-        `allocation-${(t.branch.code ?? t.branch.name).replace(/[^\w-]+/g, "_")}.csv`,
+        `allocation-${branchCell.replace(/[^\w-]+/g, "_")}.csv`,
         toCsv([
-          [...COLUMNS, "Style Code", "Product", "Size", "Color", "Brand", "Warehouse on hand"],
+          ["SKU", "Style Code", "Product", "Size", "Color", "Brand",
+           "Branch Code", "Store on hand", "Quantity", "Warehouse on hand", "Notes"],
           ...t.lines.map((l) => [
-            l.sku, branchCell, 0, "", l.styleCode ?? "", l.product, l.size, l.color, l.brand, l.onHand,
+            l.sku, l.styleCode ?? "", l.product, l.size, l.color, l.brand,
+            branchCell, l.branchOnHand, 0, l.warehouseOnHand, "",
           ]),
         ])
       );
+      const stocked = t.lines.filter((l) => l.warehouseOnHand > 0).length;
       toast.message(
-        `${t.lines.length.toLocaleString("en-PH")} SKUs for ${t.branch.name}. Set the quantities you want to send; rows left at 0 are skipped.`
+        `${t.lines.length.toLocaleString("en-PH")} products for ${t.branch.name}` +
+          (stocked === 0
+            ? `. ${t.warehouseName ?? "The warehouse"} has none in stock yet, so rows can be planned but won't go through until it does.`
+            : ` (${stocked.toLocaleString("en-PH")} in stock at ${t.warehouseName}). Set Quantity to what to send; rows left at 0 are skipped.`)
       );
     } catch (err) {
       toast.error(getErrorMessage(err));

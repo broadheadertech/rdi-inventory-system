@@ -80,11 +80,15 @@ export const getAllocationTemplate = query({
 });
 
 // ─── Per-branch template ──────────────────────────────────────────────────────
-// One branch's sheet: every SKU the warehouse holds that the branch may carry,
-// quantity left at 0 to fill in. The warehouse can run to tens of thousands of
-// SKUs, past what one query may read, so it is read a page at a time.
+// One branch's sheet: every active product of the brands it carries, whether or
+// not anything is in stock yet, with what the branch holds now and what the
+// warehouse could send. Quantity is left at 0 to fill in. A brand runs to tens
+// of thousands of SKUs, past what one query may read, so the catalog is walked
+// a page of styles at a time.
 
-const TEMPLATE_PAGE = 500;
+// 50 styles is ~1,300 reads at the catalog's widest (45 sizes × colours per
+// style), well inside a query's 4,096 index lookups.
+const TEMPLATE_STYLES_PER_PAGE = 50;
 
 type TemplateLine = {
   sku: string;
@@ -93,11 +97,19 @@ type TemplateLine = {
   size: string;
   color: string;
   brand: string;
-  onHand: number;
+  branchOnHand: number;
+  warehouseOnHand: number;
 };
 
+type TemplateHead = { code: string | null; name: string; brands: string };
+
 export const _branchTemplatePage = internalQuery({
-  args: { branchId: v.id("branches"), cursor: v.union(v.string(), v.null()) },
+  args: {
+    branchId: v.id("branches"),
+    // One of the branch's brands, or null to walk every style (all brands).
+    brandId: v.union(v.id("brands"), v.null()),
+    cursor: v.union(v.string(), v.null()),
+  },
   handler: async (ctx, args) => {
     const scope = await withBranchScope(ctx);
     if (!PLANNING_ROLES.includes(scope.user.role)) {
@@ -110,43 +122,52 @@ export const _branchTemplatePage = internalQuery({
     const warehouse = (await ctx.db.query("branches").collect()).find(
       (b) => b.isActive && b.channel === "warehouse"
     );
-    if (!warehouse) {
-      throw new ConvexError({
-        code: "NOT_FOUND",
-        message: "No active central warehouse to allocate from.",
-      });
-    }
 
-    const page = await ctx.db
-      .query("inventory")
-      .withIndex("by_branch", (q) => q.eq("branchId", warehouse._id))
-      .paginate({ cursor: args.cursor, numItems: TEMPLATE_PAGE });
+    const page = await (args.brandId
+      ? ctx.db.query("styles").withIndex("by_brand", (q) => q.eq("brandId", args.brandId!))
+      : ctx.db.query("styles")
+    ).paginate({ cursor: args.cursor, numItems: TEMPLATE_STYLES_PER_PAGE });
 
     const brandNames = await brandNameMap(ctx);
-    const styles = new Map<string, Doc<"styles"> | null>();
+    const onHand = async (branchId: Id<"branches">, variantId: Id<"variants">) =>
+      (
+        await ctx.db
+          .query("inventory")
+          .withIndex("by_branch_variant", (q) =>
+            q.eq("branchId", branchId).eq("variantId", variantId)
+          )
+          .unique()
+      )?.quantity ?? 0;
+
     const lines: TemplateLine[] = [];
-    for (const inv of page.page) {
-      if (inv.quantity <= 0) continue;
-      const variant = await ctx.db.get(inv.variantId);
-      if (!variant || !variant.isActive) continue;
-      const styleKey = variant.styleId as string;
-      if (!styles.has(styleKey)) styles.set(styleKey, await ctx.db.get(variant.styleId));
-      const style = styles.get(styleKey);
-      if (!style || !style.isActive || !branchCarries(branch, style.brandId)) continue;
-      lines.push({
-        sku: variant.sku,
-        styleCode: style.styleCode ?? null,
-        product: style.name,
-        size: variant.size,
-        color: variant.color,
-        brand: style.brandId ? brandNames.get(style.brandId as string) ?? "" : "",
-        onHand: inv.quantity,
-      });
+    for (const style of page.page) {
+      if (!style.isActive || !branchCarries(branch, style.brandId)) continue;
+      const variants = await ctx.db
+        .query("variants")
+        .withIndex("by_style", (q) => q.eq("styleId", style._id))
+        .collect();
+      for (const variant of variants) {
+        if (!variant.isActive) continue;
+        lines.push({
+          sku: variant.sku,
+          styleCode: style.styleCode ?? null,
+          product: style.name,
+          size: variant.size,
+          color: variant.color,
+          brand: style.brandId ? brandNames.get(style.brandId as string) ?? "" : "",
+          branchOnHand: await onHand(branch._id, variant._id),
+          warehouseOnHand: warehouse ? await onHand(warehouse._id, variant._id) : 0,
+        });
+      }
     }
 
     return {
-      branch: { code: branch.code ?? null, name: branch.name, brands: brandLabel(branch, brandNames) },
-      warehouseName: warehouse.name,
+      branch: {
+        code: branch.code ?? null,
+        name: branch.name,
+        brands: brandLabel(branch, brandNames),
+      } as TemplateHead,
+      warehouseName: warehouse?.name ?? null,
       lines,
       cursor: page.isDone ? null : page.continueCursor,
     };
@@ -156,28 +177,50 @@ export const _branchTemplatePage = internalQuery({
 export const buildBranchTemplate = action({
   args: { branchId: v.id("branches") },
   handler: async (ctx, args) => {
-    const lines: TemplateLine[] = [];
-    let cursor: string | null = null;
-    let head: { code: string | null; name: string; brands: string } | null = null;
-    let warehouseName = "";
-    do {
-      const page: {
-        branch: { code: string | null; name: string; brands: string };
-        warehouseName: string;
-        lines: TemplateLine[];
-        cursor: string | null;
-      } = await ctx.runQuery(internal.transfers.allocations._branchTemplatePage, {
-        branchId: args.branchId,
-        cursor,
-      });
-      head = page.branch;
-      warehouseName = page.warehouseName;
-      lines.push(...page.lines);
-      cursor = page.cursor;
-    } while (cursor !== null);
+    type Page = {
+      branch: TemplateHead;
+      warehouseName: string | null;
+      lines: TemplateLine[];
+      cursor: string | null;
+    };
+    const walk = async (brandId: Id<"brands"> | null) => {
+      let cursor: string | null = null;
+      let last: Page | null = null;
+      const lines: TemplateLine[] = [];
+      do {
+        const page: Page = await ctx.runQuery(
+          internal.transfers.allocations._branchTemplatePage,
+          { branchId: args.branchId, brandId, cursor }
+        );
+        lines.push(...page.lines);
+        cursor = page.cursor;
+        last = page;
+      } while (cursor !== null);
+      return { head: last!, lines };
+    };
 
+    // A branch limited to some brands reads just those, by index; one that
+    // takes all brands walks every style.
+    const brandIds: Id<"brands">[] = await ctx.runQuery(
+      internal.transfers.allocations._templateBrands,
+      { branchId: args.branchId }
+    );
+    const walks = brandIds.length > 0
+      ? await Promise.all(brandIds.map((id) => walk(id)))
+      : [await walk(null)];
+
+    const lines = walks.flatMap((w) => w.lines);
     lines.sort((a, b) => a.product.localeCompare(b.product) || a.sku.localeCompare(b.sku));
-    return { branch: head!, warehouseName, lines };
+    const head = walks[0].head;
+    return { branch: head.branch, warehouseName: head.warehouseName, lines };
+  },
+});
+
+export const _templateBrands = internalQuery({
+  args: { branchId: v.id("branches") },
+  handler: async (ctx, args) => {
+    const branch = await ctx.db.get(args.branchId);
+    return (branch?.brandIds ?? []) as Id<"brands">[];
   },
 });
 
