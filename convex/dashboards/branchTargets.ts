@@ -13,6 +13,7 @@ import { v, ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { requireRole, HQ_ROLES } from "../_helpers/permissions";
 import { withBranchScope } from "../_helpers/withBranchScope";
+import { brandLabel, brandNameMap } from "../_helpers/branchBrands";
 
 const PHT_OFFSET_MS = 8 * 60 * 60 * 1000;
 
@@ -139,6 +140,72 @@ export const getMyBranchGoal = query({
 // ─── setBranchDefaultTarget ───────────────────────────────────────────────────
 // The store's standing monthly goal, used for any month with no override.
 
+// ─── Writing goals ────────────────────────────────────────────────────────────
+// One place for both writes, so the single-cell mutations below and the
+// page's batch save (saveGoals) validate and store a goal the same way.
+
+function checkAmount(centavos: number) {
+  if (!Number.isFinite(centavos) || centavos < 0) {
+    throw new ConvexError("Goal cannot be negative");
+  }
+}
+
+async function writeStandingGoal(
+  ctx: MutationCtx,
+  branchId: Id<"branches">,
+  centavos: number
+) {
+  checkAmount(centavos);
+  const branch = await ctx.db.get(branchId);
+  if (!branch) throw new ConvexError("Branch not found");
+  await ctx.db.patch(branchId, {
+    // 0 clears the goal rather than storing a meaningless zero target.
+    monthlyTargetCentavos: centavos > 0 ? Math.round(centavos) : undefined,
+    updatedAt: Date.now(),
+  });
+}
+
+async function writeMonthGoal(
+  ctx: MutationCtx,
+  setById: Id<"users">,
+  branchId: Id<"branches">,
+  periodYm: string,
+  centavos: number
+) {
+  if (!isValidPeriodYm(periodYm)) {
+    throw new ConvexError("Period must be in YYYYMM format");
+  }
+  checkAmount(centavos);
+  const branch = await ctx.db.get(branchId);
+  if (!branch) throw new ConvexError("Branch not found");
+
+  const existing = await ctx.db
+    .query("branchTargets")
+    .withIndex("by_branch_period", (q) =>
+      q.eq("branchId", branchId).eq("periodYm", periodYm)
+    )
+    .unique();
+
+  // Zero removes the override so the standing goal applies again.
+  if (centavos <= 0) {
+    if (existing) await ctx.db.delete(existing._id);
+    return;
+  }
+
+  const value = Math.round(centavos);
+  if (existing) {
+    await ctx.db.patch(existing._id, { monthlyTargetCentavos: value, setById, updatedAt: Date.now() });
+    return;
+  }
+  await ctx.db.insert("branchTargets", {
+    branchId,
+    periodYm,
+    monthlyTargetCentavos: value,
+    setById,
+    updatedAt: Date.now(),
+  });
+}
+
 export const setBranchDefaultTarget = mutation({
   args: {
     branchId: v.id("branches"),
@@ -146,20 +213,7 @@ export const setBranchDefaultTarget = mutation({
   },
   handler: async (ctx, args) => {
     await requireRole(ctx, HQ_ROLES);
-
-    if (!Number.isFinite(args.monthlyTargetCentavos) || args.monthlyTargetCentavos < 0) {
-      throw new ConvexError("Goal cannot be negative");
-    }
-
-    const branch = await ctx.db.get(args.branchId);
-    if (!branch) throw new ConvexError("Branch not found");
-
-    await ctx.db.patch(args.branchId, {
-      // 0 clears the goal rather than storing a meaningless zero target.
-      monthlyTargetCentavos:
-        args.monthlyTargetCentavos > 0 ? Math.round(args.monthlyTargetCentavos) : undefined,
-      updatedAt: Date.now(),
-    });
+    await writeStandingGoal(ctx, args.branchId, args.monthlyTargetCentavos);
   },
 });
 
@@ -174,48 +228,89 @@ export const setBranchPeriodTarget = mutation({
   },
   handler: async (ctx, args) => {
     const caller = await requireRole(ctx, HQ_ROLES);
+    await writeMonthGoal(ctx, caller._id, args.branchId, args.periodYm, args.monthlyTargetCentavos);
+  },
+});
 
-    if (!isValidPeriodYm(args.periodYm)) {
-      throw new ConvexError("Period must be in YYYYMM format");
+// ─── getGoalYear ──────────────────────────────────────────────────────────────
+// The Branch Goals grid: every store with its standing goal and each month's
+// override for one year. Stores only — head-office departments and the
+// warehouse sell nothing, so a goal for them would only skew the totals.
+
+export const getGoalYear = query({
+  args: { year: v.number() },
+  handler: async (ctx, args) => {
+    await requireRole(ctx, HQ_ROLES);
+    if (!Number.isInteger(args.year) || args.year < 2000 || args.year > 2100) {
+      throw new ConvexError("Year out of range");
     }
-    if (!Number.isFinite(args.monthlyTargetCentavos) || args.monthlyTargetCentavos < 0) {
-      throw new ConvexError("Goal cannot be negative");
+    const from = `${args.year}01`;
+    const to = `${args.year}12`;
+
+    const brandNames = await brandNameMap(ctx);
+    const stores = (await ctx.db.query("branches").collect()).filter(
+      (b) => b.isActive && b.channel !== "warehouse" && b.branchType !== "headOffice"
+    );
+
+    const rows = await Promise.all(
+      stores.map(async (b) => {
+        const overrides = await ctx.db
+          .query("branchTargets")
+          .withIndex("by_branch_period", (q) =>
+            q.eq("branchId", b._id).gte("periodYm", from).lte("periodYm", to)
+          )
+          .collect();
+        return {
+          branchId: b._id,
+          code: b.code ?? null,
+          name: b.name,
+          brandLabel: brandLabel(b, brandNames),
+          standingCentavos: b.monthlyTargetCentavos ?? 0,
+          // "YYYYMM" → that month's own goal; absent months use the standing.
+          months: Object.fromEntries(
+            overrides
+              .filter((o) => o.monthlyTargetCentavos > 0)
+              .map((o) => [o.periodYm, o.monthlyTargetCentavos])
+          ) as Record<string, number>,
+        };
+      })
+    );
+
+    rows.sort(
+      (a, b) =>
+        a.brandLabel.localeCompare(b.brandLabel) ||
+        (a.code ?? a.name).localeCompare(b.code ?? b.name)
+    );
+    return { year: args.year, currentPeriodYm: currentPeriodYm(), stores: rows };
+  },
+});
+
+// ─── saveGoals ────────────────────────────────────────────────────────────────
+// Every edit on the grid in one go. One transaction, so a save either lands
+// whole or not at all — never half a brand's December.
+
+export const saveGoals = mutation({
+  args: {
+    changes: v.array(
+      v.object({
+        branchId: v.id("branches"),
+        // Absent: the standing goal. "YYYYMM": that month's own goal.
+        periodYm: v.optional(v.string()),
+        // 0 clears: no standing goal, or the month falls back to the standing.
+        centavos: v.number(),
+      })
+    ),
+  },
+  handler: async (ctx, args) => {
+    const caller = await requireRole(ctx, HQ_ROLES);
+    if (args.changes.length > 1000) {
+      throw new ConvexError("Too many changes in one save");
     }
-
-    const branch = await ctx.db.get(args.branchId);
-    if (!branch) throw new ConvexError("Branch not found");
-
-    const existing = await ctx.db
-      .query("branchTargets")
-      .withIndex("by_branch_period", (q) =>
-        q.eq("branchId", args.branchId).eq("periodYm", args.periodYm)
-      )
-      .unique();
-
-    // Zero removes the override so the branch default applies again.
-    if (args.monthlyTargetCentavos <= 0) {
-      if (existing) await ctx.db.delete(existing._id);
-      return;
+    for (const c of args.changes) {
+      if (c.periodYm === undefined) await writeStandingGoal(ctx, c.branchId, c.centavos);
+      else await writeMonthGoal(ctx, caller._id, c.branchId, c.periodYm, c.centavos);
     }
-
-    const value = Math.round(args.monthlyTargetCentavos);
-
-    if (existing) {
-      await ctx.db.patch(existing._id, {
-        monthlyTargetCentavos: value,
-        setById: caller._id,
-        updatedAt: Date.now(),
-      });
-      return;
-    }
-
-    await ctx.db.insert("branchTargets", {
-      branchId: args.branchId,
-      periodYm: args.periodYm,
-      monthlyTargetCentavos: value,
-      setById: caller._id,
-      updatedAt: Date.now(),
-    });
+    return { saved: args.changes.length };
   },
 });
 
